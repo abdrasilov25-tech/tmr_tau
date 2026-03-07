@@ -16,7 +16,7 @@ class ProductRepositoryImpl implements ProductRepository {
   }) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, category, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
         .order('created_at', ascending: false)
         .range(offset, offset + limit - 1);
     final list = _mapProducts(res as List);
@@ -28,7 +28,7 @@ class ProductRepositoryImpl implements ProductRepository {
       {String? currentUserId}) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, category, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
         .eq('id', id)
         .maybeSingle();
     if (res == null) return null;
@@ -42,7 +42,7 @@ class ProductRepositoryImpl implements ProductRepository {
       {String? currentUserId}) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, category, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
         .eq('seller_id', sellerId)
         .order('created_at', ascending: false);
     final list = _mapProducts(res as List);
@@ -57,7 +57,7 @@ class ProductRepositoryImpl implements ProductRepository {
     }
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, category, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
         .or('title.ilike.%$query%,description.ilike.%$query%')
         .order('created_at', ascending: false)
         .limit(limit);
@@ -72,7 +72,7 @@ class ProductRepositoryImpl implements ProductRepository {
   }) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, category, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
         .order('created_at', ascending: false)
         .limit(limit);
     final list = _mapProducts(res as List);
@@ -136,7 +136,8 @@ class ProductRepositoryImpl implements ProductRepository {
       ..['seller_avatar'] = userMap?['avatar']
       ..['seller_is_verified'] = userMap?['is_verified'] ?? false
       ..['likes_count'] = json['likes_count'] ?? 0
-      ..['comments_count'] = json['comments_count'] ?? 0;
+      ..['comments_count'] = json['comments_count'] ?? 0
+      ..['category'] = json['category'] ?? 'general';
     return ProductModel.fromJson(row);
   }
 
