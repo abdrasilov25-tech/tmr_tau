@@ -1,0 +1,247 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+import '../../features/auth/presentation/bloc/auth_bloc.dart';
+import '../../features/auth/presentation/pages/login_page.dart';
+import '../../features/auth/presentation/pages/register_page.dart';
+import '../../features/auth/presentation/pages/splash_page.dart';
+import '../../features/feed/presentation/pages/feed_page.dart';
+import '../../features/feed/presentation/pages/search_page.dart';
+import '../../features/notifications/domain/repositories/notifications_repository.dart';
+import '../../features/notifications/presentation/bloc/notifications_bloc.dart';
+import '../../features/notifications/presentation/pages/notifications_page.dart';
+import '../../features/product/domain/entities/product_entity.dart';
+import '../../features/product/presentation/pages/add_product_page.dart';
+import '../../features/product/presentation/pages/product_detail_page.dart';
+import '../../features/profile/presentation/pages/my_profile_page.dart';
+import '../../features/profile/presentation/pages/seller_profile_page.dart';
+import '../../features/cart/presentation/pages/cart_page.dart';
+import '../../features/chat/presentation/pages/chat_page.dart';
+import '../../features/orders/presentation/pages/orders_page.dart';
+import '../../features/feed/domain/repositories/feed_repository.dart';
+import '../../features/profile/domain/repositories/profile_repository.dart';
+
+class AppRouter {
+  AppRouter({
+    required this.feedRepository,
+    required this.productRepository,
+    required this.profileRepository,
+    required this.notificationsRepository,
+  });
+
+  final FeedRepository feedRepository;
+  final dynamic productRepository;
+  final ProfileRepository profileRepository;
+  final NotificationsRepository notificationsRepository;
+
+  late final GoRouter router = GoRouter(
+    initialLocation: '/',
+    debugLogDiagnostics: true,
+    routes: [
+      GoRoute(
+        path: '/',
+        builder: (context, state) => const SplashPage(),
+      ),
+      GoRoute(
+        path: '/login',
+        builder: (context, state) => const LoginPage(),
+      ),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterPage(),
+      ),
+      GoRoute(
+        path: '/product/:id',
+        builder: (context, state) {
+          final product = state.extra as ProductEntity?;
+          if (product == null) {
+            return const Scaffold(
+              body: Center(child: Text('Товар не найден')),
+            );
+          }
+          return ProductDetailPage(product: product);
+        },
+      ),
+      GoRoute(
+        path: '/profile/:id',
+        builder: (context, state) {
+          final id = state.pathParameters['id']!;
+          return SellerProfilePage(sellerId: id);
+        },
+      ),
+      GoRoute(
+        path: '/add-product',
+        builder: (context, state) => const AddProductPage(),
+      ),
+      GoRoute(
+        path: '/cart',
+        builder: (context, state) => const CartPage(),
+      ),
+      GoRoute(
+        path: '/orders',
+        builder: (context, state) => const OrdersPage(),
+      ),
+      GoRoute(
+        path: '/chat/:peerId',
+        builder: (context, state) {
+          final peerId = state.pathParameters['peerId']!;
+          final peerName = state.uri.queryParameters['name'] ?? 'Продавец';
+          return ChatPage(peerId: peerId, peerName: peerName);
+        },
+      ),
+      GoRoute(
+        path: '/home',
+        redirect: (context, state) {
+          final path = state.uri.path;
+          if (path == '/home' || path == '/home/') return '/home/feed';
+          return null;
+        },
+        routes: [
+          StatefulShellRoute.indexedStack(
+            builder: (context, state, navigationShell) => _MainShell(
+              navigationShell: navigationShell,
+            ),
+            branches: [
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: 'feed',
+                    builder: (context, state) => const FeedPage(),
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: 'search',
+                    builder: (context, state) => SearchPage(
+                      productRepository: productRepository,
+                      profileRepository: profileRepository,
+                    ),
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: 'add',
+                    builder: (context, state) => const AddProductPage(),
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: 'notifications',
+                    builder: (context, state) {
+                      final userId = context.read<AuthBloc>().state
+                              is AuthAuthenticated
+                          ? (context.read<AuthBloc>().state as AuthAuthenticated)
+                              .user
+                              .id
+                          : '';
+                      return BlocProvider(
+                        create: (c) => NotificationsBloc(
+                              c.read<NotificationsRepository>(),
+                              userId,
+                            )..add(NotificationsRequested()),
+                        child: const NotificationsPage(),
+                      );
+                    },
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
+                    path: 'profile',
+                    builder: (context, state) => const MyProfilePage(),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    ],
+    redirect: (context, state) {
+      try {
+        final authState = context.read<AuthBloc>().state;
+        final loc = state.matchedLocation;
+        final isSplash = loc == '/';
+        final isAuth = loc == '/login' || loc == '/register';
+        if (isSplash) return null;
+        if (authState is AuthAuthenticated && isAuth) return '/home/feed';
+        if (authState is! AuthAuthenticated && !isAuth) return '/login';
+      } catch (_) {
+        // Контекст без AuthBloc (например до монтирования провайдеров)
+        return null;
+      }
+      return null;
+    },
+  );
+}
+
+class _MainShell extends StatelessWidget {
+  const _MainShell({required this.navigationShell});
+
+  final StatefulNavigationShell navigationShell;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: navigationShell,
+      backgroundColor: Colors.white,
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        ),
+        child: NavigationBar(
+          selectedIndex: navigationShell.currentIndex,
+          onDestinationSelected: (index) {
+            const paths = [
+              '/home/feed',
+              '/home/search',
+              '/home/add',
+              '/home/notifications',
+              '/home/profile',
+            ];
+            context.go(paths[index]);
+            navigationShell.goBranch(index);
+          },
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          indicatorColor: Colors.transparent,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.home_outlined, size: 26),
+              selectedIcon: Icon(Icons.home_rounded, size: 26),
+              label: 'Главная',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.search_outlined, size: 26),
+              selectedIcon: Icon(Icons.search_rounded, size: 26),
+              label: 'Поиск',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.add_circle_outline, size: 28),
+              selectedIcon: Icon(Icons.add_circle_rounded, size: 28),
+              label: 'Добавить',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.notifications_outlined, size: 26),
+              selectedIcon: Icon(Icons.notifications_rounded, size: 26),
+              label: 'Уведомления',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline_rounded, size: 26),
+              selectedIcon: Icon(Icons.person_rounded, size: 26),
+              label: 'Профиль',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -1,0 +1,56 @@
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
+import '../../domain/entities/seller_profile_entity.dart';
+import '../../domain/repositories/profile_repository.dart';
+
+part 'profile_event.dart';
+part 'profile_state.dart';
+
+class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
+  ProfileBloc(this._repository) : super(ProfileInitial()) {
+    on<ProfileLoadRequested>(_onLoadRequested);
+    on<ProfileToggleFollow>(_onToggleFollow);
+  }
+
+  final ProfileRepository _repository;
+
+  Future<void> _onLoadRequested(
+      ProfileLoadRequested event, Emitter<ProfileState> emit) async {
+    emit(ProfileLoading());
+    try {
+      final profile = await _repository.getSellerProfile(
+        event.sellerId,
+        currentUserId: event.currentUserId,
+      );
+      if (!isClosed) {
+        emit(profile != null
+            ? ProfileSuccess(profile)
+            : ProfileFailure('Профиль не найден'));
+      }
+    } catch (e) {
+      if (!isClosed) emit(ProfileFailure(e.toString()));
+    }
+  }
+
+  Future<void> _onToggleFollow(
+      ProfileToggleFollow event, Emitter<ProfileState> emit) async {
+    final current = state;
+    if (current is! ProfileSuccess) return;
+    try {
+      await _repository.toggleFollow(event.followerId, event.followingId);
+      final updated = SellerProfileEntity(
+        id: current.profile.id,
+        name: current.profile.name,
+        avatarUrl: current.profile.avatarUrl,
+        bio: current.profile.bio,
+        followersCount: current.profile.isFollowingByMe
+            ? current.profile.followersCount - 1
+            : current.profile.followersCount + 1,
+        followingCount: current.profile.followingCount,
+        isFollowingByMe: !current.profile.isFollowingByMe,
+        products: current.profile.products,
+      );
+      if (!isClosed) emit(ProfileSuccess(updated));
+    } catch (_) {}
+  }
+}
