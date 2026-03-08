@@ -4,8 +4,10 @@ class PostEntity extends Equatable {
   const PostEntity({
     required this.id,
     required this.userId,
-    required this.imageUrl,
+    this.imageUrl = '',
     this.caption = '',
+    this.videoUrl,
+    this.videoDurationSeconds = 0,
     required this.createdAt,
     this.likesCount = 0,
     this.dislikesCount = 0,
@@ -22,6 +24,8 @@ class PostEntity extends Equatable {
   final String userId;
   final String imageUrl;
   final String caption;
+  final String? videoUrl;
+  final int videoDurationSeconds;
   final DateTime createdAt;
   final int likesCount;
   final int dislikesCount;
@@ -39,6 +43,8 @@ class PostEntity extends Equatable {
         userId,
         imageUrl,
         caption,
+        videoUrl,
+        videoDurationSeconds,
         createdAt,
         likesCount,
         dislikesCount,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:video_player/video_player.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -181,7 +182,13 @@ class _NewsPostCard extends StatelessWidget {
                   style: const TextStyle(fontSize: 15, height: 1.35),
                 ),
               ],
-              if (post.imageUrl.isNotEmpty) ...[
+              if (post.videoUrl != null && post.videoUrl!.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: _PostVideoPlayer(videoUrl: post.videoUrl!),
+                ),
+              ] else if (post.imageUrl.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -254,5 +261,73 @@ class _NewsPostCard extends StatelessWidget {
     if (diff.inHours < 24) return '${diff.inHours} ч';
     if (diff.inDays < 7) return '${diff.inDays} дн';
     return '${dateTime.day}.${dateTime.month}.${dateTime.year}';
+  }
+}
+
+class _PostVideoPlayer extends StatefulWidget {
+  const _PostVideoPlayer({required this.videoUrl});
+
+  final String videoUrl;
+
+  @override
+  State<_PostVideoPlayer> createState() => _PostVideoPlayerState();
+}
+
+class _PostVideoPlayerState extends State<_PostVideoPlayer> {
+  late VideoPlayerController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
+      ..initialize().then((_) {
+        if (mounted) setState(() {});
+      });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_controller.value.isInitialized) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          color: Colors.grey.shade300,
+          child: const Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _controller.value.isPlaying
+              ? _controller.pause()
+              : _controller.play();
+        });
+      },
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          AspectRatio(
+            aspectRatio: _controller.value.aspectRatio,
+            child: VideoPlayer(_controller),
+          ),
+          if (!_controller.value.isPlaying)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Colors.black45,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.play_arrow, color: Colors.white, size: 48),
+            ),
+        ],
+      ),
+    );
   }
 }
