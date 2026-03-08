@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
@@ -8,6 +9,9 @@ import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../product/domain/entities/product_entity.dart';
+import '../../../stories/domain/entities/story_group_entity.dart';
+import '../../../stories/domain/repositories/stories_repository.dart';
+import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../bloc/feed_bloc.dart';
 
 class FeedPage extends StatefulWidget {
@@ -42,6 +46,7 @@ class _FeedPageState extends State<FeedPage> {
       backgroundColor: Colors.black,
       body: SafeArea(
         child: CustomScrollView(
+          cacheExtent: 400,
           slivers: [
             SliverToBoxAdapter(
               child: _FeedAppBar(),
@@ -203,20 +208,101 @@ class _FeedAppBar extends StatelessWidget {
   }
 }
 
-class _StoriesStrip extends StatelessWidget {
+class _StoriesStrip extends StatefulWidget {
   const _StoriesStrip();
 
   @override
+  State<_StoriesStrip> createState() => _StoriesStripState();
+}
+
+class _StoriesStripState extends State<_StoriesStrip> {
+  List<StoryGroupEntity> _groups = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final repo = context.read<StoriesRepository>();
+      final list = await repo.getStoriesGroupedByUser();
+      if (mounted) setState(() {
+        _groups = list;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final isLoggedIn = context.read<AuthBloc>().state is AuthAuthenticated;
+
     return SizedBox(
       height: 100,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         children: [
-          _StoryCircle(label: 'Ваша история', isAdd: true, onTap: () {}),
-          _StoryCircle(label: 'Сделка дня', onTap: () {}),
-          _StoryCircle(label: 'Новое', onTap: () {}),
+          if (isLoggedIn)
+            _StoryCircle(
+              label: 'Ваша история',
+              isAdd: true,
+              onTap: () {
+                showModalBottomSheet<void>(
+                  context: context,
+                  backgroundColor: Colors.transparent,
+                  builder: (sheetContext) => AddChoiceSheet(
+                    onProuvnut: () {
+                      Navigator.pop(sheetContext);
+                      context.push('/add-news');
+                    },
+                    onStory: () async {
+                      Navigator.pop(sheetContext);
+                      await context.push('/add-story');
+                      if (context.mounted) _load();
+                    },
+                    onVideo: () async {
+                      Navigator.pop(sheetContext);
+                      await context.push('/add-story?video=1');
+                      if (context.mounted) _load();
+                    },
+                  ),
+                );
+              },
+            ),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: CircularProgressIndicator(
+                    color: Colors.white54,
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            )
+          else
+            ..._groups.map((g) => _StoryCircle(
+                  label: g.userName ?? 'История',
+                  avatarUrl: g.userAvatarUrl,
+                  onTap: () {
+                    context.push(
+                      '/stories',
+                      extra: StoryViewerArgs(
+                        groups: _groups,
+                        initialGroupIndex: _groups.indexOf(g),
+                      ),
+                    );
+                  },
+                )),
         ],
       ),
     );
@@ -227,11 +313,13 @@ class _StoryCircle extends StatelessWidget {
   const _StoryCircle({
     required this.label,
     this.isAdd = false,
+    this.avatarUrl,
     this.onTap,
   });
 
   final String label;
   final bool isAdd;
+  final String? avatarUrl;
   final VoidCallback? onTap;
 
   @override
@@ -249,21 +337,27 @@ class _StoryCircle extends StatelessWidget {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isAdd ? Colors.grey : Colors.grey.shade600,
+                  color: isAdd ? Colors.grey : Colors.white24,
                   width: 2,
                 ),
               ),
               child: ClipOval(
                 child: isAdd
-                    ? Icon(Icons.add, size: 24, color: Colors.grey.shade400)
-                    : Container(
-                        color: Colors.grey.shade800,
-                        child: Icon(
-                          Icons.storefront_rounded,
-                          color: Colors.grey.shade500,
-                          size: 24,
-                        ),
-                      ),
+                    ? Icon(Icons.add, size: 28, color: Colors.grey.shade400)
+                    : avatarUrl != null && avatarUrl!.isNotEmpty
+                        ? CachedAvatar(
+                            imageUrl: avatarUrl,
+                            radius: 28,
+                            fallbackText: label,
+                          )
+                        : Container(
+                            color: Colors.grey.shade800,
+                            child: CachedAvatar(
+                              imageUrl: null,
+                              radius: 28,
+                              fallbackText: label,
+                            ),
+                          ),
               ),
             ),
             const SizedBox(height: 4),
