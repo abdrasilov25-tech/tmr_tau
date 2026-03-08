@@ -7,10 +7,11 @@ import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/splash_page.dart';
 import '../../features/feed/presentation/pages/feed_page.dart';
 import '../../features/feed/presentation/pages/search_page.dart';
+import '../../features/news/presentation/pages/news_feed_page.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
-import '../../features/notifications/presentation/bloc/notifications_bloc.dart';
-import '../../features/notifications/presentation/pages/notifications_page.dart';
+import '../../features/post/domain/repositories/post_repository.dart';
 import '../../features/product/domain/entities/product_entity.dart';
+import '../../features/post/presentation/pages/add_post_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
 import '../../features/profile/presentation/pages/my_profile_page.dart';
@@ -27,12 +28,14 @@ class AppRouter {
     required this.productRepository,
     required this.profileRepository,
     required this.notificationsRepository,
+    required this.postRepository,
   });
 
   final FeedRepository feedRepository;
   final dynamic productRepository;
   final ProfileRepository profileRepository;
   final NotificationsRepository notificationsRepository;
+  final PostRepository postRepository;
 
   late final GoRouter router = GoRouter(
     initialLocation: '/',
@@ -72,6 +75,10 @@ class AppRouter {
       GoRoute(
         path: '/add-product',
         builder: (context, state) => const AddProductPage(),
+      ),
+      GoRoute(
+        path: '/add-news',
+        builder: (context, state) => const AddPostPage(),
       ),
       GoRoute(
         path: '/cart',
@@ -132,22 +139,8 @@ class AppRouter {
               StatefulShellBranch(
                 routes: [
                   GoRoute(
-                    path: 'notifications',
-                    builder: (context, state) {
-                      final userId = context.read<AuthBloc>().state
-                              is AuthAuthenticated
-                          ? (context.read<AuthBloc>().state as AuthAuthenticated)
-                              .user
-                              .id
-                          : '';
-                      return BlocProvider(
-                        create: (c) => NotificationsBloc(
-                              c.read<NotificationsRepository>(),
-                              userId,
-                            )..add(NotificationsRequested()),
-                        child: const NotificationsPage(),
-                      );
-                    },
+                    path: 'news',
+                    builder: (context, state) => const NewsFeedPage(),
                   ),
                 ],
               ),
@@ -204,7 +197,7 @@ class _MainShell extends StatelessWidget {
               '/home/feed',
               '/home/search',
               '/home/add',
-              '/home/notifications',
+              '/home/news',
               '/home/profile',
             ];
             context.go(paths[index]);
@@ -230,9 +223,9 @@ class _MainShell extends StatelessWidget {
               label: 'Добавить',
             ),
             NavigationDestination(
-              icon: Icon(Icons.notifications_outlined, size: 26),
-              selectedIcon: Icon(Icons.notifications_rounded, size: 26),
-              label: 'Уведомления',
+              icon: Icon(Icons.article_outlined, size: 26),
+              selectedIcon: Icon(Icons.article_rounded, size: 26),
+              label: 'Новости',
             ),
             NavigationDestination(
               icon: Icon(Icons.person_outline_rounded, size: 26),

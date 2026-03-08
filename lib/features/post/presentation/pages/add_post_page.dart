@@ -6,7 +6,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
-import '../../../feed/presentation/bloc/feed_bloc.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/repositories/post_repository.dart';
 
@@ -111,13 +110,10 @@ class _AddPostPageState extends State<AddPostPage> {
         caption: caption,
       );
       if (!mounted) return;
-      context.read<FeedBloc>().add(
-            FeedLoaded(currentUserId: userId),
-          );
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Пост опубликован')),
+        const SnackBar(content: Text('Новость опубликована')),
       );
-      context.go('/home/feed');
+      context.go('/home/news');
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -140,7 +136,7 @@ class _AddPostPageState extends State<AddPostPage> {
           onPressed: () => context.pop(),
         ),
         title: const Text(
-          'Новая публикация',
+          'Новая новость',
           style: TextStyle(
             fontWeight: FontWeight.w600,
             fontSize: 18,
@@ -211,7 +207,7 @@ class _AddPostPageState extends State<AddPostPage> {
           TextField(
             controller: _captionController,
             decoration: InputDecoration(
-              hintText: 'Напишите подпись... (сигнал, идея, результат)',
+              hintText: 'Что происходит в Темиртау? Фото и короткие видео до 2 мин',
               hintStyle: TextStyle(color: Colors.grey.shade500),
               border: InputBorder.none,
               filled: false,

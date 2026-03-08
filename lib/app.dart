@@ -14,6 +14,8 @@ import 'features/feed/domain/repositories/feed_repository.dart';
 import 'features/feed/presentation/bloc/feed_bloc.dart';
 import 'features/notifications/data/repositories/notifications_repository_impl.dart';
 import 'features/notifications/domain/repositories/notifications_repository.dart';
+import 'features/post/data/repositories/post_repository_impl.dart';
+import 'features/post/domain/repositories/post_repository.dart';
 import 'features/product/data/repositories/product_repository_impl.dart';
 import 'features/product/domain/repositories/product_repository.dart';
 import 'features/profile/data/repositories/profile_repository_impl.dart';
@@ -46,6 +48,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final CommentsRepository _commentsRepository;
   late final StoriesRepository _storiesRepository;
   late final NotificationsRepository _notificationsRepository;
+  late final PostRepository _postRepository;
   late final AppRouter _appRouter;
 
   @override
@@ -63,11 +66,13 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _commentsRepository = CommentsRepositoryImpl(_client);
     _storiesRepository = StoriesRepositoryImpl(_client);
     _notificationsRepository = NotificationsRepositoryImpl(_client);
+    _postRepository = PostRepositoryImpl(_client);
     _appRouter = AppRouter(
       feedRepository: _feedRepository,
       productRepository: _productRepository,
       profileRepository: _profileRepository,
       notificationsRepository: _notificationsRepository,
+      postRepository: _postRepository,
     );
   }
 
@@ -108,6 +113,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<StoriesRepository>.value(value: _storiesRepository),
         RepositoryProvider<NotificationsRepository>.value(
             value: _notificationsRepository),
+        RepositoryProvider<PostRepository>.value(value: _postRepository),
       ],
       child: BlocProvider(
         create: (context) => AuthBloc(_authRepository)..add(const AuthCheckRequested()),
