@@ -7,23 +7,32 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:postgrest/postgrest.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/widgets/cached_product_image.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/category_entity.dart';
+import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/categories_repository.dart';
 import '../../domain/repositories/product_repository.dart';
 
-class AddProductPage extends StatefulWidget {
-  const AddProductPage({super.key});
+class EditProductPage extends StatefulWidget {
+  const EditProductPage({
+    super.key,
+    required this.productId,
+    required this.product,
+  });
+
+  final String productId;
+  final ProductEntity product;
 
   @override
-  State<AddProductPage> createState() => _AddProductPageState();
+  State<EditProductPage> createState() => _EditProductPageState();
 }
 
-class _AddProductPageState extends State<AddProductPage> {
+class _EditProductPageState extends State<EditProductPage> {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _priceController = TextEditingController();
-  final _descriptionController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _priceController;
+  late final TextEditingController _descriptionController;
   bool _loading = false;
   File? _image;
   List<CategoryEntity> _mainCategories = [];
@@ -35,16 +44,49 @@ class _AddProductPageState extends State<AddProductPage> {
   @override
   void initState() {
     super.initState();
-    _loadCategories();
+    final p = widget.product;
+    _titleController = TextEditingController(text: p.title);
+    _priceController = TextEditingController(text: p.price.toStringAsFixed(0));
+    _descriptionController = TextEditingController(text: p.description);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadCategories());
   }
 
   Future<void> _loadCategories() async {
     try {
-      final list = await context.read<CategoriesRepository>().getMainCategories();
-      if (mounted) setState(() {
-        _mainCategories = list;
-        _categoriesLoading = false;
-      });
+      final repo = context.read<CategoriesRepository>();
+      final mainList = await repo.getMainCategories();
+      CategoryEntity? main;
+      List<CategoryEntity> subs = [];
+      CategoryEntity? sub;
+      if (widget.product.categoryId != null) {
+        final cat = await repo.getCategoryById(widget.product.categoryId!);
+        if (cat != null && cat.parentId != null) {
+          for (final m in mainList) {
+            if (m.id == cat.parentId) {
+              main = m;
+              break;
+            }
+          }
+          if (main != null) {
+            subs = await repo.getSubcategories(main.id);
+            for (final s in subs) {
+              if (s.id == widget.product.categoryId) {
+                sub = s;
+                break;
+              }
+            }
+          }
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _mainCategories = mainList;
+          _selectedMain = main;
+          _subcategories = subs;
+          _selectedSubcategory = sub;
+          _categoriesLoading = false;
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _categoriesLoading = false);
     }
@@ -74,14 +116,6 @@ class _AddProductPageState extends State<AddProductPage> {
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final authState = context.read<AuthBloc>().state;
-    if (authState is! AuthAuthenticated) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите в аккаунт')),
-      );
-      return;
-    }
-
     final price = double.tryParse(
       _priceController.text.replaceAll(' ', '').replaceAll(',', '.'),
     );
@@ -95,7 +129,7 @@ class _AddProductPageState extends State<AddProductPage> {
     setState(() => _loading = true);
     final productRepository = context.read<ProductRepository>();
     try {
-      String imageUrl = '';
+      String imageUrl = widget.product.imageUrl;
       if (_image != null) {
         const uuid = Uuid();
         final ext = _image!.path.split('.').last;
@@ -107,31 +141,39 @@ class _AddProductPageState extends State<AddProductPage> {
             .from(SupabaseConstants.bucketProducts)
             .getPublicUrl(path);
       }
-      await productRepository.addProduct(
-            title: _titleController.text.trim(),
-            description: _descriptionController.text.trim(),
-            price: price,
-            imageUrl: imageUrl,
-            category: _selectedSubcategory?.name ?? 'general',
-            categoryId: _selectedSubcategory?.id,
-            sellerId: authState.user.id,
-          );
+      await productRepository.updateProduct(
+        productId: widget.productId,
+        title: _titleController.text.trim(),
+        description: _descriptionController.text.trim(),
+        price: price,
+        imageUrl: imageUrl,
+        category: _selectedSubcategory?.name ?? widget.product.category,
+        categoryId: _selectedSubcategory?.id ?? widget.product.categoryId,
+      );
+      if (!mounted) return;
+      final authState = context.read<AuthBloc>().state;
+      final currentUserId = authState is AuthAuthenticated ? authState.user.id : null;
+      final updated = await productRepository.getProductById(
+        widget.productId,
+        currentUserId: currentUserId,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Товар добавлен')),
+        const SnackBar(content: Text('Товар обновлён')),
       );
-      context.go('/home/feed');
+      context.pop(updated);
     } catch (e, st) {
       if (!mounted) return;
-      String message = 'Ошибка при публикации';
+      String message = 'Ошибка при сохранении';
       if (e is StorageException) {
-        message = 'Storage: создайте бакет «products» в Supabase и добавьте политики загрузки (см. docs/SUPABASE_SETUP.md)';
+        message =
+            'Storage: проверьте бакет «products» (см. docs/SUPABASE_SETUP.md)';
       } else if (e is PostgrestException) {
-        message = 'База данных: проверьте таблицу products и выполните schema.sql в Supabase';
+        message = 'База данных: проверьте политики RLS для products';
       } else {
         message = 'Ошибка: $e';
       }
-      debugPrint('AddProduct error: $e $st');
+      debugPrint('EditProduct error: $e $st');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
       );
@@ -144,10 +186,10 @@ class _AddProductPageState extends State<AddProductPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Добавить товар'),
+        title: const Text('Редактировать товар'),
         leading: IconButton(
           icon: const Icon(Icons.close),
-          onPressed: () => context.go('/home/feed'),
+          onPressed: () => context.pop(),
         ),
       ),
       body: Form(
@@ -177,22 +219,34 @@ class _AddProductPageState extends State<AddProductPage> {
                           fit: BoxFit.cover,
                         ),
                       )
-                    : Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.add_photo_alternate_outlined,
-                            size: 48,
-                            color: Theme.of(context).colorScheme.outline,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Добавить фото',
-                            style: TextStyle(
-                              color: Theme.of(context).colorScheme.outline,
-                            ),
-                          ),
-                        ],
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: widget.product.imageUrl.isNotEmpty
+                            ? CachedProductImage(
+                                imageUrl: widget.product.imageUrl,
+                                width: double.infinity,
+                                height: double.infinity,
+                                fit: BoxFit.cover,
+                              )
+                            : Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    Icons.add_photo_alternate_outlined,
+                                    size: 48,
+                                    color:
+                                        Theme.of(context).colorScheme.outline,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Изменить фото',
+                                    style: TextStyle(
+                                      color:
+                                          Theme.of(context).colorScheme.outline,
+                                    ),
+                                  ),
+                                ],
+                              ),
                       ),
               ),
             ),
@@ -269,7 +323,7 @@ class _AddProductPageState extends State<AddProductPage> {
                       width: 24,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
-                  : const Text('Опубликовать'),
+                  : const Text('Сохранить'),
             ),
           ],
         ),

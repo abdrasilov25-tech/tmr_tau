@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:postgrest/postgrest.dart';
 import '../../../../features/product/domain/entities/product_entity.dart';
 import '../../../../features/product/data/models/product_model.dart';
 import '../../domain/repositories/feed_repository.dart';
@@ -29,7 +31,13 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       if (!isClosed) {
         emit(FeedSuccess(list, hasMore: list.length >= _pageSize));
       }
-    } catch (e) {
+    } catch (e, st) {
+      if (e is PostgrestException) {
+        debugPrint('FeedBloc Postgrest: ${e.message} (code: ${e.code})');
+      } else {
+        debugPrint('FeedBloc error: $e');
+      }
+      debugPrint('FeedBloc stack: $st');
       if (!isClosed) emit(FeedFailure(e.toString()));
     }
   }

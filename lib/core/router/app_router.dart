@@ -13,6 +13,7 @@ import '../../features/post/domain/repositories/post_repository.dart';
 import '../../features/product/domain/entities/product_entity.dart';
 import '../../features/post/presentation/pages/add_post_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
+import '../../features/product/presentation/pages/edit_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
 import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
@@ -64,6 +65,22 @@ class AppRouter {
           }
           return ProductDetailPage(product: product);
         },
+        routes: [
+          GoRoute(
+            path: 'edit',
+            builder: (context, state) {
+              final product = state.extra as ProductEntity?;
+              final id = state.pathParameters['id']!;
+              if (product == null) {
+                return Scaffold(
+                  appBar: AppBar(),
+                  body: const Center(child: Text('Товар не найден')),
+                );
+              }
+              return EditProductPage(productId: id, product: product);
+            },
+          ),
+        ],
       ),
       GoRoute(
         path: '/profile/:id',

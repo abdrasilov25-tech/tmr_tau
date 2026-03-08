@@ -23,7 +23,18 @@ abstract class ProductRepository {
     required double price,
     String imageUrl = '',
     String category = 'general',
+    String? categoryId,
     required String sellerId,
   });
+  Future<void> updateProduct({
+    required String productId,
+    required String title,
+    required String description,
+    required double price,
+    required String imageUrl,
+    String category = 'general',
+    String? categoryId,
+  });
+  Future<void> deleteProduct(String productId);
   Future<void> toggleProductLike(String productId, String userId);
 }

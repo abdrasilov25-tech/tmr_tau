@@ -108,28 +108,35 @@ class _SplashPageState extends State<SplashPage>
           state is AuthUnauthenticated ||
           state is AuthError,
       listener: _onAuthStateChanged,
-      child: AnimatedBuilder(
-        animation: Listenable.merge([_logoController, _fadeOutController]),
-        builder: (context, child) {
-          final fadeOut = 1.0 - _fadeOutController.value;
-          return Container(
-            color: Colors.black,
-            child: Opacity(
-              opacity: _opacityAnimation.value * fadeOut,
-              child: Center(
-                child: Transform.scale(
-                  scale: _scaleAnimation.value,
-                  child: Image.asset(
-                    'assets/icons.png',
-                    width: 160,
-                    height: 160,
-                    fit: BoxFit.contain,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: AnimatedBuilder(
+            animation: Listenable.merge([_logoController, _fadeOutController]),
+            builder: (context, child) {
+              final fadeOut = 1.0 - _fadeOutController.value;
+              return Opacity(
+                opacity: _opacityAnimation.value * fadeOut,
+                child: Center(
+                  child: Transform.scale(
+                    scale: _scaleAnimation.value,
+                    child: Image.asset(
+                      'assets/icons.png',
+                      width: 160,
+                      height: 160,
+                      fit: BoxFit.contain,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.image_outlined,
+                        size: 120,
+                        color: Colors.white54,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-          );
-        },
+              );
+            },
+          ),
+        ),
       ),
     );
   }

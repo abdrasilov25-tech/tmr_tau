@@ -1,26 +1,107 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
+import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/product_entity.dart';
+import '../../domain/repositories/product_repository.dart';
 
-class ProductDetailPage extends StatelessWidget {
+class ProductDetailPage extends StatefulWidget {
   const ProductDetailPage({super.key, required this.product});
 
   final ProductEntity product;
 
   @override
+  State<ProductDetailPage> createState() => _ProductDetailPageState();
+}
+
+class _ProductDetailPageState extends State<ProductDetailPage> {
+  late ProductEntity _product;
+
+  @override
+  void initState() {
+    super.initState();
+    _product = widget.product;
+  }
+
+  Future<void> _deleteProduct(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить товар?'),
+        content: const Text(
+          'Товар будет удалён без возможности восстановления.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await context.read<ProductRepository>().deleteProduct(_product.id);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Товар удалён')),
+      );
+      context.go('/home/feed');
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка: $e')),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final authState = context.watch<AuthBloc>().state;
+    final isOwner = authState is AuthAuthenticated &&
+        authState.user.id == _product.sellerId;
+
     return Scaffold(
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
             expandedHeight: 320,
             pinned: true,
+            actions: isOwner
+                ? [
+                    IconButton(
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () async {
+                        final updated = await context.push<ProductEntity?>(
+                          '/product/${_product.id}/edit',
+                          extra: _product,
+                        );
+                        if (updated != null && mounted) {
+                          setState(() => _product = updated);
+                        }
+                      },
+                      tooltip: 'Редактировать',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _deleteProduct(context),
+                      tooltip: 'Удалить',
+                    ),
+                  ]
+                : null,
             flexibleSpace: FlexibleSpaceBar(
               background: CachedProductImage(
-                imageUrl: product.imageUrl,
+                imageUrl: _product.imageUrl,
                 width: double.infinity,
                 height: 320,
                 fit: BoxFit.cover,
@@ -34,26 +115,26 @@ class ProductDetailPage extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                    product.title,
+                    _product.title,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    product.priceFormatted,
+                    _product.priceFormatted,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           color: Theme.of(context).colorScheme.primary,
                         ),
                   ),
                   const SizedBox(height: 16),
                   InkWell(
-                    onTap: () => context.push('/profile/${product.sellerId}'),
+                    onTap: () => context.push('/profile/${_product.sellerId}'),
                     borderRadius: BorderRadius.circular(12),
                     child: Row(
                       children: [
                         CachedAvatar(
-                          imageUrl: product.sellerAvatarUrl,
+                          imageUrl: _product.sellerAvatarUrl,
                           radius: 24,
-                          fallbackText: product.sellerName,
+                          fallbackText: _product.sellerName,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -64,11 +145,11 @@ class ProductDetailPage extends StatelessWidget {
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text(
-                                    product.sellerName ?? 'Продавец',
+                                    _product.sellerName ?? 'Продавец',
                                     style:
                                         Theme.of(context).textTheme.titleMedium,
                                   ),
-                                  if (product.sellerIsVerified) ...[
+                                  if (_product.sellerIsVerified) ...[
                                     const SizedBox(width: 6),
                                     const VerifiedBadge(size: 20),
                                   ],
@@ -93,7 +174,7 @@ class ProductDetailPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    product.description,
+                    _product.description,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 32),

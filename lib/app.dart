@@ -16,7 +16,9 @@ import 'features/notifications/data/repositories/notifications_repository_impl.d
 import 'features/notifications/domain/repositories/notifications_repository.dart';
 import 'features/post/data/repositories/post_repository_impl.dart';
 import 'features/post/domain/repositories/post_repository.dart';
+import 'features/product/data/repositories/categories_repository_impl.dart';
 import 'features/product/data/repositories/product_repository_impl.dart';
+import 'features/product/domain/repositories/categories_repository.dart';
 import 'features/product/domain/repositories/product_repository.dart';
 import 'features/profile/data/repositories/profile_repository_impl.dart';
 import 'features/profile/domain/repositories/profile_repository.dart';
@@ -43,6 +45,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final SupabaseClient _client;
   late final AuthRepository _authRepository;
   late final ProductRepository _productRepository;
+  late final CategoriesRepository _categoriesRepository;
   late final FeedRepository _feedRepository;
   late final ProfileRepository _profileRepository;
   late final CommentsRepository _commentsRepository;
@@ -61,6 +64,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     final authDataSource = AuthRemoteDataSourceImpl(_client);
     _authRepository = AuthRepositoryImpl(authDataSource, _client);
     _productRepository = ProductRepositoryImpl(_client);
+    _categoriesRepository = CategoriesRepositoryImpl(_client);
     _profileRepository = ProfileRepositoryImpl(_client);
     _feedRepository = FeedRepositoryImpl(_productRepository, _profileRepository);
     _commentsRepository = CommentsRepositoryImpl(_client);
@@ -108,6 +112,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),
+        RepositoryProvider<CategoriesRepository>.value(value: _categoriesRepository),
         RepositoryProvider<ProfileRepository>.value(value: _profileRepository),
         RepositoryProvider<CommentsRepository>.value(value: _commentsRepository),
         RepositoryProvider<StoriesRepository>.value(value: _storiesRepository),
@@ -119,11 +124,14 @@ class _TmrTauAppState extends State<TmrTauApp> {
         create: (context) => AuthBloc(_authRepository)..add(const AuthCheckRequested()),
         child: BlocProvider(
           create: (context) => FeedBloc(_feedRepository),
+          child: Container(
+          color: Colors.black,
           child: MaterialApp.router(
-          title: 'tmr_tau',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light,
-          routerConfig: _appRouter.router,
+            title: 'tmr_tau',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light,
+            routerConfig: _appRouter.router,
+          ),
         ),
           ),
       ),

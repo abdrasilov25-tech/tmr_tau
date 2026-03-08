@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
@@ -274,10 +275,19 @@ class _AddPostPageState extends State<AddPostPage> {
         const SnackBar(content: Text('Новость опубликована')),
       );
       context.go('/home/news');
-    } catch (e) {
+    } catch (e, st) {
       if (!mounted) return;
+      String message = 'Ошибка при публикации';
+      if (e is StorageException) {
+        message = 'Storage: создайте бакет «posts» в Supabase и добавьте политики загрузки (см. docs/SUPABASE_SETUP.md)';
+      } else if (e is PostgrestException) {
+        message = 'База данных: проверьте таблицу posts и выполните schema.sql в Supabase';
+      } else {
+        message = 'Ошибка: $e';
+      }
+      debugPrint('AddPost error: $e $st');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e')),
+        SnackBar(content: Text(message), duration: const Duration(seconds: 5)),
       );
     } finally {
       if (mounted) setState(() => _loading = false);

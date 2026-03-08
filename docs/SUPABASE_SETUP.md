@@ -69,7 +69,34 @@ flutter run --dart-define=SUPABASE_URL=https://ТВОЙ_ПРОЕКТ.supabase.co
 2. Нажми **New query**.
 3. Открой в проекте файл **`supabase/schema.sql`**, скопируй весь его текст.
 4. Вставь в редактор запроса в Supabase и нажми **Run** (или Ctrl+Enter).
-5. Убедись, что запрос выполнился без ошибок — после этого таблицы `users`, `products`, `orders`, `messages`, `favorites`, `followers` и RLS-политики созданы.
+5. Убедись, что запрос выполнился без ошибок — после этого таблицы `users`, `products`, `orders`, `messages`, `favorites`, `followers` и RLS-политики созданы.  
+   Для товаров включены: просмотр для всех, добавление/редактирование/удаление — только для владельца (`seller_id = auth.uid()`).
+
+---
+
+## Шаг 5.1. Storage: бакеты для фото товаров и новостей
+
+Без этого при «Добавить товар» или «Новая новость» будет **StorageException**.
+
+1. В Supabase открой **Storage**.
+2. Создай два бакета (если их ещё нет):
+   - **products** — для фото товаров (включи **Public bucket**).
+   - **posts** — для фото/видео новостей (включи **Public bucket**).
+3. В **SQL Editor** выполни (разрешит загрузку и просмотр файлов):
+
+```sql
+-- Удалить старые политики, если уже создавали (иначе будет "already exists")
+drop policy if exists "Allow authenticated uploads to products" on storage.objects;
+drop policy if exists "Allow public read products" on storage.objects;
+
+-- Товары: загрузка для авторизованных, чтение для всех
+create policy "Allow authenticated uploads to products"
+on storage.objects for insert to authenticated with check (bucket_id = 'products');
+create policy "Allow public read products"
+on storage.objects for select to public using (bucket_id = 'products');
+```
+
+Для бакета **posts** (новости) политики настраиваются так же — см. обсуждение в чате или повтори те же шаги для `bucket_id = 'posts'`.
 
 ---
 
