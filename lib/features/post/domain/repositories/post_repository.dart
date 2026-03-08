@@ -24,6 +24,7 @@ abstract class PostRepository {
     required String postId,
     required String userId,
     required String text,
+    String? parentCommentId,
   });
   Future<PostEntity?> getPostById(String postId, {String? currentUserId});
   Future<void> updatePost({

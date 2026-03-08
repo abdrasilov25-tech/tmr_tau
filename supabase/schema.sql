@@ -191,9 +191,11 @@ create table if not exists public.post_comments (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,
   user_id uuid not null references public.users(id) on delete cascade,
+  parent_id uuid references public.post_comments(id) on delete cascade,
   text text not null,
   created_at timestamptz default now()
 );
+alter table public.post_comments add column if not exists parent_id uuid references public.post_comments(id) on delete cascade;
 
 create table if not exists public.post_dislikes (
   post_id uuid not null references public.posts(id) on delete cascade,

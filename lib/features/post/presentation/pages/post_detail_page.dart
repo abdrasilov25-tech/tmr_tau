@@ -7,6 +7,7 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/post_comment_entity.dart';
 import '../../domain/entities/post_entity.dart';
+import '../../domain/exceptions/post_comment_exceptions.dart';
 import '../../domain/repositories/post_repository.dart';
 
 class PostDetailPage extends StatefulWidget {
@@ -29,6 +30,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   bool _commentsLoading = true;
   final _commentController = TextEditingController();
   bool _sending = false;
+  PostCommentEntity? _replyingToComment;
 
   @override
   void initState() {
@@ -55,6 +57,20 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
   }
 
+  /// Комментарии в порядке дерева: корневой, затем его ответы, затем следующий корневой...
+  List<PostCommentEntity> get _commentsInTreeOrder {
+    final roots = _comments.where((c) => c.parentId == null).toList()
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    final result = <PostCommentEntity>[];
+    for (final root in roots) {
+      result.add(root);
+      final replies = _comments.where((c) => c.parentId == root.id).toList()
+        ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      result.addAll(replies);
+    }
+    return result;
+  }
+
   Future<void> _sendComment() async {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
@@ -65,21 +81,47 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
     final text = _commentController.text.trim();
     if (text.isEmpty) return;
+    final parentId = _replyingToComment?.id;
     setState(() => _sending = true);
     _commentController.clear();
+    setState(() => _replyingToComment = null);
     try {
       await widget.postRepository.addComment(
             postId: _post.id,
             userId: authState.user.id,
             text: text,
+            parentCommentId: parentId,
           );
       if (!mounted) return;
       await _loadComments();
+    } on PostCommentReplyFallbackException catch (_) {
+      if (mounted) {
+        await _loadComments();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Ответ добавлен. Для вложенных ответов выполните в Supabase SQL Editor: '
+              'ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES post_comments(id) ON DELETE CASCADE;',
+            ),
+            duration: const Duration(seconds: 6),
+          ),
+        );
+      }
     } catch (e) {
       if (mounted) {
-        final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+        final msg = e is PostgrestException ? e.message : e.toString();
+        final isParentIdError = msg.toLowerCase().contains('parent_id') ||
+            (msg.contains('column') && msg.contains('exist'));
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $msg')),
+          SnackBar(
+            content: Text(
+              isParentIdError
+                  ? 'Ответы на комментарии пока недоступны. Выполните в Supabase SQL Editor: '
+                    'ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES post_comments(id) ON DELETE CASCADE;'
+                  : 'Ошибка: $msg',
+            ),
+            duration: isParentIdError ? const Duration(seconds: 8) : const Duration(seconds: 4),
+          ),
         );
       }
     } finally {
@@ -104,9 +146,20 @@ class _PostDetailPageState extends State<PostDetailPage> {
     try {
       await widget.postRepository.deletePostComment(comment.id, authState.user.id);
       if (!mounted) return;
+      final toRemove = <String>{comment.id};
+      var changed = true;
+      while (changed) {
+        changed = false;
+        for (final c in _comments) {
+          if (c.parentId != null && toRemove.contains(c.parentId) && !toRemove.contains(c.id)) {
+            toRemove.add(c.id);
+            changed = true;
+          }
+        }
+      }
       setState(() {
-        _comments = _comments.where((c) => c.id != comment.id).toList();
-        _post = _post.copyWith(commentsCount: _post.commentsCount - 1);
+        _comments = _comments.where((c) => !toRemove.contains(c.id)).toList();
+        _post = _post.copyWith(commentsCount: _post.commentsCount - toRemove.length);
       });
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
@@ -138,7 +191,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
       context.pop(true);
     } catch (e) {
       if (mounted) {
-        final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+        final msg = e is PostgrestException ? e.message : e.toString();
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
       }
     }
@@ -266,9 +319,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       ),
                     )
                   else
-                    ..._comments.map((c) => _CommentTile(
+                    ..._commentsInTreeOrder.map((c) => _CommentTile(
                           comment: c,
                           currentUserId: currentUserId,
+                          isReply: c.parentId != null,
+                          onReply: () => setState(() => _replyingToComment = c),
                           onDelete: () => _deleteComment(c),
                         )),
                 ],
@@ -287,30 +342,58 @@ class _PostDetailPageState extends State<PostDetailPage> {
                 color: Colors.white,
                 boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, -2))],
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _commentController,
-                      decoration: const InputDecoration(
-                        hintText: 'Написать комментарий...',
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  if (_replyingToComment != null)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.reply, size: 18, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Ответ для ${_replyingToComment!.userName ?? 'пользователя'}',
+                              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.primary),
+                            ),
+                          ),
+                          TextButton(
+                            onPressed: () => setState(() => _replyingToComment = null),
+                            child: const Text('Отмена'),
+                          ),
+                        ],
                       ),
-                      maxLines: 2,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _sendComment(),
                     ),
-                  ),
-                  IconButton(
-                    onPressed: _sending ? null : _sendComment,
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send_outlined),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _commentController,
+                          decoration: InputDecoration(
+                            hintText: _replyingToComment != null
+                                ? 'Написать ответ...'
+                                : 'Написать комментарий...',
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          ),
+                          maxLines: 2,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _sendComment(),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _sending ? null : _sendComment,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send_outlined),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -336,23 +419,27 @@ class _CommentTile extends StatelessWidget {
     required this.comment,
     required this.currentUserId,
     required this.onDelete,
+    this.isReply = false,
+    this.onReply,
   });
 
   final PostCommentEntity comment;
   final String? currentUserId;
   final VoidCallback onDelete;
+  final bool isReply;
+  final VoidCallback? onReply;
 
   @override
   Widget build(BuildContext context) {
     final isOwn = currentUserId == comment.userId;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: 12, left: isReply ? 28 : 0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           CachedAvatar(
             imageUrl: comment.userAvatarUrl,
-            radius: 18,
+            radius: isReply ? 14 : 18,
             fallbackText: comment.userName ?? comment.userId,
           ),
           const SizedBox(width: 10),
@@ -364,9 +451,9 @@ class _CommentTile extends StatelessWidget {
                   children: [
                     Text(
                       comment.userName ?? 'Пользователь',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                        fontSize: isReply ? 13 : 14,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -385,8 +472,31 @@ class _CommentTile extends StatelessWidget {
                     ],
                   ],
                 ),
+                if (comment.replyToUserName != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Ответ на ${comment.replyToUserName}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                  ),
+                ],
                 const SizedBox(height: 2),
-                Text(comment.text, style: const TextStyle(fontSize: 14, height: 1.3)),
+                Text(comment.text, style: TextStyle(fontSize: isReply ? 13 : 14, height: 1.3)),
+                if (onReply != null && currentUserId != null) ...[
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    onPressed: onReply,
+                    icon: Icon(Icons.reply, size: 16, color: Colors.grey.shade600),
+                    label: Text(
+                      'Ответить',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
