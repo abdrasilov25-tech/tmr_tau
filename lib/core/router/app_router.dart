@@ -9,9 +9,12 @@ import '../../features/feed/presentation/pages/feed_page.dart';
 import '../../features/feed/presentation/pages/search_page.dart';
 import '../../features/news/presentation/pages/news_feed_page.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
+import '../../features/post/domain/entities/post_entity.dart';
 import '../../features/post/domain/repositories/post_repository.dart';
 import '../../features/product/domain/entities/product_entity.dart';
 import '../../features/post/presentation/pages/add_post_page.dart';
+import '../../features/post/presentation/pages/edit_post_page.dart';
+import '../../features/post/presentation/pages/post_detail_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/edit_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
@@ -92,6 +95,33 @@ class AppRouter {
       GoRoute(
         path: '/add-product',
         builder: (context, state) => const AddProductPage(),
+      ),
+      GoRoute(
+        path: '/post/:id',
+        builder: (context, state) {
+          final post = state.extra as PostEntity?;
+          if (post == null) {
+            return const Scaffold(
+              body: Center(child: Text('Новость не найдена')),
+            );
+          }
+          return PostDetailPage(post: post);
+        },
+        routes: [
+          GoRoute(
+            path: 'edit',
+            builder: (context, state) {
+              final post = state.extra as PostEntity?;
+              if (post == null) {
+                return Scaffold(
+                  appBar: AppBar(),
+                  body: const Center(child: Text('Новость не найдена')),
+                );
+              }
+              return EditPostPage(post: post);
+            },
+          ),
+        ],
       ),
       GoRoute(
         path: '/add-news',

@@ -296,4 +296,30 @@ class PostRepositoryImpl implements PostRepository {
     }
     return post;
   }
+
+  @override
+  Future<void> updatePost({
+    required String postId,
+    String? caption,
+    String? imageUrl,
+    String? videoUrl,
+    int? videoDurationSeconds,
+  }) async {
+    final data = <String, dynamic>{};
+    if (caption != null) data['caption'] = caption;
+    if (imageUrl != null) data['image_url'] = imageUrl;
+    if (videoUrl != null) data['video_url'] = videoUrl;
+    if (videoDurationSeconds != null) data['video_duration_seconds'] = videoDurationSeconds;
+    if (data.isEmpty) return;
+    await _client.from(SupabaseConstants.postsTable).update(data).eq('id', postId);
+  }
+
+  @override
+  Future<void> deletePostComment(String commentId, String userId) async {
+    await _client
+        .from(SupabaseConstants.postCommentsTable)
+        .delete()
+        .eq('id', commentId)
+        .eq('user_id', userId);
+  }
 }

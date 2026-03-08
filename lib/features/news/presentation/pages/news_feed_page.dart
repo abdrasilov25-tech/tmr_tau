@@ -131,7 +131,7 @@ class _NewsPostCard extends StatelessWidget {
         side: BorderSide(color: Colors.grey.shade200),
       ),
       child: InkWell(
-        onTap: () {},
+        onTap: () => context.push('/post/${post.id}', extra: post),
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -238,11 +238,19 @@ class _NewsPostCard extends StatelessWidget {
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                   ),
                   const SizedBox(width: 16),
-                  Icon(Icons.chat_bubble_outline, size: 22, color: Colors.grey.shade600),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${post.commentsCount}',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                  GestureDetector(
+                    onTap: () => context.push('/post/${post.id}', extra: post),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.chat_bubble_outline, size: 22, color: Colors.grey.shade600),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${post.commentsCount}',
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
