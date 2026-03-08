@@ -5,6 +5,8 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../comments/domain/entities/product_comment_entity.dart';
+import '../../../comments/domain/repositories/comments_repository.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
 
@@ -19,11 +21,88 @@ class ProductDetailPage extends StatefulWidget {
 
 class _ProductDetailPageState extends State<ProductDetailPage> {
   late ProductEntity _product;
+  List<ProductCommentEntity> _comments = [];
+  bool _commentsLoading = true;
+  final _commentController = TextEditingController();
+  bool _sending = false;
 
   @override
   void initState() {
     super.initState();
     _product = widget.product;
+    _loadComments();
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadComments() async {
+    try {
+      final list = await context.read<CommentsRepository>().getProductComments(_product.id);
+      if (mounted) setState(() {
+        _comments = list;
+        _commentsLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _commentsLoading = false);
+    }
+  }
+
+  Future<void> _sendComment() async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы оставить комментарий')),
+      );
+      return;
+    }
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+    setState(() => _sending = true);
+    _commentController.clear();
+    try {
+      await context.read<CommentsRepository>().addComment(
+            productId: _product.id,
+            userId: authState.user.id,
+            text: text,
+          );
+      if (!mounted) return;
+      await _loadComments();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  Future<void> _deleteComment(ProductCommentEntity comment) async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated || authState.user.id != comment.userId) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить комментарий?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Удалить')),
+        ],
+      ),
+    );
+    if (ok != true || !context.mounted) return;
+    try {
+      await context.read<CommentsRepository>().deleteComment(comment.id, authState.user.id);
+      if (!mounted) return;
+      setState(() => _comments = _comments.where((c) => c.id != comment.id).toList());
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    }
   }
 
   Future<void> _deleteProduct(BuildContext context) async {
@@ -204,6 +283,66 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 32),
+                  Text(
+                    'Комментарии (${_comments.length})',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 12),
+                  if (_commentsLoading)
+                    const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+                  else if (_comments.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: Text(
+                          'Пока нет комментариев',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                        ),
+                      ),
+                    )
+                  else
+                    ..._comments.map(
+                      (c) => _ProductCommentTile(
+                        comment: c,
+                        currentUserId: authState is AuthAuthenticated ? authState.user.id : null,
+                        onDelete: () => _deleteComment(c),
+                      ),
+                    ),
+                  if (authState is AuthAuthenticated) ...[
+                    const SizedBox(height: 16),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _commentController,
+                            decoration: const InputDecoration(
+                              hintText: 'Написать комментарий...',
+                              border: OutlineInputBorder(),
+                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                            maxLines: 2,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _sendComment(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: _sending ? null : _sendComment,
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.send_outlined),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -212,4 +351,76 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       ),
     );
   }
+}
+
+class _ProductCommentTile extends StatelessWidget {
+  const _ProductCommentTile({
+    required this.comment,
+    required this.currentUserId,
+    required this.onDelete,
+  });
+
+  final ProductCommentEntity comment;
+  final String? currentUserId;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final isOwn = currentUserId == comment.userId;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CachedAvatar(
+            imageUrl: comment.userAvatarUrl,
+            radius: 18,
+            fallbackText: comment.userName ?? comment.userId,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      comment.userName ?? 'Пользователь',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _timeAgo(comment.createdAt),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (isOwn) ...[
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        onPressed: onDelete,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(comment.text, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _timeAgo(DateTime dateTime) {
+  final now = DateTime.now();
+  final diff = now.difference(dateTime);
+  if (diff.inMinutes < 1) return 'только что';
+  if (diff.inMinutes < 60) return '${diff.inMinutes} мин';
+  if (diff.inHours < 24) return '${diff.inHours} ч';
+  if (diff.inDays < 7) return '${diff.inDays} дн';
+  return '${dateTime.day}.${dateTime.month}.${dateTime.year}';
 }

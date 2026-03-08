@@ -26,4 +26,12 @@ abstract class PostRepository {
     required String text,
   });
   Future<PostEntity?> getPostById(String postId, {String? currentUserId});
+  Future<void> updatePost({
+    required String postId,
+    String? caption,
+    String? imageUrl,
+    String? videoUrl,
+    int? videoDurationSeconds,
+  });
+  Future<void> deletePostComment(String commentId, String userId);
 }
