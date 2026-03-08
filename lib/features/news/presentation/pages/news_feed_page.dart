@@ -131,7 +131,12 @@ class _NewsPostCard extends StatelessWidget {
         side: BorderSide(color: Colors.grey.shade200),
       ),
       child: InkWell(
-        onTap: () => context.push('/post/${post.id}', extra: post),
+        onTap: () async {
+          final deleted = await context.push<bool>('/post/${post.id}', extra: post);
+          if (deleted == true && context.mounted) {
+            context.read<NewsBloc>().add(NewsRefresh(currentUserId: currentUserId));
+          }
+        },
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -239,7 +244,12 @@ class _NewsPostCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 16),
                   GestureDetector(
-                    onTap: () => context.push('/post/${post.id}', extra: post),
+                    onTap: () async {
+                      final deleted = await context.push<bool>('/post/${post.id}', extra: post);
+                      if (deleted == true && context.mounted) {
+                        context.read<NewsBloc>().add(NewsRefresh(currentUserId: currentUserId));
+                      }
+                    },
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [

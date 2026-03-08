@@ -146,8 +146,19 @@ create table if not exists public.stories (
   user_id uuid not null references public.users(id) on delete cascade,
   image_url text not null default '',
   video_url text default '',
+  caption text default '',
   created_at timestamptz default now(),
   expires_at timestamptz not null default (now() + interval '24 hours')
+);
+alter table public.stories add column if not exists caption text default '';
+
+-- Ответы на сторис (как в Instagram)
+create table if not exists public.story_replies (
+  id uuid primary key default gen_random_uuid(),
+  story_id uuid not null references public.stories(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  text text not null,
+  created_at timestamptz default now()
 );
 
 -- ============== POSTS (новости, в стиле Threads — жители Темиртау) ==============
@@ -236,6 +247,7 @@ alter table public.product_likes enable row level security;
 alter table public.product_comments enable row level security;
 alter table public.followers enable row level security;
 alter table public.stories enable row level security;
+alter table public.story_replies enable row level security;
 alter table public.notifications enable row level security;
 alter table public.posts enable row level security;
 alter table public.post_likes enable row level security;
@@ -314,10 +326,19 @@ create policy "Followers all" on public.followers for all using (auth.uid() = fo
 
 drop policy if exists "Stories select" on public.stories;
 drop policy if exists "Stories insert" on public.stories;
+drop policy if exists "Stories update own" on public.stories;
 drop policy if exists "Stories delete own" on public.stories;
 create policy "Stories select" on public.stories for select using (true);
 create policy "Stories insert" on public.stories for insert with check (auth.uid() = user_id);
+create policy "Stories update own" on public.stories for update using (auth.uid() = user_id);
 create policy "Stories delete own" on public.stories for delete using (auth.uid() = user_id);
+
+drop policy if exists "Story replies select" on public.story_replies;
+drop policy if exists "Story replies insert" on public.story_replies;
+drop policy if exists "Story replies delete own" on public.story_replies;
+create policy "Story replies select" on public.story_replies for select using (true);
+create policy "Story replies insert" on public.story_replies for insert with check (auth.uid() = user_id);
+create policy "Story replies delete own" on public.story_replies for delete using (auth.uid() = user_id);
 
 drop policy if exists "Notifications select" on public.notifications;
 drop policy if exists "Notifications update own" on public.notifications;
@@ -419,6 +440,31 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- ============== STORAGE BUCKETS (products, posts, stories) ==============
+-- Создаёт бакеты, если их ещё нет. При повторном запуске — обновляет public.
+insert into storage.buckets (id, name, public)
+values
+  ('products', 'products', true),
+  ('posts', 'posts', true),
+  ('stories', 'stories', true)
+on conflict (id) do update set name = excluded.name, public = excluded.public;
+
+-- Политики Storage: загрузка для авторизованных, чтение для всех
+drop policy if exists "Allow authenticated uploads to products" on storage.objects;
+drop policy if exists "Allow public read products" on storage.objects;
+create policy "Allow authenticated uploads to products" on storage.objects for insert to authenticated with check (bucket_id = 'products');
+create policy "Allow public read products" on storage.objects for select to public using (bucket_id = 'products');
+
+drop policy if exists "Allow authenticated uploads to posts" on storage.objects;
+drop policy if exists "Allow public read posts" on storage.objects;
+create policy "Allow authenticated uploads to posts" on storage.objects for insert to authenticated with check (bucket_id = 'posts');
+create policy "Allow public read posts" on storage.objects for select to public using (bucket_id = 'posts');
+
+drop policy if exists "Allow authenticated uploads to stories" on storage.objects;
+drop policy if exists "Allow public read stories" on storage.objects;
+create policy "Allow authenticated uploads to stories" on storage.objects for insert to authenticated with check (bucket_id = 'stories');
+create policy "Allow public read stories" on storage.objects for select to public using (bucket_id = 'stories');
 
 -- ============== Delete expired stories (run via cron or Edge Function) ==============
 -- delete from public.stories where expires_at < now();

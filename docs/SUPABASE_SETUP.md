@@ -74,29 +74,11 @@ flutter run --dart-define=SUPABASE_URL=https://ТВОЙ_ПРОЕКТ.supabase.co
 
 ---
 
-## Шаг 5.1. Storage: бакеты для фото товаров и новостей
+## Шаг 5.1. Storage: бакеты для фото товаров, новостей и историй
 
-Без этого при «Добавить товар» или «Новая новость» будет **StorageException**.
+Бакеты **products**, **posts** и **stories** создаются автоматически при выполнении **`supabase/schema.sql`** в SQL Editor (в конце файла добавлены `insert into storage.buckets` и политики для всех трёх бакетов).
 
-1. В Supabase открой **Storage**.
-2. Создай два бакета (если их ещё нет):
-   - **products** — для фото товаров (включи **Public bucket**).
-   - **posts** — для фото/видео новостей (включи **Public bucket**).
-3. В **SQL Editor** выполни (разрешит загрузку и просмотр файлов):
-
-```sql
--- Удалить старые политики, если уже создавали (иначе будет "already exists")
-drop policy if exists "Allow authenticated uploads to products" on storage.objects;
-drop policy if exists "Allow public read products" on storage.objects;
-
--- Товары: загрузка для авторизованных, чтение для всех
-create policy "Allow authenticated uploads to products"
-on storage.objects for insert to authenticated with check (bucket_id = 'products');
-create policy "Allow public read products"
-on storage.objects for select to public using (bucket_id = 'products');
-```
-
-Для бакета **posts** (новости) политики настраиваются так же — см. обсуждение в чате или повтори те же шаги для `bucket_id = 'posts'`.
+Если ты уже запускал schema.sql раньше — просто выполни в SQL Editor **последний блок** из `schema.sql` (секция «STORAGE BUCKETS»), либо перезапусти весь schema.sql целиком. После этого бакеты и политики будут созданы, загрузка фото товаров, новостей и историй заработает без **StorageException**.
 
 ---
 

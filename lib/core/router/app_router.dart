@@ -26,6 +26,9 @@ import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/orders/presentation/pages/orders_page.dart';
 import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
+import '../../features/stories/presentation/pages/add_story_page.dart';
+import '../../features/stories/presentation/pages/story_viewer_page.dart';
+import '../../features/stories/presentation/pages/story_viewer_args.dart';
 
 class AppRouter {
   AppRouter({
@@ -46,7 +49,7 @@ class AppRouter {
 
   late final GoRouter router = GoRouter(
     initialLocation: '/',
-    debugLogDiagnostics: true,
+    debugLogDiagnostics: false,
     routes: [
       GoRoute(
         path: '/',
@@ -101,6 +104,34 @@ class AppRouter {
       GoRoute(
         path: '/add-product',
         builder: (context, state) => const AddProductPage(),
+      ),
+      GoRoute(
+        path: '/add-story',
+        builder: (context, state) {
+          final isVideo = state.uri.queryParameters['video'] == '1';
+          return AddStoryPage(isVideoMode: isVideo);
+        },
+      ),
+      GoRoute(
+        path: '/stories',
+        builder: (context, state) {
+          final args = state.extra as StoryViewerArgs?;
+          if (args == null || args.groups.isEmpty) {
+            return Scaffold(
+              backgroundColor: Colors.black,
+              body: Center(
+                child: Text(
+                  'Нет историй',
+                  style: TextStyle(color: Colors.grey.shade400),
+                ),
+              ),
+            );
+          }
+          return StoryViewerPage(
+            groups: args.groups,
+            initialGroupIndex: args.initialGroupIndex,
+          );
+        },
       ),
       GoRoute(
         path: '/post/:id',

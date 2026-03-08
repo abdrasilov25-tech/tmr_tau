@@ -33,5 +33,6 @@ abstract class PostRepository {
     String? videoUrl,
     int? videoDurationSeconds,
   });
+  Future<void> deletePost(String postId, String userId);
   Future<void> deletePostComment(String commentId, String userId);
 }

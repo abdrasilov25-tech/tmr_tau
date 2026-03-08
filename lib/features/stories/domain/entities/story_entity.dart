@@ -8,6 +8,7 @@ class StoryEntity extends Equatable {
     required this.createdAt,
     required this.expiresAt,
     this.videoUrl,
+    this.caption,
     this.userName,
     this.userAvatarUrl,
   });
@@ -16,6 +17,7 @@ class StoryEntity extends Equatable {
   final String userId;
   final String imageUrl;
   final String? videoUrl;
+  final String? caption;
   final DateTime createdAt;
   final DateTime expiresAt;
   final String? userName;
@@ -25,5 +27,5 @@ class StoryEntity extends Equatable {
 
   @override
   List<Object?> get props =>
-      [id, userId, imageUrl, videoUrl, createdAt, expiresAt];
+      [id, userId, imageUrl, videoUrl, caption, createdAt, expiresAt];
 }

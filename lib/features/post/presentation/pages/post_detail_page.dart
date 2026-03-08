@@ -113,6 +113,37 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
   }
 
+  Future<void> _deletePost() async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Удалить новость?'),
+        content: const Text('Новость будет удалена без возможности восстановления.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(ctx).colorScheme.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.postRepository.deletePost(_post.id, authState.user.id);
+      if (!mounted) return;
+      context.pop(true);
+    } catch (e) {
+      if (mounted) {
+        final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $msg')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
@@ -139,6 +170,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     if (updated != null && mounted) setState(() => _post = updated);
                   },
                   tooltip: 'Редактировать',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _deletePost(),
+                  tooltip: 'Удалить',
                 ),
               ]
             : null,

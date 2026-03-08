@@ -306,6 +306,15 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
+  Future<void> deletePost(String postId, String userId) async {
+    await _client
+        .from(SupabaseConstants.postsTable)
+        .delete()
+        .eq('id', postId)
+        .eq('user_id', userId);
+  }
+
+  @override
   Future<void> deletePostComment(String commentId, String userId) async {
     await _client
         .from(SupabaseConstants.postCommentsTable)

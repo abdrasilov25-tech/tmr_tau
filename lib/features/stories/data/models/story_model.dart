@@ -8,6 +8,7 @@ class StoryModel extends StoryEntity {
     required super.createdAt,
     required super.expiresAt,
     super.videoUrl,
+    super.caption,
     super.userName,
     super.userAvatarUrl,
   });
@@ -18,6 +19,7 @@ class StoryModel extends StoryEntity {
       userId: json['user_id'] as String,
       imageUrl: json['image_url'] as String? ?? '',
       videoUrl: json['video_url'] as String?,
+      caption: json['caption'] as String?,
       createdAt: DateTime.parse(json['created_at'] as String),
       expiresAt: DateTime.parse(json['expires_at'] as String),
       userName: json['user_name'] as String?,
