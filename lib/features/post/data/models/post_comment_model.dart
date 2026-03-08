@@ -7,6 +7,8 @@ class PostCommentModel extends PostCommentEntity {
     required super.userId,
     required super.text,
     required super.createdAt,
+    super.parentId,
+    super.replyToUserName,
     super.userName,
     super.userAvatarUrl,
   });
@@ -18,6 +20,7 @@ class PostCommentModel extends PostCommentEntity {
       userId: json['user_id'] as String,
       text: json['text'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
+      parentId: json['parent_id'] as String?,
       userName: json['user_name'] as String?,
       userAvatarUrl: json['user_avatar'] as String?,
     );

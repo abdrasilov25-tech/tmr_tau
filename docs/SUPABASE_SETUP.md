@@ -82,6 +82,18 @@ flutter run --dart-define=SUPABASE_URL=https://ТВОЙ_ПРОЕКТ.supabase.co
 
 ---
 
+## Шаг 5.2. Ответы на комментарии (вложенные комментарии)
+
+Чтобы пользователи могли отвечать друг другу в комментариях к новостям, в таблице `post_comments` должна быть колонка `parent_id`. Она добавляется в **`supabase/schema.sql`** (секция post_comments). Если проект был создан до появления этой фичи, выполни в SQL Editor один запрос:
+
+```sql
+ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES post_comments(id) ON DELETE CASCADE;
+```
+
+После этого кнопка «Ответить» под комментарием будет сохранять ответы как вложенные.
+
+---
+
 ## Шаг 6. Проверить приложение
 
 1. Сохрани изменения в `main.dart`.

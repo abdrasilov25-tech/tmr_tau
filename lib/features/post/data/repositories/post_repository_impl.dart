@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/post_comment_entity.dart';
 import '../../domain/entities/post_entity.dart';
+import '../../domain/exceptions/post_comment_exceptions.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../models/post_comment_model.dart';
 import '../models/post_model.dart';
@@ -216,7 +217,7 @@ class PostRepositoryImpl implements PostRepository {
         .select('*, users!user_id(name, avatar)')
         .eq('post_id', postId)
         .order('created_at', ascending: true);
-    return (res as List)
+    final list = (res as List)
         .map((e) {
           final m = e as Map<String, dynamic>;
           final users = m['users'];
@@ -229,6 +230,11 @@ class PostRepositoryImpl implements PostRepository {
           return PostCommentModel.fromJson(row);
         })
         .toList();
+    final idToName = {for (final c in list) c.id: c.userName};
+    return list.map((c) {
+      if (c.parentId == null) return c as PostCommentEntity;
+      return c.copyWith(replyToUserName: idToName[c.parentId]);
+    }).toList();
   }
 
   @override
@@ -236,12 +242,28 @@ class PostRepositoryImpl implements PostRepository {
     required String postId,
     required String userId,
     required String text,
+    String? parentCommentId,
   }) async {
-    await _client.from(SupabaseConstants.postCommentsTable).insert({
+    final data = <String, dynamic>{
       'post_id': postId,
       'user_id': userId,
       'text': text,
-    });
+    };
+    if (parentCommentId != null && parentCommentId.isNotEmpty) {
+      data['parent_id'] = parentCommentId;
+    }
+    try {
+      await _client.from(SupabaseConstants.postCommentsTable).insert(data);
+    } catch (e) {
+      final msg = e.toString().toLowerCase();
+      if (data.containsKey('parent_id') && (msg.contains('parent_id') || (msg.contains('column') && msg.contains('exist')))) {
+        data.remove('parent_id');
+        await _client.from(SupabaseConstants.postCommentsTable).insert(data);
+        throw const PostCommentReplyFallbackException();
+      } else {
+        rethrow;
+      }
+    }
   }
 
   @override
