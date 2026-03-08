@@ -11,8 +11,10 @@ abstract class PostRepository {
   Future<List<PostEntity>> getPostsByUser(String userId, {String? currentUserId});
   Future<PostEntity> createPost({
     required String userId,
-    required String imageUrl,
+    String imageUrl = '',
     String caption = '',
+    String? videoUrl,
+    int videoDurationSeconds = 0,
   });
   Future<void> toggleLike(String postId, String userId);
   Future<void> toggleDislike(String postId, String userId);

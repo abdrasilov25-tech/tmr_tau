@@ -475,7 +475,8 @@ class _PostsGrid extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, index) {
         final p = posts[index];
-        if (p.imageUrl.isEmpty) {
+        final hasVideo = p.videoUrl != null && p.videoUrl!.isNotEmpty;
+        if (p.imageUrl.isEmpty && !hasVideo) {
           return Container(
             color: Colors.grey.shade200,
             child: const Center(
@@ -483,13 +484,30 @@ class _PostsGrid extends StatelessWidget {
             ),
           );
         }
-        return Image.network(
-          p.imageUrl,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Container(
-            color: Colors.grey.shade200,
-            child: const Icon(Icons.broken_image_outlined),
-          ),
+        if (hasVideo && p.imageUrl.isEmpty) {
+          return Container(
+            color: Colors.grey.shade300,
+            child: const Center(
+              child: Icon(Icons.videocam, size: 40, color: Colors.white70),
+            ),
+          );
+        }
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              p.imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.broken_image_outlined),
+              ),
+            ),
+            if (hasVideo)
+              const Center(
+                child: Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
+              ),
+          ],
         );
       },
     );

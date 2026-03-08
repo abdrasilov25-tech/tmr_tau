@@ -42,6 +42,8 @@ class PostRepositoryImpl implements PostRepository {
                 userId: p.userId,
                 imageUrl: p.imageUrl,
                 caption: p.caption,
+                videoUrl: p.videoUrl,
+                videoDurationSeconds: p.videoDurationSeconds,
                 createdAt: p.createdAt,
                 likesCount: p.likesCount,
                 dislikesCount: p.dislikesCount,
@@ -85,6 +87,8 @@ class PostRepositoryImpl implements PostRepository {
                 userId: p.userId,
                 imageUrl: p.imageUrl,
                 caption: p.caption,
+                videoUrl: p.videoUrl,
+                videoDurationSeconds: p.videoDurationSeconds,
                 createdAt: p.createdAt,
                 likesCount: p.likesCount,
                 dislikesCount: p.dislikesCount,
@@ -117,16 +121,23 @@ class PostRepositoryImpl implements PostRepository {
   @override
   Future<PostEntity> createPost({
     required String userId,
-    required String imageUrl,
+    String imageUrl = '',
     String caption = '',
+    String? videoUrl,
+    int videoDurationSeconds = 0,
   }) async {
+    final data = <String, dynamic>{
+      'user_id': userId,
+      'image_url': imageUrl,
+      'caption': caption,
+    };
+    if (videoUrl != null && videoUrl.isNotEmpty) {
+      data['video_url'] = videoUrl;
+      data['video_duration_seconds'] = videoDurationSeconds;
+    }
     final res = await _client
         .from(SupabaseConstants.postsTable)
-        .insert({
-          'user_id': userId,
-          'image_url': imageUrl,
-          'caption': caption,
-        })
+        .insert(data)
         .select('*, users!user_id(name, avatar)')
         .single();
     return _mapPost(Map<String, dynamic>.from(res as Map));
@@ -269,6 +280,8 @@ class PostRepositoryImpl implements PostRepository {
         userId: post.userId,
         imageUrl: post.imageUrl,
         caption: post.caption,
+        videoUrl: post.videoUrl,
+        videoDurationSeconds: post.videoDurationSeconds,
         createdAt: post.createdAt,
         likesCount: post.likesCount,
         dislikesCount: post.dislikesCount,

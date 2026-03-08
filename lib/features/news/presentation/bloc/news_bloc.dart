@@ -71,6 +71,8 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
           userId: p.userId,
           imageUrl: p.imageUrl,
           caption: p.caption,
+          videoUrl: p.videoUrl,
+          videoDurationSeconds: p.videoDurationSeconds,
           createdAt: p.createdAt,
           likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
           dislikesCount: p.dislikesCount,
