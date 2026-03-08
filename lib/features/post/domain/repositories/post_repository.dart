@@ -20,7 +20,7 @@ abstract class PostRepository {
   Future<void> toggleDislike(String postId, String userId);
   Future<void> toggleRepost(String postId, String userId);
   Future<List<PostCommentEntity>> getComments(String postId);
-  Future<PostCommentEntity> addComment({
+  Future<void> addComment({
     required String postId,
     required String userId,
     required String text,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -9,9 +10,14 @@ import '../../domain/entities/post_entity.dart';
 import '../../domain/repositories/post_repository.dart';
 
 class PostDetailPage extends StatefulWidget {
-  const PostDetailPage({super.key, required this.post});
+  const PostDetailPage({
+    super.key,
+    required this.post,
+    required this.postRepository,
+  });
 
   final PostEntity post;
+  final PostRepository postRepository;
 
   @override
   State<PostDetailPage> createState() => _PostDetailPageState();
@@ -39,7 +45,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
 
   Future<void> _loadComments() async {
     try {
-      final list = await context.read<PostRepository>().getComments(_post.id);
+      final list = await widget.postRepository.getComments(_post.id);
       if (mounted) setState(() {
         _comments = list;
         _commentsLoading = false;
@@ -62,7 +68,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
     setState(() => _sending = true);
     _commentController.clear();
     try {
-      await context.read<PostRepository>().addComment(
+      await widget.postRepository.addComment(
             postId: _post.id,
             userId: authState.user.id,
             text: text,
@@ -71,8 +77,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
       await _loadComments();
     } catch (e) {
       if (mounted) {
+        final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e')),
+          SnackBar(content: Text('Ошибка: $msg')),
         );
       }
     } finally {
@@ -95,7 +102,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
     );
     if (ok != true || !mounted) return;
     try {
-      await context.read<PostRepository>().deletePostComment(comment.id, authState.user.id);
+      await widget.postRepository.deletePostComment(comment.id, authState.user.id);
       if (!mounted) return;
       setState(() {
         _comments = _comments.where((c) => c.id != comment.id).toList();

@@ -77,6 +77,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
       profileRepository: _profileRepository,
       notificationsRepository: _notificationsRepository,
       postRepository: _postRepository,
+      commentsRepository: _commentsRepository,
     );
   }
 
