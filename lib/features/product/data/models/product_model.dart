@@ -1,5 +1,14 @@
 import '../../domain/entities/product_entity.dart';
 
+String _categoryNameFromJson(Map<String, dynamic> json) {
+  if (json['category'] != null && json['category'] is String) {
+    return json['category'] as String;
+  }
+  final cat = json['categories'];
+  if (cat is Map && cat['name'] != null) return cat['name'] as String;
+  return 'general';
+}
+
 class ProductModel extends ProductEntity {
   const ProductModel({
     required super.id,
@@ -9,6 +18,7 @@ class ProductModel extends ProductEntity {
     required super.imageUrl,
     required super.sellerId,
     super.category = 'general',
+    super.categoryId,
     super.likesCount = 0,
     super.commentsCount = 0,
     super.sellerName,
@@ -27,7 +37,8 @@ class ProductModel extends ProductEntity {
       price: (json['price'] as num).toDouble(),
       imageUrl: json['image_url'] as String? ?? '',
       sellerId: json['seller_id'] as String,
-      category: json['category'] as String? ?? 'general',
+      category: json['category'] as String? ?? _categoryNameFromJson(json),
+      categoryId: json['category_id'] as String?,
       likesCount: json['likes_count'] as int? ?? 0,
       commentsCount: json['comments_count'] as int? ?? 0,
       sellerName: json['seller_name'] as String?,

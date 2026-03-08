@@ -9,6 +9,7 @@ class ProductEntity extends Equatable {
     required this.imageUrl,
     required this.sellerId,
     this.category = 'general',
+    this.categoryId,
     this.likesCount = 0,
     this.commentsCount = 0,
     this.sellerName,
@@ -26,6 +27,7 @@ class ProductEntity extends Equatable {
   final String imageUrl;
   final String sellerId;
   final String category;
+  final String? categoryId;
   final int likesCount;
   final int commentsCount;
   final String? sellerName;
@@ -46,6 +48,7 @@ class ProductEntity extends Equatable {
         imageUrl,
         sellerId,
         category,
+        categoryId,
         likesCount,
         commentsCount,
         sellerName,

@@ -3,6 +3,7 @@ class SupabaseConstants {
   SupabaseConstants._();
 
   static const String usersTable = 'users';
+  static const String categoriesTable = 'categories';
   static const String productsTable = 'products';
   static const String productLikesTable = 'product_likes';
   static const String productCommentsTable = 'product_comments';

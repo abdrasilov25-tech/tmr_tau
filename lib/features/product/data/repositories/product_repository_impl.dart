@@ -16,7 +16,7 @@ class ProductRepositoryImpl implements ProductRepository {
   }) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .order('created_at', ascending: false)
         .range(offset, offset + limit - 1);
     final list = _mapProducts(res as List);
@@ -28,7 +28,7 @@ class ProductRepositoryImpl implements ProductRepository {
       {String? currentUserId}) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .eq('id', id)
         .maybeSingle();
     if (res == null) return null;
@@ -42,7 +42,7 @@ class ProductRepositoryImpl implements ProductRepository {
       {String? currentUserId}) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .eq('seller_id', sellerId)
         .order('created_at', ascending: false);
     final list = _mapProducts(res as List);
@@ -57,7 +57,7 @@ class ProductRepositoryImpl implements ProductRepository {
     }
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .or('title.ilike.%$query%,description.ilike.%$query%')
         .order('created_at', ascending: false)
         .limit(limit);
@@ -72,7 +72,7 @@ class ProductRepositoryImpl implements ProductRepository {
   }) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, seller_id, created_at, users!seller_id(name, avatar)')
+        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .order('created_at', ascending: false)
         .limit(limit);
     final list = _mapProducts(res as List);
@@ -86,16 +86,45 @@ class ProductRepositoryImpl implements ProductRepository {
     required double price,
     String imageUrl = '',
     String category = 'general',
+    String? categoryId,
     required String sellerId,
   }) async {
-    await _client.from(SupabaseConstants.productsTable).insert({
+    final data = <String, dynamic>{
       'title': title,
       'description': description,
       'price': price,
       'image_url': imageUrl,
       'category': category,
       'seller_id': sellerId,
-    });
+    };
+    if (categoryId != null) data['category_id'] = categoryId;
+    await _client.from(SupabaseConstants.productsTable).insert(data);
+  }
+
+  @override
+  Future<void> updateProduct({
+    required String productId,
+    required String title,
+    required String description,
+    required double price,
+    required String imageUrl,
+    String category = 'general',
+    String? categoryId,
+  }) async {
+    final data = <String, dynamic>{
+      'title': title,
+      'description': description,
+      'price': price,
+      'image_url': imageUrl,
+      'category': category,
+    };
+    if (categoryId != null) data['category_id'] = categoryId;
+    await _client.from(SupabaseConstants.productsTable).update(data).eq('id', productId);
+  }
+
+  @override
+  Future<void> deleteProduct(String productId) async {
+    await _client.from(SupabaseConstants.productsTable).delete().eq('id', productId);
   }
 
   @override
@@ -130,14 +159,18 @@ class ProductRepositoryImpl implements ProductRepository {
     if (users is Map) {
       userMap = Map<String, dynamic>.from(users);
     }
+    final categories = json['categories'];
+    final categoryName = json['category'] ?? (categories is Map ? (categories as Map)['name'] : null);
     final row = Map<String, dynamic>.from(json)
       ..remove('users')
+      ..remove('categories')
       ..['seller_name'] = userMap?['name']
       ..['seller_avatar'] = userMap?['avatar']
       ..['seller_is_verified'] = userMap?['is_verified'] ?? false
       ..['likes_count'] = json['likes_count'] ?? 0
       ..['comments_count'] = json['comments_count'] ?? 0
-      ..['category'] = json['category'] ?? 'general';
+      ..['category'] = categoryName ?? 'general'
+      ..['category_id'] = json['category_id'];
     return ProductModel.fromJson(row);
   }
 
@@ -148,20 +181,26 @@ class ProductRepositoryImpl implements ProductRepository {
     if (currentUserId == null || list.isEmpty) return list;
     final ids = list.map((e) => e.id).toList();
     final sellerIds = list.map((e) => e.sellerId).toSet().toList();
-    final likes = await _client
-        .from(SupabaseConstants.productLikesTable)
-        .select('product_id')
-        .eq('user_id', currentUserId)
-        .inFilter('product_id', ids);
-    final follows = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('following_id')
-        .eq('follower_id', currentUserId)
-        .inFilter('following_id', sellerIds);
-    final likedIds =
-        (likes as List).map((e) => (e as Map)['product_id'] as String).toSet();
-    final followingIds =
-        (follows as List).map((e) => (e as Map)['following_id'] as String).toSet();
+    Set<String> likedIds = {};
+    Set<String> followingIds = {};
+    try {
+      final likes = await _client
+          .from(SupabaseConstants.productLikesTable)
+          .select('product_id')
+          .eq('user_id', currentUserId)
+          .inFilter('product_id', ids);
+      likedIds =
+          (likes as List).map((e) => (e as Map)['product_id'] as String).toSet();
+    } catch (_) {}
+    try {
+      final follows = await _client
+          .from(SupabaseConstants.followersTable)
+          .select('following_id')
+          .eq('follower_id', currentUserId)
+          .inFilter('following_id', sellerIds);
+      followingIds =
+          (follows as List).map((e) => (e as Map)['following_id'] as String).toSet();
+    } catch (_) {}
     return list
         .map((p) => ProductModel(
               id: p.id,
@@ -171,6 +210,7 @@ class ProductRepositoryImpl implements ProductRepository {
               imageUrl: p.imageUrl,
               sellerId: p.sellerId,
               category: p.category,
+              categoryId: p.categoryId,
               likesCount: p.likesCount,
               commentsCount: p.commentsCount,
               sellerName: p.sellerName,
