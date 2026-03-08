@@ -232,25 +232,16 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
-  Future<PostCommentEntity> addComment({
+  Future<void> addComment({
     required String postId,
     required String userId,
     required String text,
   }) async {
-    final res = await _client
-        .from(SupabaseConstants.postCommentsTable)
-        .insert({'post_id': postId, 'user_id': userId, 'text': text})
-        .select('*, users!user_id(name, avatar)')
-        .single();
-    final m = Map<String, dynamic>.from(res as Map);
-    final users = m['users'];
-    Map<String, dynamic>? u;
-    if (users is Map) u = Map<String, dynamic>.from(users);
-    final row = Map<String, dynamic>.from(m)
-      ..remove('users')
-      ..['user_name'] = u?['name']
-      ..['user_avatar'] = u?['avatar'];
-    return PostCommentModel.fromJson(row);
+    await _client.from(SupabaseConstants.postCommentsTable).insert({
+      'post_id': postId,
+      'user_id': userId,
+      'text': text,
+    });
   }
 
   @override

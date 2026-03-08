@@ -11,26 +11,35 @@ class CommentsRepositoryImpl implements CommentsRepository {
   @override
   Future<List<ProductCommentEntity>> getProductComments(
       String productId) async {
-    final res = await _client
-        .from(SupabaseConstants.productCommentsTable)
-        .select('*, users!user_id(name, avatar)')
-        .eq('product_id', productId)
-        .order('created_at', ascending: true);
-    return (res as List).map((e) => _mapComment(e as Map<String, dynamic>)).toList();
+    try {
+      final res = await _client
+          .from(SupabaseConstants.productCommentsTable)
+          .select('*, users!user_id(name, avatar)')
+          .eq('product_id', productId)
+          .order('created_at', ascending: true);
+      return (res as List).map((e) => _mapComment(e as Map<String, dynamic>)).toList();
+    } catch (_) {
+      // Fallback: load without join (e.g. if RLS blocks users or relation name differs)
+      final res = await _client
+          .from(SupabaseConstants.productCommentsTable)
+          .select()
+          .eq('product_id', productId)
+          .order('created_at', ascending: true);
+      return (res as List).map((e) => _mapComment(e as Map<String, dynamic>)).toList();
+    }
   }
 
   @override
-  Future<ProductCommentEntity> addComment({
+  Future<void> addComment({
     required String productId,
     required String userId,
     required String text,
   }) async {
-    final res = await _client
-        .from(SupabaseConstants.productCommentsTable)
-        .insert({'product_id': productId, 'user_id': userId, 'text': text})
-        .select('*, users!user_id(name, avatar)')
-        .single();
-    return _mapComment(Map<String, dynamic>.from(res as Map));
+    await _client.from(SupabaseConstants.productCommentsTable).insert({
+      'product_id': productId,
+      'user_id': userId,
+      'text': text,
+    });
   }
 
   @override

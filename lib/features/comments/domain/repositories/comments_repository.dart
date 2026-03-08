@@ -2,7 +2,7 @@ import '../entities/product_comment_entity.dart';
 
 abstract class CommentsRepository {
   Future<List<ProductCommentEntity>> getProductComments(String productId);
-  Future<ProductCommentEntity> addComment({
+  Future<void> addComment({
     required String productId,
     required String userId,
     required String text,

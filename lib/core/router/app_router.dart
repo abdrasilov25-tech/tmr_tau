@@ -10,6 +10,7 @@ import '../../features/feed/presentation/pages/search_page.dart';
 import '../../features/news/presentation/pages/news_feed_page.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
 import '../../features/post/domain/entities/post_entity.dart';
+import '../../features/comments/domain/repositories/comments_repository.dart';
 import '../../features/post/domain/repositories/post_repository.dart';
 import '../../features/product/domain/entities/product_entity.dart';
 import '../../features/post/presentation/pages/add_post_page.dart';
@@ -33,6 +34,7 @@ class AppRouter {
     required this.profileRepository,
     required this.notificationsRepository,
     required this.postRepository,
+    required this.commentsRepository,
   });
 
   final FeedRepository feedRepository;
@@ -40,6 +42,7 @@ class AppRouter {
   final ProfileRepository profileRepository;
   final NotificationsRepository notificationsRepository;
   final PostRepository postRepository;
+  final CommentsRepository commentsRepository;
 
   late final GoRouter router = GoRouter(
     initialLocation: '/',
@@ -66,7 +69,10 @@ class AppRouter {
               body: Center(child: Text('Товар не найден')),
             );
           }
-          return ProductDetailPage(product: product);
+          return ProductDetailPage(
+            product: product,
+            commentsRepository: commentsRepository,
+          );
         },
         routes: [
           GoRoute(
@@ -105,7 +111,10 @@ class AppRouter {
               body: Center(child: Text('Новость не найдена')),
             );
           }
-          return PostDetailPage(post: post);
+          return PostDetailPage(
+            post: post,
+            postRepository: postRepository,
+          );
         },
         routes: [
           GoRoute(

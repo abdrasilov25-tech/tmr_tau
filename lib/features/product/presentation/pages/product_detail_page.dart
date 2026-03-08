@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
@@ -11,9 +12,14 @@ import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
 
 class ProductDetailPage extends StatefulWidget {
-  const ProductDetailPage({super.key, required this.product});
+  const ProductDetailPage({
+    super.key,
+    required this.product,
+    required this.commentsRepository,
+  });
 
   final ProductEntity product;
+  final CommentsRepository commentsRepository;
 
   @override
   State<ProductDetailPage> createState() => _ProductDetailPageState();
@@ -41,7 +47,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
 
   Future<void> _loadComments() async {
     try {
-      final list = await context.read<CommentsRepository>().getProductComments(_product.id);
+      final list = await widget.commentsRepository.getProductComments(_product.id);
       if (mounted) setState(() {
         _comments = list;
         _commentsLoading = false;
@@ -64,7 +70,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     setState(() => _sending = true);
     _commentController.clear();
     try {
-      await context.read<CommentsRepository>().addComment(
+      await widget.commentsRepository.addComment(
             productId: _product.id,
             userId: authState.user.id,
             text: text,
@@ -73,8 +79,9 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       await _loadComments();
     } catch (e) {
       if (mounted) {
+        final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e')),
+          SnackBar(content: Text('Ошибка: $msg')),
         );
       }
     } finally {
@@ -97,7 +104,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     );
     if (ok != true || !context.mounted) return;
     try {
-      await context.read<CommentsRepository>().deleteComment(comment.id, authState.user.id);
+      await widget.commentsRepository.deleteComment(comment.id, authState.user.id);
       if (!mounted) return;
       setState(() => _comments = _comments.where((c) => c.id != comment.id).toList());
     } catch (e) {

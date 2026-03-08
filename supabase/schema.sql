@@ -103,9 +103,10 @@ create table if not exists public.products (
   comments_count int default 0,
   created_at timestamptz default now()
 );
--- Если таблица уже была без category / category_id — добавить колонки
+-- Если таблица уже была без category / category_id / comments_count — добавить колонки
 alter table public.products add column if not exists category text default 'general';
 alter table public.products add column if not exists category_id uuid references public.categories(id) on delete set null;
+alter table public.products add column if not exists comments_count int default 0;
 
 -- ============== PRODUCT LIKES ==============
 create table if not exists public.product_likes (
@@ -163,6 +164,10 @@ create table if not exists public.posts (
   reposts_count int default 0,
   created_at timestamptz default now()
 );
+-- Если таблица posts уже была без comments_count / dislikes_count / reposts_count
+alter table public.posts add column if not exists comments_count int default 0;
+alter table public.posts add column if not exists dislikes_count int default 0;
+alter table public.posts add column if not exists reposts_count int default 0;
 
 create table if not exists public.post_likes (
   post_id uuid not null references public.posts(id) on delete cascade,
