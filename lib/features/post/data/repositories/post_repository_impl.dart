@@ -295,11 +295,18 @@ class PostRepositoryImpl implements PostRepository {
     String? imageUrl,
     String? videoUrl,
     int? videoDurationSeconds,
+    bool clearImage = false,
+    bool clearVideo = false,
   }) async {
     final data = <String, dynamic>{};
     if (caption != null) data['caption'] = caption;
     if (imageUrl != null) data['image_url'] = imageUrl;
+    if (clearImage) data['image_url'] = '';
     if (videoUrl != null) data['video_url'] = videoUrl;
+    if (clearVideo) {
+      data['video_url'] = null;
+      data['video_duration_seconds'] = 0;
+    }
     if (videoDurationSeconds != null) data['video_duration_seconds'] = videoDurationSeconds;
     if (data.isEmpty) return;
     await _client.from(SupabaseConstants.postsTable).update(data).eq('id', postId);

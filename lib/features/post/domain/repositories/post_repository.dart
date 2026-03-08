@@ -32,6 +32,8 @@ abstract class PostRepository {
     String? imageUrl,
     String? videoUrl,
     int? videoDurationSeconds,
+    bool clearImage = false,
+    bool clearVideo = false,
   });
   Future<void> deletePost(String postId, String userId);
   Future<void> deletePostComment(String commentId, String userId);
