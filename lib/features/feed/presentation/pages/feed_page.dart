@@ -194,8 +194,8 @@ class _FeedAppBar extends StatelessWidget {
           ),
           const Spacer(),
           IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: Colors.white),
-            onPressed: () => context.go('/home/notifications'),
+            icon: const Icon(Icons.article_outlined, color: Colors.white),
+            onPressed: () => context.go('/home/news'),
           ),
         ],
       ),

@@ -66,6 +66,50 @@ create table if not exists public.stories (
   expires_at timestamptz not null default (now() + interval '24 hours')
 );
 
+-- ============== POSTS (новости, в стиле Threads — жители Темиртау) ==============
+create table if not exists public.posts (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  image_url text default '',
+  video_url text default '',
+  video_duration_seconds int default 0,
+  caption text default '',
+  likes_count int default 0,
+  comments_count int default 0,
+  dislikes_count int default 0,
+  reposts_count int default 0,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.post_likes (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (post_id, user_id)
+);
+
+create table if not exists public.post_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  text text not null,
+  created_at timestamptz default now()
+);
+
+create table if not exists public.post_dislikes (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (post_id, user_id)
+);
+
+create table if not exists public.reposts (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (post_id, user_id)
+);
+
 -- ============== NOTIFICATIONS ==============
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
@@ -105,8 +149,31 @@ alter table public.product_comments enable row level security;
 alter table public.followers enable row level security;
 alter table public.stories enable row level security;
 alter table public.notifications enable row level security;
+alter table public.posts enable row level security;
+alter table public.post_likes enable row level security;
+alter table public.post_comments enable row level security;
+alter table public.post_dislikes enable row level security;
+alter table public.reposts enable row level security;
 alter table public.favorites enable row level security;
 alter table public.orders enable row level security;
+
+create policy "Posts select" on public.posts for select using (true);
+create policy "Posts insert" on public.posts for insert with check (auth.uid() = user_id);
+create policy "Posts update own" on public.posts for update using (auth.uid() = user_id);
+create policy "Posts delete own" on public.posts for delete using (auth.uid() = user_id);
+
+create policy "Post likes select" on public.post_likes for select using (true);
+create policy "Post likes all" on public.post_likes for all using (auth.uid() = user_id);
+
+create policy "Post comments select" on public.post_comments for select using (true);
+create policy "Post comments insert" on public.post_comments for insert with check (auth.uid() = user_id);
+create policy "Post comments delete own" on public.post_comments for delete using (auth.uid() = user_id);
+
+create policy "Post dislikes select" on public.post_dislikes for select using (true);
+create policy "Post dislikes all" on public.post_dislikes for all using (auth.uid() = user_id);
+
+create policy "Reposts select" on public.reposts for select using (true);
+create policy "Reposts all" on public.reposts for all using (auth.uid() = user_id);
 
 create policy "Users select" on public.users for select using (true);
 create policy "Users update own" on public.users for update using (auth.uid() = id);
@@ -182,6 +249,36 @@ drop trigger if exists on_product_comment on public.product_comments;
 create trigger on_product_comment after insert or delete on public.product_comments for each row execute procedure public.update_product_comments_count();
 drop trigger if exists on_follower_change on public.followers;
 create trigger on_follower_change after insert or delete on public.followers for each row execute procedure public.update_followers_count();
+
+-- ============== TRIGGERS: post likes/comments count ==============
+create or replace function public.update_post_likes_count()
+returns trigger as $$
+begin
+  if tg_op = 'INSERT' then
+    update public.posts set likes_count = likes_count + 1 where id = new.post_id;
+  elsif tg_op = 'DELETE' then
+    update public.posts set likes_count = greatest(0, likes_count - 1) where id = old.post_id;
+  end if;
+  return null;
+end;
+$$ language plpgsql security definer;
+
+create or replace function public.update_post_comments_count()
+returns trigger as $$
+begin
+  if tg_op = 'INSERT' then
+    update public.posts set comments_count = comments_count + 1 where id = new.post_id;
+  elsif tg_op = 'DELETE' then
+    update public.posts set comments_count = greatest(0, comments_count - 1) where id = old.post_id;
+  end if;
+  return null;
+end;
+$$ language plpgsql security definer;
+
+drop trigger if exists on_post_like on public.post_likes;
+create trigger on_post_like after insert or delete on public.post_likes for each row execute procedure public.update_post_likes_count();
+drop trigger if exists on_post_comment on public.post_comments;
+create trigger on_post_comment after insert or delete on public.post_comments for each row execute procedure public.update_post_comments_count();
 
 -- ============== Create profile on signup ==============
 create or replace function public.handle_new_user()
