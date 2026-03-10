@@ -455,7 +455,7 @@ class _ProductCard extends StatelessWidget {
                   TextButton(
                     onPressed: onFollow,
                     child: Text(
-                      product.isFollowingSeller ? 'Отписка' : 'Подписаться',
+                      product.isFollowingSeller ? 'Отписаться' : 'Подписаться',
                       style: TextStyle(
                         color: product.isFollowingSeller
                             ? Colors.grey

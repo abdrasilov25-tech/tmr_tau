@@ -7,6 +7,7 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -114,19 +115,32 @@ class _SellerProfileView extends StatelessWidget {
                 if (context.read<AuthBloc>().state is AuthAuthenticated &&
                     (context.read<AuthBloc>().state as AuthAuthenticated).user.id != profile.id) ...[
                   const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: () {
-                      final uid = (context.read<AuthBloc>().state as AuthAuthenticated).user.id;
-                      context.read<ProfileBloc>().add(
-                            ProfileToggleFollow(
-                              followerId: uid,
-                              followingId: profile.id,
-                            ),
-                          );
-                    },
-                    child: Text(
-                      profile.isFollowingByMe ? 'Отписаться' : 'Подписаться',
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton(
+                          onPressed: () {
+                            final uid = (context.read<AuthBloc>().state as AuthAuthenticated).user.id;
+                            context.read<ProfileBloc>().add(
+                                  ProfileToggleFollow(
+                                    followerId: uid,
+                                    followingId: profile.id,
+                                  ),
+                                );
+                          },
+                          child: Text(
+                            profile.isFollowingByMe ? 'Отписаться' : 'Подписаться',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: StartChatButton(
+                          peerId: profile.id,
+                          peerName: profile.name,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],

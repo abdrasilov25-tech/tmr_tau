@@ -1,8 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
+import '../../../../core/widgets/add_choice_sheet.dart';
+import '../../../../core/constants/supabase_constants.dart';
 import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
@@ -23,11 +28,70 @@ class _MyProfilePageState extends State<MyProfilePage> {
   List<PostEntity> _posts = [];
   bool _loading = true;
   int _tabIndex = 0;
+  bool _updatingAvatar = false;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  Future<void> _changeAvatar() async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы изменить аватар')),
+      );
+      return;
+    }
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+    setState(() => _updatingAvatar = true);
+    try {
+      final file = File(picked.path);
+      final ext = file.path.split('.').last;
+      final fileName =
+          '${authState.user.id}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      // Храним аватары в отдельном бакете avatars.
+      final storageRef = supa.Supabase.instance.client.storage
+          .from(SupabaseConstants.bucketAvatars);
+      await storageRef.upload(
+        fileName,
+        file,
+        fileOptions: const supa.FileOptions(upsert: true),
+      );
+      final publicUrl = storageRef.getPublicUrl(fileName);
+
+      await context.read<ProfileRepository>().updateProfile(
+            userId: authState.user.id,
+            avatarUrl: publicUrl,
+          );
+
+      if (mounted) {
+        context.read<AuthBloc>().add(const AuthCheckRequested());
+        await _load();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Аватар обновлён')),
+        );
+      }
+    } catch (e, st) {
+      if (!mounted) return;
+      String message = 'Не удалось обновить аватар: $e';
+      if (e is supa.StorageException) {
+        message = 'Storage error: ${e.message ?? e.toString()}';
+      } else if (e is supa.PostgrestException) {
+        message = 'Postgrest error: ${e.message ?? e.toString()}';
+      }
+      // Для отладки можно смотреть полный текст ошибки в консоли.
+      // ignore: avoid_print
+      print('Avatar upload error: $e\n$st');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } finally {
+      if (mounted) setState(() => _updatingAvatar = false);
+    }
   }
 
   Future<void> _load() async {
@@ -98,11 +162,43 @@ class _MyProfilePageState extends State<MyProfilePage> {
     );
   }
 
+  void _showStoryChoice() {
+    final state = context.read<AuthBloc>().state;
+    if (state is! AuthAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы добавить историю')),
+      );
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => AddChoiceSheet(
+        onProuvnut: () {
+          Navigator.pop(sheetContext);
+          context.push('/add-news');
+        },
+        onStory: () async {
+          Navigator.pop(sheetContext);
+          await context.push('/add-story');
+        },
+        onVideo: () async {
+          Navigator.pop(sheetContext);
+          await context.push('/add-story?video=1');
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.add_circle_outline),
+          onPressed: _showStoryChoice,
+        ),
         backgroundColor: Colors.white,
         elevation: 0,
         title: Text(
@@ -157,6 +253,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
             onTabChanged: (i) => setState(() => _tabIndex = i),
             onRefresh: _load,
             onAddTap: _showAddChoice,
+            onAvatarTap: _changeAvatar,
+            updatingAvatar: _updatingAvatar,
           );
         },
       ),
@@ -183,6 +281,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
               onTap: () {
                 Navigator.pop(context);
                 context.push('/orders');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.chat_bubble_outline),
+              title: const Text('Мои чаты'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/chats');
               },
             ),
             ListTile(
@@ -226,6 +332,8 @@ class _ProfileContent extends StatelessWidget {
     required this.onTabChanged,
     required this.onRefresh,
     required this.onAddTap,
+    required this.onAvatarTap,
+    required this.updatingAvatar,
   });
 
   final AppUser user;
@@ -235,6 +343,8 @@ class _ProfileContent extends StatelessWidget {
   final ValueChanged<int> onTabChanged;
   final VoidCallback onRefresh;
   final VoidCallback onAddTap;
+  final VoidCallback onAvatarTap;
+  final bool updatingAvatar;
 
   int get _publicationsCount =>
       (profile?.products.length ?? 0) + posts.length;
@@ -250,10 +360,66 @@ class _ProfileContent extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               child: Column(
                 children: [
-                  CachedAvatar(
-                    imageUrl: user.avatarUrl ?? profile?.avatarUrl,
-                    radius: 48,
-                    fallbackText: user.name ?? user.email,
+                  Stack(
+                    alignment: Alignment.bottomRight,
+                    children: [
+                      GestureDetector(
+                        onTap: () {
+                          final imageUrl = user.avatarUrl ?? profile?.avatarUrl;
+                          if (imageUrl == null || imageUrl.isEmpty) return;
+                          showDialog<void>(
+                            context: context,
+                            builder: (ctx) => Dialog(
+                              backgroundColor: Colors.black,
+                              insetPadding: const EdgeInsets.all(24),
+                              child: AspectRatio(
+                                aspectRatio: 1,
+                                child: InteractiveViewer(
+                                  child: Image.network(
+                                    imageUrl,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                        child: CachedAvatar(
+                          imageUrl: user.avatarUrl ?? profile?.avatarUrl,
+                          radius: 48,
+                          fallbackText: user.name ?? user.email,
+                        ),
+                      ),
+                      Positioned(
+                        right: 2,
+                        bottom: 2,
+                        child: GestureDetector(
+                          onTap: updatingAvatar ? null : onAvatarTap,
+                          child: Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.blueAccent,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: updatingAvatar
+                                ? const Padding(
+                                    padding: EdgeInsets.all(3),
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                                    ),
+                                  )
+                                : const Icon(
+                                    Icons.add,
+                                    size: 14,
+                                    color: Colors.white,
+                                  ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Text(
