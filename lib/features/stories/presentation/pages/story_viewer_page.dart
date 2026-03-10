@@ -72,18 +72,25 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
     final currentStoryPage = storyController.page?.round() ?? 0;
 
     if (currentStoryPage < group.stories.length - 1) {
-      storyController.nextPage(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-      );
+      if (storyController.hasClients) {
+        storyController.nextPage(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        );
+      }
       _startTimer();
     } else if (_currentGroupIndex < widget.groups.length - 1) {
       _currentGroupIndex++;
-      _groupPageController.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-      _storyPageControllers[_currentGroupIndex].jumpToPage(0);
+      if (_groupPageController.hasClients) {
+        _groupPageController.nextPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+      final nextController = _storyPageControllers[_currentGroupIndex];
+      if (nextController.hasClients) {
+        nextController.jumpToPage(0);
+      }
       _startTimer();
     } else {
       context.pop();
@@ -95,19 +102,26 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
     final currentStoryPage = storyController.page?.round() ?? 0;
 
     if (currentStoryPage > 0) {
-      storyController.previousPage(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeInOut,
-      );
+      if (storyController.hasClients) {
+        storyController.previousPage(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+        );
+      }
       _startTimer();
     } else if (_currentGroupIndex > 0) {
       _currentGroupIndex--;
       final prevGroup = widget.groups[_currentGroupIndex];
-      _groupPageController.previousPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
-      _storyPageControllers[_currentGroupIndex].jumpToPage(prevGroup.stories.length - 1);
+      if (_groupPageController.hasClients) {
+        _groupPageController.previousPage(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+        );
+      }
+      final prevController = _storyPageControllers[_currentGroupIndex];
+      if (prevController.hasClients) {
+        prevController.jumpToPage(prevGroup.stories.length - 1);
+      }
       _startTimer();
     } else {
       context.pop();
