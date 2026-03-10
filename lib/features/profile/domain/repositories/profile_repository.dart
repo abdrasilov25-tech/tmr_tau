@@ -7,6 +7,8 @@ abstract class ProfileRepository {
   });
   /// Verified/official accounts (e.g. tmr_tau official page), for search top.
   Future<List<SellerProfileEntity>> getVerifiedUsers();
+  /// Users that the given user is following.
+  Future<List<SellerProfileEntity>> getFollowingUsers(String followerId);
   Future<void> toggleFollow(String followerId, String followingId);
   Future<void> updateProfile({
     required String userId,

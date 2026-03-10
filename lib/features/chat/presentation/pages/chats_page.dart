@@ -71,7 +71,7 @@ class _ChatsPageState extends State<ChatsPage> {
             .eq('id', peerId)
             .maybeSingle();
         if (userRes == null) continue;
-        final json = userRes as Map<String, dynamic>;
+        final json = userRes;
         final name = json['name'] as String?;
         final avatar = json['avatar'] as String?;
         final existing = threadsByPeer[peerId];

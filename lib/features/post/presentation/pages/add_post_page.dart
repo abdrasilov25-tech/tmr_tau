@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
@@ -23,7 +22,6 @@ class AddPostPage extends StatefulWidget {
 class _AddPostPageState extends State<AddPostPage> {
   File? _image;
   File? _video;
-  _MediaType _mediaType = _MediaType.photo;
   final _captionController = TextEditingController();
   bool _loading = false;
   static const int _maxVideoSeconds = 120; // 2 минуты
@@ -116,7 +114,6 @@ class _AddPostPageState extends State<AddPostPage> {
       setState(() {
         _image = File(x.path);
         _video = null;
-        _mediaType = _MediaType.photo;
       });
     }
   }
@@ -199,7 +196,6 @@ class _AddPostPageState extends State<AddPostPage> {
     setState(() {
       _video = file;
       _image = null;
-      _mediaType = _MediaType.video;
       _loading = false;
     });
   }

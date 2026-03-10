@@ -19,6 +19,19 @@ class ProfileRepositoryImpl implements ProfileRepository {
         .maybeSingle();
     if (userRes == null) return null;
     final userMap = Map<String, dynamic>.from(userRes as Map);
+
+    // Считаем количество подписчиков и подписок на основе таблицы followers,
+    // чтобы цифры всегда были актуальными.
+    final followersRes = await _client
+        .from(SupabaseConstants.followersTable)
+        .select('follower_id')
+        .eq('following_id', sellerId);
+    final followingRes = await _client
+        .from(SupabaseConstants.followersTable)
+        .select('following_id')
+        .eq('follower_id', sellerId);
+    final followersCount = (followersRes as List).length;
+    final followingCount = (followingRes as List).length;
     final productsRes = await _client
         .from(SupabaseConstants.productsTable)
         .select('*, users!seller_id(name, avatar)')
@@ -42,8 +55,8 @@ class ProfileRepositoryImpl implements ProfileRepository {
       name: userMap['name'] as String? ?? 'Seller',
       avatarUrl: userMap['avatar'] as String?,
       bio: userMap['bio'] as String?,
-      followersCount: userMap['followers_count'] as int? ?? 0,
-      followingCount: userMap['following_count'] as int? ?? 0,
+      followersCount: followersCount,
+      followingCount: followingCount,
       isFollowingByMe: isFollowingByMe,
       products: products,
       isVerified: userMap['is_verified'] as bool? ?? false,
@@ -80,24 +93,76 @@ class ProfileRepositoryImpl implements ProfileRepository {
   }
 
   @override
-  Future<void> toggleFollow(String followerId, String followingId) async {
-    final existing = await _client
+  Future<List<SellerProfileEntity>> getFollowingUsers(String followerId) async {
+    // Сначала берём всех, на кого подписан пользователь.
+    final followersRes = await _client
         .from(SupabaseConstants.followersTable)
-        .select('follower_id')
-        .eq('follower_id', followerId)
-        .eq('following_id', followingId)
-        .maybeSingle();
-    if (existing != null) {
-      await _client
+        .select('following_id')
+        .eq('follower_id', followerId);
+    final followersList = followersRes as List;
+    if (followersList.isEmpty) return [];
+
+    final followingIds = followersList
+        .map((e) => (e as Map)['following_id'] as String)
+        .toSet()
+        .toList();
+
+    // Для простоты и совместимости без in_ загружаем пользователей по одному.
+    final List<SellerProfileEntity> result = [];
+    for (final id in followingIds) {
+      final userRes = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar, bio, followers_count')
+          .eq('id', id)
+          .maybeSingle();
+      if (userRes == null) continue;
+      final m = Map<String, dynamic>.from(userRes as Map);
+      result.add(
+        SellerProfileEntity(
+          id: m['id'] as String,
+          name: m['name'] as String? ?? 'User',
+          avatarUrl: m['avatar'] as String?,
+          bio: m['bio'] as String?,
+          followersCount: m['followers_count'] as int? ?? 0,
+          followingCount: 0,
+          isFollowingByMe: true,
+          products: const [],
+          isVerified: false,
+        ),
+      );
+    }
+    return result;
+  }
+
+  @override
+  Future<void> toggleFollow(String followerId, String followingId) async {
+    try {
+      final existing = await _client
           .from(SupabaseConstants.followersTable)
-          .delete()
+          .select('follower_id')
           .eq('follower_id', followerId)
-          .eq('following_id', followingId);
-    } else {
-      await _client.from(SupabaseConstants.followersTable).insert({
-        'follower_id': followerId,
-        'following_id': followingId,
-      });
+          .eq('following_id', followingId)
+          .maybeSingle();
+      if (existing != null) {
+        await _client
+            .from(SupabaseConstants.followersTable)
+            .delete()
+            .eq('follower_id', followerId)
+            .eq('following_id', followingId);
+      } else {
+        await _client.from(SupabaseConstants.followersTable).insert({
+          'follower_id': followerId,
+          'following_id': followingId,
+        });
+      }
+    } on PostgrestException catch (e) {
+      if (e.code != '23505') {
+        // ignore: avoid_print
+        print('Postgrest toggleFollow error: ${e.message ?? e.toString()}');
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('Unknown toggleFollow error: $e');
     }
   }
 

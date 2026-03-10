@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../domain/entities/seller_profile_entity.dart';
@@ -36,21 +37,23 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       ProfileToggleFollow event, Emitter<ProfileState> emit) async {
     final current = state;
     if (current is! ProfileSuccess) return;
-    try {
-      await _repository.toggleFollow(event.followerId, event.followingId);
-      final updated = SellerProfileEntity(
-        id: current.profile.id,
-        name: current.profile.name,
-        avatarUrl: current.profile.avatarUrl,
-        bio: current.profile.bio,
-        followersCount: current.profile.isFollowingByMe
-            ? current.profile.followersCount - 1
-            : current.profile.followersCount + 1,
-        followingCount: current.profile.followingCount,
-        isFollowingByMe: !current.profile.isFollowingByMe,
-        products: current.profile.products,
-      );
-      if (!isClosed) emit(ProfileSuccess(updated));
-    } catch (_) {}
+    // Оптимистично обновляем профиль в UI.
+    final updated = SellerProfileEntity(
+      id: current.profile.id,
+      name: current.profile.name,
+      avatarUrl: current.profile.avatarUrl,
+      bio: current.profile.bio,
+      followersCount: current.profile.isFollowingByMe
+          ? current.profile.followersCount - 1
+          : current.profile.followersCount + 1,
+      followingCount: current.profile.followingCount,
+      isFollowingByMe: !current.profile.isFollowingByMe,
+      products: current.profile.products,
+      isVerified: current.profile.isVerified,
+    );
+    if (!isClosed) emit(ProfileSuccess(updated));
+
+    // Запрос в БД выполняем в фоне, чтобы не блокировать интерфейс.
+    unawaited(_repository.toggleFollow(event.followerId, event.followingId));
   }
 }

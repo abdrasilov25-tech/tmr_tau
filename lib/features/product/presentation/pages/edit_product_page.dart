@@ -255,7 +255,7 @@ class _EditProductPageState extends State<EditProductPage> {
               const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
             else ...[
               DropdownButtonFormField<CategoryEntity>(
-                value: _selectedMain,
+                initialValue: _selectedMain,
                 decoration: const InputDecoration(
                   labelText: 'Категория',
                 ),
@@ -267,7 +267,7 @@ class _EditProductPageState extends State<EditProductPage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<CategoryEntity>(
-                value: _selectedSubcategory,
+                initialValue: _selectedSubcategory,
                 decoration: const InputDecoration(
                   labelText: 'Подкатегория',
                 ),

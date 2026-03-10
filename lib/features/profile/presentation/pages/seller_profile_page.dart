@@ -121,6 +121,7 @@ class _SellerProfileView extends StatelessWidget {
                         child: FilledButton(
                           onPressed: () {
                             final uid = (context.read<AuthBloc>().state as AuthAuthenticated).user.id;
+                            print('UI: Toggle follow pressed, uid=$uid, followingId=${profile.id}');
                             context.read<ProfileBloc>().add(
                                   ProfileToggleFollow(
                                     followerId: uid,
