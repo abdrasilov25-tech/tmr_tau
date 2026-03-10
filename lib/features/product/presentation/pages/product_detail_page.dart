@@ -8,6 +8,7 @@ import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../comments/domain/entities/product_comment_entity.dart';
 import '../../../comments/domain/repositories/comments_repository.dart';
+import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
 
@@ -263,7 +264,12 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     _product.description,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
+                  StartChatButton(
+                    peerId: _product.sellerId,
+                    peerName: _product.sellerName ?? 'Продавец',
+                  ),
+                  const SizedBox(height: 24),
                   Row(
                     children: [
                       OutlinedButton.icon(

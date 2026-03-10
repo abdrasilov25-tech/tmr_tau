@@ -18,8 +18,10 @@ class SupabaseConstants {
   static const String postDislikesTable = 'post_dislikes';
   static const String postCommentsTable = 'post_comments';
   static const String repostsTable = 'reposts';
+  static const String messagesTable = 'messages';
 
   static const String bucketProducts = 'products';
   static const String bucketStories = 'stories';
   static const String bucketPosts = 'posts';
+  static const String bucketAvatars = 'avatars';
 }

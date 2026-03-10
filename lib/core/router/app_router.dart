@@ -23,6 +23,7 @@ import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
 import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
+import '../../features/chat/presentation/pages/chats_page.dart';
 import '../../features/orders/presentation/pages/orders_page.dart';
 import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
@@ -182,6 +183,10 @@ class AppRouter {
           final peerName = state.uri.queryParameters['name'] ?? 'Продавец';
           return ChatPage(peerId: peerId, peerName: peerName);
         },
+      ),
+      GoRoute(
+        path: '/chats',
+        builder: (context, state) => const ChatsPage(),
       ),
       GoRoute(
         path: '/home',
