@@ -79,9 +79,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
       if (!mounted) return;
       String message = 'Не удалось обновить аватар: $e';
       if (e is supa.StorageException) {
-        message = 'Storage error: ${e.message ?? e.toString()}';
+        message = 'Storage error: ${e.message}';
       } else if (e is supa.PostgrestException) {
-        message = 'Postgrest error: ${e.message ?? e.toString()}';
+        message = 'Postgrest error: ${e.message}';
       }
       // Для отладки можно смотреть полный текст ошибки в консоли.
       // ignore: avoid_print
@@ -103,11 +103,28 @@ class _MyProfilePageState extends State<MyProfilePage> {
     final uid = state.user.id;
     setState(() => _loading = true);
     try {
-      final profile = await context.read<ProfileRepository>().getSellerProfile(uid);
-      final posts = await context.read<PostRepository>().getPostsByUser(uid, currentUserId: uid);
+      final repo = context.read<ProfileRepository>();
+      final profile = await repo.getSellerProfile(uid);
+      final posts =
+          await context.read<PostRepository>().getPostsByUser(uid, currentUserId: uid);
+      // Подсчитываем актуальное количество подписок через followers.
+      final followingUsers = await repo.getFollowingUsers(uid);
+      final followingCount = followingUsers.length;
       if (mounted) {
         setState(() {
-          _profile = profile;
+          _profile = profile == null
+              ? null
+              : SellerProfileEntity(
+                  id: profile.id,
+                  name: profile.name,
+                  avatarUrl: profile.avatarUrl,
+                  bio: profile.bio,
+                  followersCount: profile.followersCount,
+                  followingCount: followingCount,
+                  isFollowingByMe: profile.isFollowingByMe,
+                  products: profile.products,
+                  isVerified: profile.isVerified,
+                );
           _posts = posts;
           _loading = false;
         });
@@ -454,6 +471,7 @@ class _ProfileContent extends StatelessWidget {
                       _StatItem(
                         value: profile?.followingCount ?? user.followingCount,
                         label: 'подписок',
+                        onTap: () => context.push('/following'),
                       ),
                     ],
                   ),
@@ -522,14 +540,19 @@ class _ProfileContent extends StatelessWidget {
 }
 
 class _StatItem extends StatelessWidget {
-  const _StatItem({required this.value, required this.label});
+  const _StatItem({
+    required this.value,
+    required this.label,
+    this.onTap,
+  });
 
   final int value;
   final String label;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final content = Column(
       children: [
         Text(
           '$value',
@@ -546,6 +569,12 @@ class _StatItem extends StatelessWidget {
           ),
         ),
       ],
+    );
+    if (onTap == null) return content;
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: content,
     );
   }
 }

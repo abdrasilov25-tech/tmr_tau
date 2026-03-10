@@ -41,10 +41,12 @@ class _AddProductPageState extends State<AddProductPage> {
   Future<void> _loadCategories() async {
     try {
       final list = await context.read<CategoriesRepository>().getMainCategories();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _mainCategories = list;
         _categoriesLoading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _categoriesLoading = false);
     }
@@ -201,7 +203,7 @@ class _AddProductPageState extends State<AddProductPage> {
               const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
             else ...[
               DropdownButtonFormField<CategoryEntity>(
-                value: _selectedMain,
+                initialValue: _selectedMain,
                 decoration: const InputDecoration(
                   labelText: 'Категория',
                 ),
@@ -213,7 +215,7 @@ class _AddProductPageState extends State<AddProductPage> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<CategoryEntity>(
-                value: _selectedSubcategory,
+                initialValue: _selectedSubcategory,
                 decoration: const InputDecoration(
                   labelText: 'Подкатегория',
                 ),

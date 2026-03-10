@@ -48,10 +48,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
   Future<void> _loadComments() async {
     try {
       final list = await widget.postRepository.getComments(_post.id);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _comments = list;
         _commentsLoading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _commentsLoading = false);
     }
@@ -103,7 +105,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
               'Ответ добавлен. Для вложенных ответов выполните в Supabase SQL Editor: '
               'ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES post_comments(id) ON DELETE CASCADE;',
             ),
-            duration: const Duration(seconds: 6),
+            duration: Duration(seconds: 6),
           ),
         );
       }

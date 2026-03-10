@@ -63,6 +63,32 @@ class AuthRepositoryImpl implements AuthRepository {
     }
   }
 
+  @override
+  Future<void> signInWithGoogle() async {
+    await _client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: 'tmrtau://auth/callback', // Замените на ваш app scheme
+    );
+    final authUser = _client.auth.currentUser;
+    final uid = authUser?.id;
+    if (uid == null) return;
+    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    if (_cachedUser == null) {
+      try {
+        await _ensureUserRow(uid, authUser?.email ?? '', _getName(authUser) ?? '');
+        _cachedUser = await _dataSource.fetchUserProfile(uid);
+      } catch (_) {
+        // Профиль в БД не создался — пускаем в приложение с данными из сессии
+      }
+      _cachedUser ??= AppUser(
+        id: uid,
+        email: authUser?.email ?? '',
+        name: _getName(authUser),
+        followersCount: 0,
+      );
+    }
+  }
+
   String? _getName(User? user) {
     if (user == null) return null;
     final meta = user.userMetadata;

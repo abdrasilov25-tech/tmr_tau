@@ -3,11 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:postgrest/postgrest.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
-import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/post_entity.dart';
 import '../../domain/repositories/post_repository.dart';
@@ -280,7 +278,7 @@ class _EditPostPageState extends State<EditPostPage> {
       if (e is StorageException) {
         message = 'Ошибка загрузки файла. Проверьте настройки Supabase Storage.';
       } else if (e is PostgrestException) {
-        message = e.message ?? message;
+        message = e.message;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(message)),

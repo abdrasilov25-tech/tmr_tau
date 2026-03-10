@@ -111,6 +111,12 @@ class _LoginPageState extends State<LoginPage> {
                           : const Text('Войти'),
                     ),
                     const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: loading ? null : () => context.read<AuthBloc>().add(const AuthSignInWithGoogleRequested()),
+                      icon: const Icon(Icons.login),
+                      label: const Text('Войти через Google'),
+                    ),
+                    const SizedBox(height: 16),
                     TextButton(
                       onPressed: () => context.push('/register'),
                       child: const Text('Нет аккаунта? Зарегистрироваться'),

@@ -160,7 +160,7 @@ class ProductRepositoryImpl implements ProductRepository {
       userMap = Map<String, dynamic>.from(users);
     }
     final categories = json['categories'];
-    final categoryName = json['category'] ?? (categories is Map ? (categories as Map)['name'] : null);
+    final categoryName = json['category'] ?? (categories is Map ? categories['name'] : null);
     final row = Map<String, dynamic>.from(json)
       ..remove('users')
       ..remove('categories')

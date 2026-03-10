@@ -180,12 +180,14 @@ class _AddStoryPageState extends State<AddStoryPage> {
       );
       return;
     }
-    if (mounted) setState(() {
+    if (mounted) {
+      setState(() {
       _video = file;
       _videoDurationSeconds = durationSeconds;
       _image = null;
       _loading = false;
     });
+    }
   }
 
   Future<void> _publish() async {

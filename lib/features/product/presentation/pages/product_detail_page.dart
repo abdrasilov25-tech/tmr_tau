@@ -49,10 +49,12 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   Future<void> _loadComments() async {
     try {
       final list = await widget.commentsRepository.getProductComments(_product.id);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _comments = list;
         _commentsLoading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _commentsLoading = false);
     }
@@ -80,7 +82,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       await _loadComments();
     } catch (e) {
       if (mounted) {
-        final msg = e is PostgrestException ? (e.message ?? e.toString()) : e.toString();
+        final msg = e is PostgrestException ? e.message : e.toString();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Ошибка: $msg')),
         );

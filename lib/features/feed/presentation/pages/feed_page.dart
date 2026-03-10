@@ -229,10 +229,12 @@ class _StoriesStripState extends State<_StoriesStrip> {
     try {
       final repo = context.read<StoriesRepository>();
       final list = await repo.getStoriesGroupedByUser();
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _groups = list;
         _loading = false;
       });
+      }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }

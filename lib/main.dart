@@ -15,6 +15,18 @@ void main() async {
   } catch (e, st) {
     debugPrint('Supabase init failed: $e $st');
   }
+
+  // Handle OAuth callback
+  if (_supabaseInitialized) {
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      final event = data.event;
+      if (event == AuthChangeEvent.signedIn) {
+        // User signed in via OAuth
+        debugPrint('User signed in via OAuth');
+      }
+    });
+  }
+
   runApp(TmrTauApp(
     supabaseUrl: _supabaseUrl,
     supabaseAnonKey: _supabaseAnonKey,

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
@@ -102,29 +103,30 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       FeedToggleFollow event, Emitter<FeedState> emit) async {
     final current = state;
     if (current is! FeedSuccess) return;
-    try {
-      await _repository.toggleFollow(event.followerId, event.followingId);
-      final updated = current.products.map((p) {
-        if (p.sellerId != event.followingId) return p;
-        return ProductModel(
-          id: p.id,
-          title: p.title,
-          description: p.description,
-          price: p.price,
-          imageUrl: p.imageUrl,
-          sellerId: p.sellerId,
-          category: p.category,
-          likesCount: p.likesCount,
-          commentsCount: p.commentsCount,
-          sellerName: p.sellerName,
-          sellerAvatarUrl: p.sellerAvatarUrl,
-          createdAt: p.createdAt,
-          isLikedByMe: p.isLikedByMe,
-          isFollowingSeller: !p.isFollowingSeller,
-          sellerIsVerified: p.sellerIsVerified,
-        );
-      }).toList();
-      if (!isClosed) emit(current.copyWith(products: updated));
-    } catch (_) {}
+    // Оптимистично обновляем UI, запрос в БД выполняем "в фоне".
+    final updated = current.products.map((p) {
+      if (p.sellerId != event.followingId) return p;
+      return ProductModel(
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        imageUrl: p.imageUrl,
+        sellerId: p.sellerId,
+        category: p.category,
+        likesCount: p.likesCount,
+        commentsCount: p.commentsCount,
+        sellerName: p.sellerName,
+        sellerAvatarUrl: p.sellerAvatarUrl,
+        createdAt: p.createdAt,
+        isLikedByMe: p.isLikedByMe,
+        isFollowingSeller: !p.isFollowingSeller,
+        sellerIsVerified: p.sellerIsVerified,
+      );
+    }).toList();
+    if (!isClosed) emit(current.copyWith(products: updated));
+
+    // Запрос к репозиторию выполняем без ожидания, чтобы не блокировать UI.
+    unawaited(_repository.toggleFollow(event.followerId, event.followingId));
   }
 }
