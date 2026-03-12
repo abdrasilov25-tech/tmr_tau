@@ -9,6 +9,8 @@ abstract class ProfileRepository {
   Future<List<SellerProfileEntity>> getVerifiedUsers();
   /// Users that the given user is following.
   Future<List<SellerProfileEntity>> getFollowingUsers(String followerId);
+  /// Users that are following the given user.
+  Future<List<SellerProfileEntity>> getFollowersUsers(String followingId);
   Future<void> toggleFollow(String followerId, String followingId);
   Future<void> updateProfile({
     required String userId,

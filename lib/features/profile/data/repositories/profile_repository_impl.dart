@@ -135,6 +135,47 @@ class ProfileRepositoryImpl implements ProfileRepository {
   }
 
   @override
+  Future<List<SellerProfileEntity>> getFollowersUsers(String followingId) async {
+    // Все, кто подписаны на данного пользователя.
+    final res = await _client
+        .from(SupabaseConstants.followersTable)
+        .select('follower_id')
+        .eq('following_id', followingId);
+    final list = res as List;
+    if (list.isEmpty) return [];
+
+    final followerIds = list
+        .map((e) => (e as Map)['follower_id'] as String)
+        .toSet()
+        .toList();
+
+    final List<SellerProfileEntity> result = [];
+    for (final id in followerIds) {
+      final userRes = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar, bio, followers_count')
+          .eq('id', id)
+          .maybeSingle();
+      if (userRes == null) continue;
+      final m = Map<String, dynamic>.from(userRes as Map);
+      result.add(
+        SellerProfileEntity(
+          id: m['id'] as String,
+          name: m['name'] as String? ?? 'User',
+          avatarUrl: m['avatar'] as String?,
+          bio: m['bio'] as String?,
+          followersCount: m['followers_count'] as int? ?? 0,
+          followingCount: 0,
+          isFollowingByMe: false,
+          products: const [],
+          isVerified: false,
+        ),
+      );
+    }
+    return result;
+  }
+
+  @override
   Future<void> toggleFollow(String followerId, String followingId) async {
     try {
       final existing = await _client
