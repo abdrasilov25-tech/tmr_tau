@@ -467,6 +467,7 @@ class _ProfileContent extends StatelessWidget {
                       _StatItem(
                         value: profile?.followersCount ?? user.followersCount,
                         label: 'подписчиков',
+                        onTap: () => context.push('/followers'),
                       ),
                       _StatItem(
                         value: profile?.followingCount ?? user.followingCount,

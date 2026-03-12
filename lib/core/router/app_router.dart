@@ -22,6 +22,7 @@ import '../../features/product/presentation/pages/product_detail_page.dart';
 import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
 import '../../features/profile/presentation/pages/following_page.dart';
+import '../../features/profile/presentation/pages/followers_page.dart';
 import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/chat/presentation/pages/chats_page.dart';
@@ -192,6 +193,10 @@ class AppRouter {
       GoRoute(
         path: '/following',
         builder: (context, state) => const FollowingPage(),
+      ),
+      GoRoute(
+        path: '/followers',
+        builder: (context, state) => const FollowersPage(),
       ),
       GoRoute(
         path: '/home',
