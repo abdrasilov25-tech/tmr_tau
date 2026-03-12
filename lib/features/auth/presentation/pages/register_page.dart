@@ -46,6 +46,11 @@ class _RegisterPageState extends State<RegisterPage> {
       body: SafeArea(
         child: BlocConsumer<AuthBloc, AuthState>(
           listener: (context, state) {
+            if (state is AuthAuthenticated) {
+              // После успешной регистрации сразу идём на домашний экран.
+              context.go('/home/feed');
+              return;
+            }
             if (state is AuthError) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(state.message)),

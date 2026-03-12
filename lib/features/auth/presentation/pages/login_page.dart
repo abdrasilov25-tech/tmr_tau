@@ -37,6 +37,11 @@ class _LoginPageState extends State<LoginPage> {
       body: SafeArea(
         child: BlocConsumer<AuthBloc, AuthState>(
           listener: (context, state) {
+            if (state is AuthAuthenticated) {
+              // Успешный вход — переходим на домашний экран.
+              context.go('/home/feed');
+              return;
+            }
             if (state is AuthError) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(state.message)),
@@ -109,12 +114,6 @@ class _LoginPageState extends State<LoginPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Text('Войти'),
-                    ),
-                    const SizedBox(height: 16),
-                    OutlinedButton.icon(
-                      onPressed: loading ? null : () => context.read<AuthBloc>().add(const AuthSignInWithGoogleRequested()),
-                      icon: const Icon(Icons.login),
-                      label: const Text('Войти через Google'),
                     ),
                     const SizedBox(height: 16),
                     TextButton(
