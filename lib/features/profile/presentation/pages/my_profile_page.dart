@@ -457,6 +457,11 @@ class _ProfileContent extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 20),
+                  TextButton(
+                    onPressed: () => context.push('/edit-profile'),
+                    child: const Text('Редактировать профиль'),
+                  ),
+                  const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [

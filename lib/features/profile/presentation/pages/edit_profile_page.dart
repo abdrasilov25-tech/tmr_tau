@@ -1,0 +1,155 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../domain/repositories/profile_repository.dart';
+
+class EditProfilePage extends StatefulWidget {
+  const EditProfilePage({super.key});
+
+  @override
+  State<EditProfilePage> createState() => _EditProfilePageState();
+}
+
+class _EditProfilePageState extends State<EditProfilePage> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _usernameController;
+  late final TextEditingController _bioController;
+  String? _gender; // 'male' / 'female' / null
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final authState = context.read<AuthBloc>().state;
+    final user = authState is AuthAuthenticated ? authState.user : null;
+    _nameController = TextEditingController(text: user?.name ?? '');
+    _usernameController = TextEditingController();
+    _bioController = TextEditingController(text: user?.bio ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _usernameController.dispose();
+    _bioController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) return;
+    setState(() => _saving = true);
+    try {
+      await context.read<ProfileRepository>().updateProfile(
+            userId: authState.user.id,
+            name: _nameController.text.trim().isEmpty
+                ? null
+                : _nameController.text.trim(),
+            bio: _bioController.text.trim().isEmpty
+                ? null
+                : _bioController.text.trim(),
+            username: _usernameController.text.trim().isEmpty
+                ? null
+                : _usernameController.text.trim(),
+            gender: _gender,
+          );
+      if (!mounted) return;
+      // Обновим профиль в AuthBloc.
+      context.read<AuthBloc>().add(const AuthCheckRequested());
+      context.pop();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось сохранить профиль: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Редактировать профиль'),
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Имя',
+                  ),
+                  validator: (v) =>
+                      (v == null || v.trim().isEmpty) ? 'Введите имя' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _usernameController,
+                  decoration: const InputDecoration(
+                    labelText: 'Имя пользователя',
+                    hintText: 'username',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _bioController,
+                  decoration: const InputDecoration(
+                    labelText: 'О себе',
+                    alignLabelWithHint: true,
+                  ),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Пол',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                RadioListTile<String?>(
+                  value: 'male',
+                  groupValue: _gender,
+                  title: const Text('Мужской'),
+                  onChanged: (v) => setState(() => _gender = v),
+                ),
+                RadioListTile<String?>(
+                  value: 'female',
+                  groupValue: _gender,
+                  title: const Text('Женский'),
+                  onChanged: (v) => setState(() => _gender = v),
+                ),
+                RadioListTile<String?>(
+                  value: null,
+                  groupValue: _gender,
+                  title: const Text('Не указывать'),
+                  onChanged: (v) => setState(() => _gender = null),
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _saving ? null : _save,
+                  child: _saving
+                      ? const SizedBox(
+                          height: 24,
+                          width: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Сохранить'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
