@@ -254,21 +254,6 @@ class AppRouter {
         ],
       ),
     ],
-    redirect: (context, state) {
-      try {
-        final authState = context.read<AuthBloc>().state;
-        final loc = state.matchedLocation;
-        final isSplash = loc == '/';
-        final isAuth = loc == '/login' || loc == '/register';
-        if (isSplash) return null;
-        if (authState is AuthAuthenticated && isAuth) return '/home/feed';
-        if (authState is! AuthAuthenticated && !isAuth) return '/login';
-      } catch (_) {
-        // Контекст без AuthBloc (например до монтирования провайдеров)
-        return null;
-      }
-      return null;
-    },
   );
 }
 
@@ -290,14 +275,7 @@ class _MainShell extends StatelessWidget {
         child: NavigationBar(
           selectedIndex: navigationShell.currentIndex,
           onDestinationSelected: (index) {
-            const paths = [
-              '/home/feed',
-              '/home/search',
-              '/home/add',
-              '/home/news',
-              '/home/profile',
-            ];
-            context.go(paths[index]);
+            // Меняем только активную ветку shell-роута.
             navigationShell.goBranch(index);
           },
           backgroundColor: Colors.transparent,

@@ -82,6 +82,11 @@ class _TmrTauAppState extends State<TmrTauApp> {
   }
 
   @override
+  void dispose() {
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     if (!widget.supabaseInitialized) {
       return MaterialApp(
@@ -113,28 +118,31 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),
-        RepositoryProvider<CategoriesRepository>.value(value: _categoriesRepository),
+        RepositoryProvider<CategoriesRepository>.value(
+            value: _categoriesRepository),
         RepositoryProvider<ProfileRepository>.value(value: _profileRepository),
         RepositoryProvider<CommentsRepository>.value(value: _commentsRepository),
         RepositoryProvider<StoriesRepository>.value(value: _storiesRepository),
         RepositoryProvider<NotificationsRepository>.value(
-            value: _notificationsRepository),
+          value: _notificationsRepository,
+        ),
         RepositoryProvider<PostRepository>.value(value: _postRepository),
       ],
       child: BlocProvider(
-        create: (context) => AuthBloc(_authRepository)..add(const AuthCheckRequested()),
+        create: (context) =>
+            AuthBloc(_authRepository)..add(const AuthCheckRequested()),
         child: BlocProvider(
           create: (context) => FeedBloc(_feedRepository),
           child: Container(
-          color: Colors.black,
-          child: MaterialApp.router(
-            title: 'tmr_tau',
-            debugShowCheckedModeBanner: false,
-            theme: AppTheme.light,
-            routerConfig: _appRouter.router,
+            color: Colors.black,
+            child: MaterialApp.router(
+              title: 'tmr_tau',
+              debugShowCheckedModeBanner: false,
+              theme: AppTheme.light,
+              routerConfig: _appRouter.router,
+            ),
           ),
         ),
-          ),
       ),
     );
   }
