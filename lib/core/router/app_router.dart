@@ -23,6 +23,7 @@ import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
 import '../../features/profile/presentation/pages/following_page.dart';
 import '../../features/profile/presentation/pages/followers_page.dart';
+import '../../features/profile/presentation/pages/edit_profile_page.dart';
 import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/chat/presentation/pages/chats_page.dart';
@@ -197,6 +198,10 @@ class AppRouter {
       GoRoute(
         path: '/followers',
         builder: (context, state) => const FollowersPage(),
+      ),
+      GoRoute(
+        path: '/edit-profile',
+        builder: (context, state) => const EditProfilePage(),
       ),
       GoRoute(
         path: '/home',

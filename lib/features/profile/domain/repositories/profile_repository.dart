@@ -17,5 +17,7 @@ abstract class ProfileRepository {
     String? name,
     String? avatarUrl,
     String? bio,
+    String? username,
+    String? gender,
   });
 }
