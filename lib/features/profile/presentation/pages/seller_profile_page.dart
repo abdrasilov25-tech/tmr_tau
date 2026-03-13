@@ -64,10 +64,32 @@ class _SellerProfileView extends StatelessWidget {
             padding: const EdgeInsets.all(24),
             child: Column(
               children: [
-                CachedAvatar(
-                  imageUrl: profile.avatarUrl,
-                  radius: 48,
-                  fallbackText: profile.name,
+                GestureDetector(
+                  onTap: () {
+                    final imageUrl = profile.avatarUrl;
+                    if (imageUrl == null || imageUrl.isEmpty) return;
+                    showDialog<void>(
+                      context: context,
+                      builder: (ctx) => Dialog(
+                        backgroundColor: Colors.black,
+                        insetPadding: const EdgeInsets.all(24),
+                        child: AspectRatio(
+                          aspectRatio: 1,
+                          child: InteractiveViewer(
+                            child: Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                  child: CachedAvatar(
+                    imageUrl: profile.avatarUrl,
+                    radius: 48,
+                    fallbackText: profile.name,
+                  ),
                 ),
                 const SizedBox(height: 12),
                 Row(
