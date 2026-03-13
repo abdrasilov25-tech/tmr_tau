@@ -28,6 +28,14 @@ final class FeedToggleLike extends FeedEvent {
   List<Object?> get props => [productId, userId];
 }
 
+final class FeedToggleRepost extends FeedEvent {
+  const FeedToggleRepost({required this.productId, required this.userId});
+  final String productId;
+  final String userId;
+  @override
+  List<Object?> get props => [productId, userId];
+}
+
 final class FeedToggleFollow extends FeedEvent {
   const FeedToggleFollow({
     required this.followerId,

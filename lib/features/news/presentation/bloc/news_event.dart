@@ -19,6 +19,12 @@ final class NewsToggleLike extends NewsEvent {
   final String userId;
 }
 
+final class NewsToggleRepost extends NewsEvent {
+  const NewsToggleRepost({required this.postId, required this.userId});
+  final String postId;
+  final String userId;
+}
+
 final class NewsRefresh extends NewsEvent {
   const NewsRefresh({this.currentUserId});
   final String? currentUserId;

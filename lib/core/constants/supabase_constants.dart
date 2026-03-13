@@ -7,6 +7,7 @@ class SupabaseConstants {
   static const String productsTable = 'products';
   static const String productLikesTable = 'product_likes';
   static const String productCommentsTable = 'product_comments';
+  static const String productRepostsTable = 'product_reposts';
   static const String followersTable = 'followers';
   static const String storiesTable = 'stories';
   static const String storyRepliesTable = 'story_replies';

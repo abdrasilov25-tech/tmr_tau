@@ -167,6 +167,14 @@ class _FeedPageState extends State<FeedPage> {
                             '/product/${product.id}',
                             extra: product,
                           ),
+                          onRepost: currentUserId != null
+                              ? () => context.read<FeedBloc>().add(
+                                    FeedToggleRepost(
+                                      productId: product.id,
+                                      userId: currentUserId,
+                                    ),
+                                  )
+                              : null,
                         );
                       },
                       childCount: state.products.length + 1,
@@ -393,6 +401,7 @@ class _ProductCard extends StatelessWidget {
     this.onLike,
     this.onFollow,
     required this.onComment,
+    this.onRepost,
   });
 
   final ProductEntity product;
@@ -402,6 +411,7 @@ class _ProductCard extends StatelessWidget {
   final VoidCallback? onLike;
   final VoidCallback? onFollow;
   final VoidCallback onComment;
+  final VoidCallback? onRepost;
 
   @override
   Widget build(BuildContext context) {
@@ -501,6 +511,16 @@ class _ProductCard extends StatelessWidget {
                       onPressed: onComment,
                       padding: EdgeInsets.zero,
                     ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.repeat,
+                        size: 24,
+                        color:
+                            product.isRepostedByMe ? Colors.greenAccent : Colors.white,
+                      ),
+                      onPressed: onRepost,
+                      padding: EdgeInsets.zero,
+                    ),
                     if (product.likesCount > 0)
                       Text(
                         '${product.likesCount}',
@@ -509,6 +529,16 @@ class _ProductCard extends StatelessWidget {
                           fontSize: 14,
                         ),
                       ),
+                    if (product.repostsCount > 0) ...[
+                      const SizedBox(width: 4),
+                      Text(
+                        '${product.repostsCount}',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
                 Text(

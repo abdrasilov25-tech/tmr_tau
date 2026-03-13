@@ -27,4 +27,8 @@ class FeedRepositoryImpl implements FeedRepository {
   @override
   Future<void> toggleFollow(String followerId, String followingId) =>
       _profileRepository.toggleFollow(followerId, followingId);
+
+  @override
+  Future<void> toggleProductRepost(String productId, String userId) =>
+      _productRepository.toggleProductRepost(productId, userId);
 }

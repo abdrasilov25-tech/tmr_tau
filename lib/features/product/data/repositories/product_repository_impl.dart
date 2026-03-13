@@ -149,6 +149,28 @@ class ProductRepositoryImpl implements ProductRepository {
     }
   }
 
+  @override
+  Future<void> toggleProductRepost(String productId, String userId) async {
+    final existing = await _client
+        .from(SupabaseConstants.productRepostsTable)
+        .select('product_id')
+        .eq('product_id', productId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from(SupabaseConstants.productRepostsTable)
+          .delete()
+          .eq('product_id', productId)
+          .eq('user_id', userId);
+    } else {
+      await _client.from(SupabaseConstants.productRepostsTable).insert({
+        'product_id': productId,
+        'user_id': userId,
+      });
+    }
+  }
+
   List<ProductEntity> _mapProducts(List<dynamic> list) {
     return list.map((e) => _mapProduct(e as Map<String, dynamic>)).toList();
   }
@@ -183,6 +205,8 @@ class ProductRepositoryImpl implements ProductRepository {
     final sellerIds = list.map((e) => e.sellerId).toSet().toList();
     Set<String> likedIds = {};
     Set<String> followingIds = {};
+    Set<String> repostedIds = {};
+    final Map<String, int> repostCounts = {};
     try {
       final likes = await _client
           .from(SupabaseConstants.productLikesTable)
@@ -201,6 +225,27 @@ class ProductRepositoryImpl implements ProductRepository {
       followingIds =
           (follows as List).map((e) => (e as Map)['following_id'] as String).toSet();
     } catch (_) {}
+    try {
+      final repostsByMe = await _client
+          .from(SupabaseConstants.productRepostsTable)
+          .select('product_id')
+          .eq('user_id', currentUserId)
+          .inFilter('product_id', ids);
+      repostedIds = (repostsByMe as List)
+          .map((e) => (e as Map)['product_id'] as String)
+          .toSet();
+    } catch (_) {}
+    try {
+      final reposts = await _client
+          .from(SupabaseConstants.productRepostsTable)
+          .select('product_id')
+          .inFilter('product_id', ids);
+      for (final row in reposts as List) {
+        final map = row as Map<String, dynamic>;
+        final productId = map['product_id'] as String;
+        repostCounts[productId] = (repostCounts[productId] ?? 0) + 1;
+      }
+    } catch (_) {}
     return list
         .map((p) => ProductModel(
               id: p.id,
@@ -213,10 +258,12 @@ class ProductRepositoryImpl implements ProductRepository {
               categoryId: p.categoryId,
               likesCount: p.likesCount,
               commentsCount: p.commentsCount,
+              repostsCount: repostCounts[p.id] ?? 0,
               sellerName: p.sellerName,
               sellerAvatarUrl: p.sellerAvatarUrl,
               createdAt: p.createdAt,
               isLikedByMe: likedIds.contains(p.id),
+              isRepostedByMe: repostedIds.contains(p.id),
               isFollowingSeller: followingIds.contains(p.sellerId),
               sellerIsVerified: p.sellerIsVerified,
             ))

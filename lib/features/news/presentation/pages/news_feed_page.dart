@@ -242,7 +242,7 @@ class _NewsPostCard extends StatelessWidget {
                     '${post.likesCount}',
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                   ),
-                  const SizedBox(width: 16),
+                  const SizedBox(width: 12),
                   GestureDetector(
                     onTap: () async {
                       final deleted = await context.push<bool>('/post/${post.id}', extra: post);
@@ -261,6 +261,23 @@ class _NewsPostCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                  ),
+                  const SizedBox(width: 12),
+                  IconButton(
+                    icon: Icon(
+                      post.isRepostedByMe ? Icons.repeat : Icons.repeat_outlined,
+                      size: 22,
+                      color: post.isRepostedByMe ? Colors.green : Colors.grey.shade700,
+                    ),
+                    onPressed: currentUserId != null
+                        ? () => context.read<NewsBloc>().add(
+                              NewsToggleRepost(postId: post.id, userId: currentUserId!),
+                            )
+                        : null,
+                  ),
+                  Text(
+                    '${post.repostsCount}',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                   ),
                 ],
               ),
