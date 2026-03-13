@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
   static const Color _primary = Color(0xFF1A1A1A);
@@ -24,26 +23,26 @@ class AppTheme {
         backgroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        titleTextStyle: GoogleFonts.manrope(
+        titleTextStyle: const TextStyle(
           fontSize: 18,
           fontWeight: FontWeight.w600,
           color: _primary,
         ),
         iconTheme: const IconThemeData(color: _primary),
       ),
-      textTheme: GoogleFonts.manropeTextTheme().copyWith(
-        titleLarge: GoogleFonts.manrope(
+      textTheme: const TextTheme(
+        titleLarge: TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.w600,
           color: _primary,
         ),
-        titleMedium: GoogleFonts.manrope(
+        titleMedium: TextStyle(
           fontSize: 16,
           fontWeight: FontWeight.w600,
           color: _primary,
         ),
-        bodyMedium: GoogleFonts.manrope(fontSize: 14, color: _primary),
-        bodySmall: GoogleFonts.manrope(
+        bodyMedium: TextStyle(fontSize: 14, color: _primary),
+        bodySmall: TextStyle(
           fontSize: 12,
           color: Colors.grey,
         ),
@@ -64,14 +63,14 @@ class AppTheme {
           }
           return const IconThemeData(color: Color(0xFF737373), size: 26);
         }),
-        labelTextStyle: WidgetStateProperty.resolveWith((states) {
-          return GoogleFonts.manrope(
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
             fontSize: 12,
             color: states.contains(WidgetState.selected)
                 ? _primary
                 : const Color(0xFF737373),
-          );
-        }),
+          ),
+        ),
       ),
       cardTheme: CardThemeData(
         color: Colors.white,
@@ -88,10 +87,10 @@ class AppTheme {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          textStyle: GoogleFonts.manrope(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          textStyle: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
