@@ -21,12 +21,14 @@ class ProductModel extends ProductEntity {
     super.categoryId,
     super.likesCount = 0,
     super.commentsCount = 0,
+    super.repostsCount = 0,
     super.sellerName,
     super.sellerAvatarUrl,
     super.createdAt,
     super.isLikedByMe = false,
     super.isFollowingSeller = false,
     super.sellerIsVerified = false,
+    super.isRepostedByMe = false,
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -41,6 +43,7 @@ class ProductModel extends ProductEntity {
       categoryId: json['category_id'] as String?,
       likesCount: json['likes_count'] as int? ?? 0,
       commentsCount: json['comments_count'] as int? ?? 0,
+      repostsCount: json['reposts_count'] as int? ?? 0,
       sellerName: json['seller_name'] as String?,
       sellerAvatarUrl: json['seller_avatar'] as String?,
       createdAt: json['created_at'] != null

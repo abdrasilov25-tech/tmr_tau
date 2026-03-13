@@ -16,6 +16,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     on<FeedLoadMore>(_onLoadMore);
     on<FeedToggleLike>(_onToggleLike);
     on<FeedToggleFollow>(_onToggleFollow);
+    on<FeedToggleRepost>(_onToggleRepost);
   }
 
   final FeedRepository _repository;
@@ -87,11 +88,13 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
           category: p.category,
           likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
           commentsCount: p.commentsCount,
+          repostsCount: p.repostsCount,
           sellerName: p.sellerName,
           sellerAvatarUrl: p.sellerAvatarUrl,
           createdAt: p.createdAt,
           isLikedByMe: !p.isLikedByMe,
           isFollowingSeller: p.isFollowingSeller,
+          isRepostedByMe: p.isRepostedByMe,
           sellerIsVerified: p.sellerIsVerified,
         );
       }).toList();
@@ -116,11 +119,13 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         category: p.category,
         likesCount: p.likesCount,
         commentsCount: p.commentsCount,
+        repostsCount: p.repostsCount,
         sellerName: p.sellerName,
         sellerAvatarUrl: p.sellerAvatarUrl,
         createdAt: p.createdAt,
         isLikedByMe: p.isLikedByMe,
         isFollowingSeller: !p.isFollowingSeller,
+        isRepostedByMe: p.isRepostedByMe,
         sellerIsVerified: p.sellerIsVerified,
       );
     }).toList();
@@ -128,5 +133,41 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
 
     // Запрос к репозиторию выполняем без ожидания, чтобы не блокировать UI.
     unawaited(_repository.toggleFollow(event.followerId, event.followingId));
+  }
+
+  Future<void> _onToggleRepost(
+      FeedToggleRepost event, Emitter<FeedState> emit) async {
+    final current = state;
+    if (current is! FeedSuccess) return;
+    try {
+      await _repository.toggleProductRepost(event.productId, event.userId);
+      final updated = current.products.map((p) {
+        if (p.id != event.productId) return p;
+        final isNowReposted = !p.isRepostedByMe;
+        final newCount = isNowReposted
+            ? p.repostsCount + 1
+            : (p.repostsCount > 0 ? p.repostsCount - 1 : 0);
+        return ProductModel(
+          id: p.id,
+          title: p.title,
+          description: p.description,
+          price: p.price,
+          imageUrl: p.imageUrl,
+          sellerId: p.sellerId,
+          category: p.category,
+          likesCount: p.likesCount,
+          commentsCount: p.commentsCount,
+          repostsCount: newCount,
+          sellerName: p.sellerName,
+          sellerAvatarUrl: p.sellerAvatarUrl,
+          createdAt: p.createdAt,
+          isLikedByMe: p.isLikedByMe,
+          isFollowingSeller: p.isFollowingSeller,
+          isRepostedByMe: isNowReposted,
+          sellerIsVerified: p.sellerIsVerified,
+        );
+      }).toList();
+      if (!isClosed) emit(current.copyWith(products: updated));
+    } catch (_) {}
   }
 }

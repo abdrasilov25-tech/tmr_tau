@@ -8,4 +8,5 @@ abstract class FeedRepository {
   });
   Future<void> toggleProductLike(String productId, String userId);
   Future<void> toggleFollow(String followerId, String followingId);
+  Future<void> toggleProductRepost(String productId, String userId);
 }

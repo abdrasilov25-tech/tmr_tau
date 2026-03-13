@@ -12,12 +12,14 @@ class ProductEntity extends Equatable {
     this.categoryId,
     this.likesCount = 0,
     this.commentsCount = 0,
+    this.repostsCount = 0,
     this.sellerName,
     this.sellerAvatarUrl,
     this.createdAt,
     this.isLikedByMe = false,
     this.isFollowingSeller = false,
     this.sellerIsVerified = false,
+    this.isRepostedByMe = false,
   });
 
   final String id;
@@ -30,12 +32,14 @@ class ProductEntity extends Equatable {
   final String? categoryId;
   final int likesCount;
   final int commentsCount;
+  final int repostsCount;
   final String? sellerName;
   final String? sellerAvatarUrl;
   final DateTime? createdAt;
   final bool isLikedByMe;
   final bool isFollowingSeller;
   final bool sellerIsVerified;
+  final bool isRepostedByMe;
 
   String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
 
@@ -51,11 +55,13 @@ class ProductEntity extends Equatable {
         categoryId,
         likesCount,
         commentsCount,
+        repostsCount,
         sellerName,
         sellerAvatarUrl,
         createdAt,
         isLikedByMe,
         isFollowingSeller,
         sellerIsVerified,
+        isRepostedByMe,
       ];
 }

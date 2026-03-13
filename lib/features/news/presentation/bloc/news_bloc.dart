@@ -11,6 +11,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     on<NewsLoaded>(_onLoaded);
     on<NewsLoadMore>(_onLoadMore);
     on<NewsToggleLike>(_onToggleLike);
+    on<NewsToggleRepost>(_onToggleRepost);
     on<NewsRefresh>(_onRefresh);
   }
 
@@ -83,6 +84,38 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
           isLikedByMe: !p.isLikedByMe,
           isDislikedByMe: p.isDislikedByMe,
           isRepostedByMe: p.isRepostedByMe,
+        );
+      }).toList();
+      if (!isClosed) emit(current.copyWith(posts: updated));
+    } catch (_) {}
+  }
+
+  Future<void> _onToggleRepost(NewsToggleRepost event, Emitter<NewsState> emit) async {
+    final current = state;
+    if (current is! NewsSuccess) return;
+    try {
+      await _repository.toggleRepost(event.postId, event.userId);
+      final updated = current.posts.map((p) {
+        if (p.id != event.postId) return p;
+        final isNowReposted = !p.isRepostedByMe;
+        return PostEntity(
+          id: p.id,
+          userId: p.userId,
+          imageUrl: p.imageUrl,
+          caption: p.caption,
+          videoUrl: p.videoUrl,
+          videoDurationSeconds: p.videoDurationSeconds,
+          createdAt: p.createdAt,
+          likesCount: p.likesCount,
+          dislikesCount: p.dislikesCount,
+          commentsCount: p.commentsCount,
+          repostsCount:
+              isNowReposted ? p.repostsCount + 1 : (p.repostsCount > 0 ? p.repostsCount - 1 : 0),
+          userName: p.userName,
+          userAvatarUrl: p.userAvatarUrl,
+          isLikedByMe: p.isLikedByMe,
+          isDislikedByMe: p.isDislikedByMe,
+          isRepostedByMe: isNowReposted,
         );
       }).toList();
       if (!isClosed) emit(current.copyWith(posts: updated));

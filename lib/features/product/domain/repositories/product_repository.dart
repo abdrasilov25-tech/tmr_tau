@@ -37,4 +37,5 @@ abstract class ProductRepository {
   });
   Future<void> deleteProduct(String productId);
   Future<void> toggleProductLike(String productId, String userId);
+  Future<void> toggleProductRepost(String productId, String userId);
 }
