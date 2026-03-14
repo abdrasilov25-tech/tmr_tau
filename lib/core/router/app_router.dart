@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/storage/local_reactions_storage.dart';
+import '../../core/theme/login_theme_presets.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
@@ -274,9 +276,17 @@ class _MainShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final themeIndex = context.read<LocalReactionsStorage>().getLoginThemeIndex();
+    final decoration = LoginThemePresets.gradientDecoration(themeIndex);
     return Scaffold(
-      body: navigationShell,
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.transparent,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(decoration: decoration),
+          navigationShell,
+        ],
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
