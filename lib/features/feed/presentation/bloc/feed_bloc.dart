@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import 'package:postgrest/postgrest.dart';
+import '../../../../core/storage/local_reactions_storage.dart';
 import '../../../../features/product/domain/entities/product_entity.dart';
 import '../../../../features/product/data/models/product_model.dart';
 import '../../domain/repositories/feed_repository.dart';
@@ -11,7 +12,7 @@ part 'feed_event.dart';
 part 'feed_state.dart';
 
 class FeedBloc extends Bloc<FeedEvent, FeedState> {
-  FeedBloc(this._repository) : super(FeedInitial()) {
+  FeedBloc(this._repository, this._localReactions) : super(FeedInitial()) {
     on<FeedLoaded>(_onLoaded);
     on<FeedLoadMore>(_onLoadMore);
     on<FeedToggleLike>(_onToggleLike);
@@ -20,16 +21,18 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
   }
 
   final FeedRepository _repository;
+  final LocalReactionsStorage _localReactions;
   static const int _pageSize = 20;
 
   Future<void> _onLoaded(FeedLoaded event, Emitter<FeedState> emit) async {
     emit(FeedLoading());
     try {
-      final list = await _repository.getFeed(
+      var list = await _repository.getFeed(
         limit: _pageSize,
         offset: 0,
         currentUserId: event.currentUserId,
       );
+      list = _mergeLocalReactions(list);
       if (!isClosed) {
         emit(FeedSuccess(list, hasMore: list.length >= _pageSize));
       }
@@ -57,7 +60,8 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         offset: offset,
         currentUserId: event.currentUserId,
       );
-      final newList = [...current.products, ...list];
+      var newList = [...current.products, ...list];
+      newList = _mergeLocalReactions(newList);
       if (!isClosed) {
         emit(FeedSuccess(
           newList,
@@ -70,36 +74,77 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     }
   }
 
+  List<ProductEntity> _mergeLocalReactions(List<ProductEntity> list) {
+    final likedIds = _localReactions.getLikedIds();
+    final repostedIds = _localReactions.getRepostedIds();
+    if (likedIds.isEmpty && repostedIds.isEmpty) return list;
+    return list.map((p) {
+      final fromLocalLike = likedIds.contains(p.id);
+      final fromLocalRepost = repostedIds.contains(p.id);
+      if (!fromLocalLike && !fromLocalRepost) return p;
+      return ProductModel(
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        imageUrl: p.imageUrl,
+        sellerId: p.sellerId,
+        category: p.category,
+        categoryId: p.categoryId,
+        likesCount: p.likesCount,
+        commentsCount: p.commentsCount,
+        repostsCount: p.repostsCount,
+        sellerName: p.sellerName,
+        sellerAvatarUrl: p.sellerAvatarUrl,
+        createdAt: p.createdAt,
+        isLikedByMe: p.isLikedByMe || fromLocalLike,
+        isFollowingSeller: p.isFollowingSeller,
+        isRepostedByMe: p.isRepostedByMe || fromLocalRepost,
+        sellerIsVerified: p.sellerIsVerified,
+      );
+    }).toList();
+  }
+
   Future<void> _onToggleLike(
       FeedToggleLike event, Emitter<FeedState> emit) async {
     final current = state;
     if (current is! FeedSuccess) return;
+    final p = current.products.firstWhere((e) => e.id == event.productId);
+    final isNowLiked = !p.isLikedByMe;
+    await _localReactions.setLiked(event.productId, isNowLiked);
+    final updated = current.products.map((p) {
+      if (p.id != event.productId) return p;
+      return ProductModel(
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        imageUrl: p.imageUrl,
+        sellerId: p.sellerId,
+        category: p.category,
+        likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
+        commentsCount: p.commentsCount,
+        repostsCount: p.repostsCount,
+        sellerName: p.sellerName,
+        sellerAvatarUrl: p.sellerAvatarUrl,
+        createdAt: p.createdAt,
+        isLikedByMe: isNowLiked,
+        isFollowingSeller: p.isFollowingSeller,
+        isRepostedByMe: p.isRepostedByMe,
+        sellerIsVerified: p.sellerIsVerified,
+      );
+    }).toList();
+    if (!isClosed) emit(current.copyWith(products: updated));
     try {
       await _repository.toggleProductLike(event.productId, event.userId);
-      final updated = current.products.map((p) {
-        if (p.id != event.productId) return p;
-        return ProductModel(
-          id: p.id,
-          title: p.title,
-          description: p.description,
-          price: p.price,
-          imageUrl: p.imageUrl,
-          sellerId: p.sellerId,
-          category: p.category,
-          likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
-          commentsCount: p.commentsCount,
-          repostsCount: p.repostsCount,
-          sellerName: p.sellerName,
-          sellerAvatarUrl: p.sellerAvatarUrl,
-          createdAt: p.createdAt,
-          isLikedByMe: !p.isLikedByMe,
-          isFollowingSeller: p.isFollowingSeller,
-          isRepostedByMe: p.isRepostedByMe,
-          sellerIsVerified: p.sellerIsVerified,
-        );
-      }).toList();
-      if (!isClosed) emit(current.copyWith(products: updated));
-    } catch (_) {}
+    } catch (e, st) {
+      if (e is PostgrestException) {
+        debugPrint('FeedBloc toggleLike: ${e.message}');
+      } else {
+        debugPrint('FeedBloc toggleLike error: $e');
+      }
+      debugPrint('FeedBloc toggleLike stack: $st');
+    }
   }
 
   Future<void> _onToggleFollow(
@@ -139,35 +184,43 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       FeedToggleRepost event, Emitter<FeedState> emit) async {
     final current = state;
     if (current is! FeedSuccess) return;
+    final p = current.products.firstWhere((e) => e.id == event.productId);
+    final isNowReposted = !p.isRepostedByMe;
+    await _localReactions.setReposted(event.productId, isNowReposted);
+    final updated = current.products.map((p) {
+      if (p.id != event.productId) return p;
+      final newCount = isNowReposted
+          ? p.repostsCount + 1
+          : (p.repostsCount > 0 ? p.repostsCount - 1 : 0);
+      return ProductModel(
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        imageUrl: p.imageUrl,
+        sellerId: p.sellerId,
+        category: p.category,
+        likesCount: p.likesCount,
+        commentsCount: p.commentsCount,
+        repostsCount: newCount,
+        sellerName: p.sellerName,
+        sellerAvatarUrl: p.sellerAvatarUrl,
+        createdAt: p.createdAt,
+        isLikedByMe: p.isLikedByMe,
+        isFollowingSeller: p.isFollowingSeller,
+        isRepostedByMe: isNowReposted,
+        sellerIsVerified: p.sellerIsVerified,
+      );
+    }).toList();
+    if (!isClosed) emit(current.copyWith(products: updated));
     try {
       await _repository.toggleProductRepost(event.productId, event.userId);
-      final updated = current.products.map((p) {
-        if (p.id != event.productId) return p;
-        final isNowReposted = !p.isRepostedByMe;
-        final newCount = isNowReposted
-            ? p.repostsCount + 1
-            : (p.repostsCount > 0 ? p.repostsCount - 1 : 0);
-        return ProductModel(
-          id: p.id,
-          title: p.title,
-          description: p.description,
-          price: p.price,
-          imageUrl: p.imageUrl,
-          sellerId: p.sellerId,
-          category: p.category,
-          likesCount: p.likesCount,
-          commentsCount: p.commentsCount,
-          repostsCount: newCount,
-          sellerName: p.sellerName,
-          sellerAvatarUrl: p.sellerAvatarUrl,
-          createdAt: p.createdAt,
-          isLikedByMe: p.isLikedByMe,
-          isFollowingSeller: p.isFollowingSeller,
-          isRepostedByMe: isNowReposted,
-          sellerIsVerified: p.sellerIsVerified,
-        );
-      }).toList();
-      if (!isClosed) emit(current.copyWith(products: updated));
-    } catch (_) {}
+    } catch (e, st) {
+      if (e is PostgrestException) {
+        debugPrint('FeedBloc toggleRepost: ${e.message}');
+      } else {
+        debugPrint('FeedBloc toggleRepost error: $e');
+      }
+    }
   }
 }

@@ -7,6 +7,7 @@ import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
+import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
@@ -29,9 +30,10 @@ class _FeedPageState extends State<FeedPage> {
       if (!mounted) return;
       final bloc = context.read<FeedBloc>();
       if (bloc.state is FeedInitial) {
-        final userId = context.read<AuthBloc>().state is AuthAuthenticated
-            ? (context.read<AuthBloc>().state as AuthAuthenticated).user.id
-            : null;
+        final authState = context.read<AuthBloc>().state;
+        final userId = authState is AuthAuthenticated
+            ? authState.user.id
+            : context.read<AuthRepository>().currentUser?.id;
         bloc.add(FeedLoaded(currentUserId: userId));
       }
     });
@@ -39,9 +41,10 @@ class _FeedPageState extends State<FeedPage> {
 
   @override
   Widget build(BuildContext context) {
-    final currentUserId = context.read<AuthBloc>().state is AuthAuthenticated
-        ? (context.read<AuthBloc>().state as AuthAuthenticated).user.id
-        : null;
+    final authState = context.read<AuthBloc>().state;
+    final currentUserId = authState is AuthAuthenticated
+        ? authState.user.id
+        : context.read<AuthRepository>().currentUser?.id;
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -146,14 +149,23 @@ class _FeedPageState extends State<FeedPage> {
                           ),
                           onSellerTap: () =>
                               context.push('/profile/${product.sellerId}'),
-                          onLike: currentUserId != null
-                              ? () => context.read<FeedBloc>().add(
+                          onLike: () {
+                            if (currentUserId != null) {
+                              context.read<FeedBloc>().add(
                                     FeedToggleLike(
                                       productId: product.id,
-                                      userId: currentUserId,
+                                      userId: currentUserId!,
                                     ),
-                                  )
-                              : null,
+                                  );
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Войдите, чтобы ставить лайки'),
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            }
+                          },
                           onFollow: currentUserId != null &&
                                   currentUserId != product.sellerId
                               ? () => context.read<FeedBloc>().add(
@@ -505,6 +517,17 @@ class _ProductCard extends StatelessWidget {
                       onPressed: onLike,
                       padding: EdgeInsets.zero,
                     ),
+                    if (product.likesCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: Text(
+                          '${product.likesCount}',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
                     IconButton(
                       icon: const Icon(Icons.chat_bubble_outline,
                           size: 24, color: Colors.white),
@@ -521,16 +544,7 @@ class _ProductCard extends StatelessWidget {
                       onPressed: onRepost,
                       padding: EdgeInsets.zero,
                     ),
-                    if (product.likesCount > 0)
-                      Text(
-                        '${product.likesCount}',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                        ),
-                      ),
-                    if (product.repostsCount > 0) ...[
-                      const SizedBox(width: 4),
+                    if (product.repostsCount > 0)
                       Text(
                         '${product.repostsCount}',
                         style: const TextStyle(
@@ -538,7 +552,6 @@ class _ProductCard extends StatelessWidget {
                           fontSize: 14,
                         ),
                       ),
-                    ],
                   ],
                 ),
                 Text(

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
@@ -14,9 +15,10 @@ class NewsFeedPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final userId = context.read<AuthBloc>().state is AuthAuthenticated
-        ? (context.read<AuthBloc>().state as AuthAuthenticated).user.id
-        : null;
+    final authState = context.read<AuthBloc>().state;
+    final userId = authState is AuthAuthenticated
+        ? authState.user.id
+        : context.read<AuthRepository>().currentUser?.id;
     return BlocProvider(
       create: (c) => NewsBloc(c.read<PostRepository>())..add(NewsLoaded(currentUserId: userId)),
       child: Scaffold(
@@ -99,6 +101,20 @@ class NewsFeedPage extends StatelessWidget {
                     return _NewsPostCard(
                       post: state.posts[index],
                       currentUserId: userId,
+                      onLike: () {
+                        if (userId != null) {
+                          context.read<NewsBloc>().add(
+                                NewsToggleLike(postId: state.posts[index].id, userId: userId),
+                              );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Войдите, чтобы ставить лайки'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      },
                     );
                   },
                 ),
@@ -116,10 +132,12 @@ class _NewsPostCard extends StatelessWidget {
   const _NewsPostCard({
     required this.post,
     this.currentUserId,
+    required this.onLike,
   });
 
   final PostEntity post;
   final String? currentUserId;
+  final VoidCallback onLike;
 
   @override
   Widget build(BuildContext context) {
@@ -232,11 +250,7 @@ class _NewsPostCard extends StatelessWidget {
                       size: 22,
                       color: post.isLikedByMe ? Colors.red : null,
                     ),
-                    onPressed: currentUserId != null
-                        ? () => context.read<NewsBloc>().add(
-                              NewsToggleLike(postId: post.id, userId: currentUserId!),
-                            )
-                        : null,
+                    onPressed: onLike,
                   ),
                   Text(
                     '${post.likesCount}',
