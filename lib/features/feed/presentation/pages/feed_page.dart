@@ -46,7 +46,7 @@ class _FeedPageState extends State<FeedPage> {
         ? authState.user.id
         : context.read<AuthRepository>().currentUser?.id;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.transparent,
       body: SafeArea(
         child: CustomScrollView(
           cacheExtent: 400,
