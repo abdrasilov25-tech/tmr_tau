@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'core/storage/local_reactions_storage.dart';
 
 bool _supabaseInitialized = false;
 
@@ -27,9 +29,13 @@ Future<void> main() async {
     debugPrint('Supabase init failed: $e $st');
   }
 
+  final prefs = await SharedPreferences.getInstance();
+  final localReactions = LocalReactionsStorage(prefs);
+
   runApp(TmrTauApp(
     supabaseUrl: supabaseUrl,
     supabaseAnonKey: supabaseAnonKey,
     supabaseInitialized: _supabaseInitialized,
+    localReactionsStorage: localReactions,
   ));
 }

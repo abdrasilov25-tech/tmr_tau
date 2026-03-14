@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/storage/local_reactions_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
@@ -31,11 +32,13 @@ class TmrTauApp extends StatefulWidget {
     required this.supabaseUrl,
     required this.supabaseAnonKey,
     this.supabaseInitialized = true,
+    required this.localReactionsStorage,
   });
 
   final String supabaseUrl;
   final String supabaseAnonKey;
   final bool supabaseInitialized;
+  final LocalReactionsStorage localReactionsStorage;
 
   @override
   State<TmrTauApp> createState() => _TmrTauAppState();
@@ -132,7 +135,10 @@ class _TmrTauAppState extends State<TmrTauApp> {
         create: (context) =>
             AuthBloc(_authRepository)..add(const AuthCheckRequested()),
         child: BlocProvider(
-          create: (context) => FeedBloc(_feedRepository),
+          create: (context) => FeedBloc(
+            _feedRepository,
+            widget.localReactionsStorage,
+          ),
           child: Container(
             color: Colors.black,
             child: MaterialApp.router(

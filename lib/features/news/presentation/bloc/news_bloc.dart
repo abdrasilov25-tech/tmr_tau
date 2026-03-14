@@ -63,31 +63,33 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
   Future<void> _onToggleLike(NewsToggleLike event, Emitter<NewsState> emit) async {
     final current = state;
     if (current is! NewsSuccess) return;
+    final updated = current.posts.map((p) {
+      if (p.id != event.postId) return p;
+      return PostEntity(
+        id: p.id,
+        userId: p.userId,
+        imageUrl: p.imageUrl,
+        caption: p.caption,
+        videoUrl: p.videoUrl,
+        videoDurationSeconds: p.videoDurationSeconds,
+        createdAt: p.createdAt,
+        likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
+        dislikesCount: p.dislikesCount,
+        commentsCount: p.commentsCount,
+        repostsCount: p.repostsCount,
+        userName: p.userName,
+        userAvatarUrl: p.userAvatarUrl,
+        isLikedByMe: !p.isLikedByMe,
+        isDislikedByMe: p.isDislikedByMe,
+        isRepostedByMe: p.isRepostedByMe,
+      );
+    }).toList();
+    if (!isClosed) emit(current.copyWith(posts: updated));
     try {
       await _repository.toggleLike(event.postId, event.userId);
-      final updated = current.posts.map((p) {
-        if (p.id != event.postId) return p;
-        return PostEntity(
-          id: p.id,
-          userId: p.userId,
-          imageUrl: p.imageUrl,
-          caption: p.caption,
-          videoUrl: p.videoUrl,
-          videoDurationSeconds: p.videoDurationSeconds,
-          createdAt: p.createdAt,
-          likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
-          dislikesCount: p.dislikesCount,
-          commentsCount: p.commentsCount,
-          repostsCount: p.repostsCount,
-          userName: p.userName,
-          userAvatarUrl: p.userAvatarUrl,
-          isLikedByMe: !p.isLikedByMe,
-          isDislikedByMe: p.isDislikedByMe,
-          isRepostedByMe: p.isRepostedByMe,
-        );
-      }).toList();
-      if (!isClosed) emit(current.copyWith(posts: updated));
-    } catch (_) {}
+    } catch (_) {
+      if (!isClosed) emit(current);
+    }
   }
 
   Future<void> _onToggleRepost(NewsToggleRepost event, Emitter<NewsState> emit) async {
