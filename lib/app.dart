@@ -118,6 +118,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
     }
     return MultiRepositoryProvider(
       providers: [
+        RepositoryProvider<LocalReactionsStorage>.value(
+            value: widget.localReactionsStorage),
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),

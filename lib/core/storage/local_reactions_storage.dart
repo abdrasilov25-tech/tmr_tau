@@ -8,6 +8,7 @@ class LocalReactionsStorage {
 
   static const _likedIdsKey = 'tmr_tau_liked_product_ids';
   static const _repostedIdsKey = 'tmr_tau_reposted_product_ids';
+  static const _loginThemeIndexKey = 'tmr_tau_login_theme_index';
 
   Set<String> getLikedIds() {
     final list = _prefs.getStringList(_likedIdsKey);
@@ -37,5 +38,14 @@ class LocalReactionsStorage {
       set.remove(productId);
     }
     await _prefs.setStringList(_repostedIdsKey, set.toList());
+  }
+
+  /// Индекс темы экрана входа (0–5). По умолчанию 0.
+  int getLoginThemeIndex() {
+    return _prefs.getInt(_loginThemeIndexKey) ?? 0;
+  }
+
+  Future<void> setLoginThemeIndex(int index) async {
+    await _prefs.setInt(_loginThemeIndexKey, index.clamp(0, 5));
   }
 }

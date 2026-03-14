@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../../core/storage/local_reactions_storage.dart';
 import '../bloc/auth_bloc.dart';
 
 /// Цвета неоновой палитры
@@ -26,16 +27,105 @@ class LoginPage extends StatefulWidget {
   State<LoginPage> createState() => _LoginPageState();
 }
 
+/// Пресеты градиентов для темы (только цвета фона, частицы и волны не трогаем)
+class _LoginThemePresets {
+  static const List<Color> neon = [
+    Color(0xFF6B2D9E),
+    Color(0xFF8B2D9E),
+    Color(0xFFE91E8C),
+    Color(0xFFE85A4F),
+    Color(0xFFFF6B35),
+    Color(0xFFFFA726),
+    Color(0xFFFFD23F),
+    Color(0xFF26C6DA),
+    Color(0xFF00D9D9),
+  ];
+  static const List<Color> blue = [
+    Color(0xFF0D47A1),
+    Color(0xFF1565C0),
+    Color(0xFF1976D2),
+    Color(0xFF42A5F5),
+    Color(0xFF64B5F6),
+    Color(0xFF90CAF9),
+    Color(0xFFBBDEFB),
+    Color(0xFF4FC3F7),
+    Color(0xFF00BCD4),
+  ];
+  static const List<Color> pink = [
+    Color(0xFF880E4F),
+    Color(0xFFAD1457),
+    Color(0xFFC2185B),
+    Color(0xFFE91E63),
+    Color(0xFFF06292),
+    Color(0xFFF48FB1),
+    Color(0xFFF8BBD9),
+    Color(0xFFEC407A),
+    Color(0xFFF50057),
+  ];
+  static const List<Color> purple = [
+    Color(0xFF4A148C),
+    Color(0xFF6A1B9A),
+    Color(0xFF7B1FA2),
+    Color(0xFF9C27B0),
+    Color(0xFFAB47BC),
+    Color(0xFFCE93D8),
+    Color(0xFFE1BEE7),
+    Color(0xFF7C4DFF),
+    Color(0xFF651FFF),
+  ];
+  static const List<Color> dark = [
+    Color(0xFF1A1A2E),
+    Color(0xFF16213E),
+    Color(0xFF0F3460),
+    Color(0xFF1B262C),
+    Color(0xFF2C3E50),
+    Color(0xFF34495E),
+    Color(0xFF2D3436),
+    Color(0xFF6C5CE7),
+    Color(0xFF00CEC9),
+  ];
+
+  /// Обычный — белый минималистичный фон
+  static const List<Color> ordinary = [
+    Color(0xFFFFFFFF),
+    Color(0xFFFAFAFA),
+    Color(0xFFF5F5F5),
+    Color(0xFFF0F0F0),
+    Color(0xFFEEEEEE),
+    Color(0xFFE8E8E8),
+    Color(0xFFE0E0E0),
+    Color(0xFFF5F5F5),
+    Color(0xFFFAFAFA),
+  ];
+
+  static List<Color> preset(int index) {
+    switch (index) {
+      case 0: return neon;
+      case 1: return ordinary;
+      case 2: return blue;
+      case 3: return pink;
+      case 4: return purple;
+      case 5: return dark;
+      default: return neon;
+    }
+  }
+}
+
 class _LoginPageState extends State<LoginPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
+  int _themeIndex = 0;
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
+  late AnimationController _themeButtonScaleController;
+  late Animation<double> _themeButtonScaleAnimation;
+  late AnimationController _themeButtonGlowController;
+  late Animation<double> _themeButtonGlowAnimation;
 
   @override
   void initState() {
@@ -47,8 +137,30 @@ class _LoginPageState extends State<LoginPage>
     _scaleAnimation = Tween<double>(begin: 1.0, end: 0.96).animate(
       CurvedAnimation(parent: _scaleController, curve: Curves.easeInOut),
     );
+    _themeButtonScaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+    );
+    _themeButtonScaleAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
+      CurvedAnimation(parent: _themeButtonScaleController, curve: Curves.easeInOut),
+    );
+    _themeButtonGlowController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+    _themeButtonGlowAnimation = Tween<double>(begin: 0.4, end: 0.8).animate(
+      CurvedAnimation(parent: _themeButtonGlowController, curve: Curves.easeInOut),
+    );
     _emailFocus.addListener(() => setState(() {}));
     _passwordFocus.addListener(() => setState(() {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      try {
+        final storage = context.read<LocalReactionsStorage>();
+        final saved = storage.getLoginThemeIndex();
+        if (saved != _themeIndex) setState(() => _themeIndex = saved);
+      } catch (_) {}
+    });
   }
 
   @override
@@ -58,6 +170,8 @@ class _LoginPageState extends State<LoginPage>
     _emailFocus.dispose();
     _passwordFocus.dispose();
     _scaleController.dispose();
+    _themeButtonScaleController.dispose();
+    _themeButtonGlowController.dispose();
     super.dispose();
   }
 
@@ -84,108 +198,16 @@ class _LoginPageState extends State<LoginPage>
           _buildNeonWaves(),
           // Контент поверх
           SafeArea(
-            child: BlocConsumer<AuthBloc, AuthState>(
-              listener: (context, state) {
-                if (state is AuthAuthenticated) {
-                  context.go('/home/feed');
-                  return;
-                }
-                if (state is AuthError) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(state.message),
-                      backgroundColor: Colors.black87,
-                      behavior: SnackBarBehavior.floating,
-                    ),
-                  );
-                }
-              },
-              builder: (context, state) {
-                final loading = state is AuthLoading;
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        const SizedBox(height: 56),
-                        Text(
-                          'tmr_tau',
-                          style: GoogleFonts.poppins(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            color: _NeonColors.white,
-                            letterSpacing: 1.2,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Войдите в аккаунт',
-                          style: GoogleFonts.poppins(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w400,
-                            color: _NeonColors.white60,
-                          ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 48),
-                        _NeonTextField(
-                          controller: _emailController,
-                          focusNode: _emailFocus,
-                          isFocused: _emailFocus.hasFocus,
-                          hint: 'Email',
-                          keyboardType: TextInputType.emailAddress,
-                          borderColor: _NeonColors.cyan,
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) return 'Введите email';
-                            if (!v.contains('@')) return 'Некорректный email';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 20),
-                        _NeonTextField(
-                          controller: _passwordController,
-                          focusNode: _passwordFocus,
-                          isFocused: _passwordFocus.hasFocus,
-                          hint: 'Пароль',
-                          obscureText: _obscurePassword,
-                          borderColor: _NeonColors.pink,
-                          toggleObscure: () =>
-                              setState(() => _obscurePassword = !_obscurePassword),
-                          validator: (v) =>
-                              (v == null || v.isEmpty) ? 'Введите пароль' : null,
-                        ),
-                        const SizedBox(height: 40),
-                        _NeonLoginButton(
-                          scaleAnimation: _scaleAnimation,
-                          onTapDown: () => _scaleController.forward(),
-                          onTapUp: () => _scaleController.reverse(),
-                          onTapCancel: () => _scaleController.reverse(),
-                          onPressed: loading ? null : _submit,
-                          loading: loading,
-                        ),
-                        const SizedBox(height: 24),
-                        TextButton(
-                          onPressed: () => context.push('/register'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.green,
-                          ),
-                          child: Text(
-                            'Нет аккаунта? Зарегистрироваться',
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              color: Colors.green,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 32),
-                      ],
-                    ),
-                  ),
-                );
-              },
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _buildScrollContent(),
+                Positioned(
+                  top: 8,
+                  right: 16,
+                  child: _buildThemeButton(),
+                ),
+              ],
             ),
           ),
         ],
@@ -193,24 +215,197 @@ class _LoginPageState extends State<LoginPage>
     );
   }
 
+  Widget _buildScrollContent() {
+    return BlocConsumer<AuthBloc, AuthState>(
+      listener: (context, state) {
+        if (state is AuthAuthenticated) {
+          context.go('/home/feed');
+          return;
+        }
+        if (state is AuthError) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.message),
+              backgroundColor: Colors.black87,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      },
+      builder: (context, state) {
+        final loading = state is AuthLoading;
+        final isLightTheme = _themeIndex == 1; // Обычный — белый фон
+        final titleColor = isLightTheme ? Colors.black87 : _NeonColors.white;
+        final subtitleColor = isLightTheme ? Colors.black54 : _NeonColors.white60;
+        return SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 56),
+                Text(
+                  'tmr_tau',
+                  style: GoogleFonts.poppins(
+                    fontSize: 36,
+                    fontWeight: FontWeight.bold,
+                    color: titleColor,
+                    letterSpacing: 1.2,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Войдите в аккаунт',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w400,
+                    color: subtitleColor,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 48),
+                _NeonTextField(
+                  controller: _emailController,
+                  focusNode: _emailFocus,
+                  isFocused: _emailFocus.hasFocus,
+                  hint: 'Email',
+                  keyboardType: TextInputType.emailAddress,
+                  borderColor: _NeonColors.cyan,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Введите email';
+                    if (!v.contains('@')) return 'Некорректный email';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 20),
+                _NeonTextField(
+                  controller: _passwordController,
+                  focusNode: _passwordFocus,
+                  isFocused: _passwordFocus.hasFocus,
+                  hint: 'Пароль',
+                  obscureText: _obscurePassword,
+                  borderColor: _NeonColors.pink,
+                  toggleObscure: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Введите пароль' : null,
+                ),
+                const SizedBox(height: 40),
+                _NeonLoginButton(
+                  scaleAnimation: _scaleAnimation,
+                  onTapDown: () => _scaleController.forward(),
+                  onTapUp: () => _scaleController.reverse(),
+                  onTapCancel: () => _scaleController.reverse(),
+                  onPressed: loading ? null : _submit,
+                  loading: loading,
+                ),
+                const SizedBox(height: 24),
+                TextButton(
+                  onPressed: () => context.push('/register'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.green,
+                  ),
+                  child: Text(
+                    'Нет аккаунта? Зарегистрироваться',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 32),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildThemeButton() {
+    return AnimatedBuilder(
+      animation: Listenable.merge([_themeButtonScaleAnimation, _themeButtonGlowAnimation]),
+      builder: (context, child) {
+        final glow = _themeButtonGlowAnimation.value;
+        return Transform.scale(
+          scale: _themeButtonScaleAnimation.value,
+          child: Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.white.withValues(alpha: 0.12 * glow),
+                  blurRadius: 12,
+                  spreadRadius: 0,
+                ),
+              ],
+            ),
+            child: child,
+          ),
+        );
+      },
+      child: GestureDetector(
+        onTapDown: (_) => _themeButtonScaleController.forward(),
+        onTapUp: (_) => _themeButtonScaleController.reverse(),
+        onTapCancel: () => _themeButtonScaleController.reverse(),
+        onTap: _showThemeBottomSheet,
+        child: SizedBox(
+          width: 38,
+          height: 38,
+          child: ClipOval(
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+              child: Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color.fromRGBO(255, 255, 255, 0.08),
+                  border: Border.all(
+                    color: const Color.fromRGBO(255, 255, 255, 0.15),
+                    width: 1,
+                  ),
+                ),
+                child: Icon(
+                  Icons.palette_outlined,
+                  size: 19,
+                  color: Colors.white.withValues(alpha: 0.8),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showThemeBottomSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => _ThemeBottomSheet(
+        currentIndex: _themeIndex,
+        onSelect: (index) {
+          setState(() => _themeIndex = index);
+          context.read<LocalReactionsStorage>().setLoginThemeIndex(index);
+          Navigator.of(context).pop();
+        },
+      ),
+    );
+  }
+
   Widget _buildGradientBackground() {
+    final colors = _LoginThemePresets.preset(_themeIndex);
     return Positioned.fill(
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              _NeonColors.purple,
-              const Color(0xFF8B2D9E),
-              _NeonColors.pink,
-              const Color(0xFFE85A4F),
-              _NeonColors.orange,
-              const Color(0xFFFFA726),
-              _NeonColors.yellow,
-              const Color(0xFF26C6DA),
-              _NeonColors.teal,
-            ],
+            colors: colors,
             stops: const [0.0, 0.2, 0.35, 0.5, 0.6, 0.75, 0.85, 0.92, 1.0],
           ),
         ),
@@ -230,6 +425,138 @@ class _LoginPageState extends State<LoginPage>
     return Positioned.fill(
       child: CustomPaint(
         painter: _NeonWavesPainter(),
+      ),
+    );
+  }
+}
+
+/// Bottom sheet: непрозрачная панель выбора темы — всё чётко видно
+class _ThemeBottomSheet extends StatelessWidget {
+  const _ThemeBottomSheet({
+    required this.currentIndex,
+    required this.onSelect,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onSelect;
+
+  static final List<(String label, List<Color> colors)> _options = [
+    ('Neon', _LoginThemePresets.neon),
+    ('Обычный', _LoginThemePresets.ordinary),
+    ('Синий градиент', _LoginThemePresets.blue),
+    ('Pink', _LoginThemePresets.pink),
+    ('Purple', _LoginThemePresets.purple),
+    ('Dark', _LoginThemePresets.dark),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF252530),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: const Color(0xFF6B6B80),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 24),
+          Text(
+            'Тема',
+            style: GoogleFonts.poppins(
+              fontSize: 22,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Выберите фон экрана входа',
+            style: GoogleFonts.poppins(
+              fontSize: 15,
+              color: Color(0xFFB0B0C0),
+            ),
+          ),
+          const SizedBox(height: 24),
+          ...List.generate(_options.length, (index) {
+            final selected = index == currentIndex;
+            final option = _options[index];
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Material(
+                color: selected ? const Color(0xFF3A3A4A) : const Color(0xFF2E2E3A),
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  onTap: () => onSelect(index),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 18,
+                    ),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: selected
+                            ? const Color(0xFF6C9EFF)
+                            : const Color(0xFF404055),
+                        width: selected ? 2 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: option.$2,
+                            ),
+                            border: Border.all(
+                              color: const Color(0xFF505065),
+                              width: 1,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 18),
+                        Expanded(
+                          child: Text(
+                            option.$1,
+                            style: GoogleFonts.poppins(
+                              fontSize: 17,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.w500,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                        if (selected)
+                          const Icon(
+                            Icons.check_circle_rounded,
+                            color: Color(0xFF6C9EFF),
+                            size: 26,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
       ),
     );
   }
