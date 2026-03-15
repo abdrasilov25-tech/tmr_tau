@@ -235,7 +235,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           IconButton(
             icon: const Icon(Icons.menu_rounded, size: 26),
             onPressed: () {
-              // Меню: настройки, заказы, избранное, выйти
+              // Меню: чаты, избранное, выйти
               _showProfileMenu(context);
             },
           ),
@@ -279,9 +279,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
   }
 
   void _showProfileMenu(BuildContext context) {
-    final user = context.read<AuthBloc>().state is AuthAuthenticated
-        ? (context.read<AuthBloc>().state as AuthAuthenticated).user
-        : null;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -292,14 +289,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
-              leading: const Icon(Icons.shopping_bag_outlined),
-              title: const Text('Мои заказы'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/orders');
-              },
-            ),
             ListTile(
               leading: const Icon(Icons.chat_bubble_outline),
               title: const Text('Мои чаты'),
@@ -314,14 +303,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
               onTap: () {
                 Navigator.pop(context);
                 context.push('/favorites');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.store_outlined),
-              title: const Text('Мой магазин'),
-              onTap: () {
-                Navigator.pop(context);
-                if (user != null) context.push('/profile/${user.id}');
               },
             ),
             const Divider(height: 1),
