@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/storage/chat_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 
@@ -17,12 +18,14 @@ class ChatsPage extends StatefulWidget {
 class _ChatsPageState extends State<ChatsPage> {
   late final SupabaseClient _client;
   late final String _currentUserId;
+  late final ChatListStorage _chatStorage;
   late Future<List<_ChatThread>> _threadsFuture;
 
   @override
   void initState() {
     super.initState();
     final authState = context.read<AuthBloc>().state;
+    _chatStorage = context.read<ChatListStorage>();
     if (authState is! AuthAuthenticated) {
       _threadsFuture = Future.value(const []);
       return;
@@ -57,6 +60,7 @@ class _ChatsPageState extends State<ChatsPage> {
           peerAvatarUrl: null,
           lastMessageText: text,
           lastMessageAt: createdAt,
+          lastMessageSenderId: senderId,
         );
       }
     }
@@ -82,7 +86,6 @@ class _ChatsPageState extends State<ChatsPage> {
           );
         }
       } catch (_) {
-        // Если не удалось загрузить пользователя, оставляем дефолтные данные
         continue;
       }
     }
@@ -90,6 +93,92 @@ class _ChatsPageState extends State<ChatsPage> {
     final threads = threadsByPeer.values.toList()
       ..sort((a, b) => b.lastMessageAt.compareTo(a.lastMessageAt));
     return threads;
+  }
+
+  List<_ChatThread> _filterByTab(List<_ChatThread> threads, int tabIndex) {
+    final archived = _chatStorage.getArchivedPeerIds();
+    if (tabIndex == 0) {
+      return threads.where((t) => !archived.contains(t.peerId)).toList();
+    }
+    if (tabIndex == 1) {
+      return threads.where((t) {
+        if (archived.contains(t.peerId)) return false;
+        final lastRead = _chatStorage.getLastReadAt(t.peerId);
+        final fromPeer = t.lastMessageSenderId != _currentUserId;
+        return fromPeer && (lastRead == null || t.lastMessageAt.isAfter(lastRead));
+      }).toList();
+    }
+    return threads.where((t) => archived.contains(t.peerId)).toList();
+  }
+
+  void _showThreadMenu(BuildContext context, _ChatThread t) {
+    final archived = _chatStorage.getArchivedPeerIds();
+    final isArchived = archived.contains(t.peerId);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(isArchived ? Icons.unarchive_outlined : Icons.archive_outlined),
+              title: Text(isArchived ? 'Из архива' : 'В архив'),
+              onTap: () async {
+                Navigator.pop(ctx);
+                await _chatStorage.setArchived(t.peerId, !isArchived);
+                setState(() {});
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline, color: Colors.red),
+              title: const Text('Удалить чат', style: TextStyle(color: Colors.red)),
+              onTap: () async {
+                Navigator.pop(ctx);
+                final ok = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Text('Удалить чат?'),
+                    content: Text('Переписка с ${t.peerName} будет удалена.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
+                      FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Удалить')),
+                    ],
+                  ),
+                );
+                if (ok == true && mounted) await _deleteChat(t);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteChat(_ChatThread t) async {
+    try {
+      await _client
+          .from(SupabaseConstants.messagesTable)
+          .delete()
+          .eq('sender_id', _currentUserId)
+          .eq('receiver_id', t.peerId);
+      await _client
+          .from(SupabaseConstants.messagesTable)
+          .delete()
+          .eq('sender_id', t.peerId)
+          .eq('receiver_id', _currentUserId);
+      await _chatStorage.setArchived(t.peerId, false);
+      if (mounted) setState(() => _threadsFuture = _loadThreads());
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось удалить чат: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -114,80 +203,137 @@ class _ChatsPageState extends State<ChatsPage> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Мои чаты')),
-      body: FutureBuilder<List<_ChatThread>>(
-        future: _threadsFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('Не удалось загрузить чаты'),
-                  const SizedBox(height: 12),
-                  FilledButton(
-                    onPressed: () {
-                      setState(() {
-                        _threadsFuture = _loadThreads();
-                      });
-                    },
-                    child: const Text('Повторить'),
-                  ),
-                ],
-              ),
-            );
-          }
-          final threads = snapshot.data ?? const [];
-          if (threads.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.chat_bubble_outline,
-                      size: 56, color: Colors.grey.shade400),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Пока нет чатов',
-                    style: TextStyle(color: Colors.grey.shade600),
-                  ),
-                ],
-              ),
-            );
-          }
-          return ListView.separated(
-            itemCount: threads.length,
-            separatorBuilder: (context, index) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final t = threads[index];
-              return ListTile(
-                leading: CachedAvatar(
-                  imageUrl: t.peerAvatarUrl,
-                  radius: 22,
-                  fallbackText: t.peerName,
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Мои чаты'),
+          bottom: const TabBar(
+            tabs: [
+              Tab(text: 'Основные'),
+              Tab(text: 'Непрочитанное'),
+              Tab(text: 'Архив'),
+            ],
+          ),
+        ),
+        body: FutureBuilder<List<_ChatThread>>(
+          future: _threadsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text('Не удалось загрузить чаты'),
+                    const SizedBox(height: 12),
+                    FilledButton(
+                      onPressed: () {
+                        setState(() => _threadsFuture = _loadThreads());
+                      },
+                      child: const Text('Повторить'),
+                    ),
+                  ],
                 ),
-                title: Text(t.peerName),
-                subtitle: Text(
-                  t.lastMessageText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: Text(
-                  _timeAgo(t.lastMessageAt),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                onTap: () {
-                  final encodedName = Uri.encodeComponent(t.peerName);
-                  context.push('/chat/${t.peerId}?name=$encodedName');
-                },
               );
-            },
-          );
-        },
+            }
+            final allThreads = snapshot.data ?? [];
+            return TabBarView(
+              children: [0, 1, 2].map((tabIndex) {
+                final threads = _filterByTab(allThreads, tabIndex);
+                if (threads.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.chat_bubble_outline, size: 56, color: Colors.grey.shade400),
+                        const SizedBox(height: 12),
+                        Text(
+                          tabIndex == 0
+                              ? 'Пока нет чатов'
+                              : tabIndex == 1
+                                  ? 'Нет непрочитанных'
+                                  : 'В архиве пусто',
+                          style: TextStyle(color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                return _buildThreadList(context, threads);
+              }).toList(),
+            );
+          },
+        ),
       ),
+    );
+  }
+
+  Widget _buildThreadList(BuildContext context, List<_ChatThread> threads) {
+    return ListView.separated(
+      itemCount: threads.length,
+      separatorBuilder: (context, index) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final t = threads[index];
+        final isUnread = t.lastMessageSenderId != _currentUserId &&
+            (_chatStorage.getLastReadAt(t.peerId) == null ||
+                t.lastMessageAt.isAfter(_chatStorage.getLastReadAt(t.peerId)!));
+        return ListTile(
+          leading: Stack(
+            children: [
+              CachedAvatar(
+                imageUrl: t.peerAvatarUrl,
+                radius: 22,
+                fallbackText: t.peerName,
+              ),
+              if (isUnread)
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: const BoxDecoration(
+                      color: Colors.green,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          title: Text(
+            t.peerName,
+            style: TextStyle(fontWeight: isUnread ? FontWeight.bold : FontWeight.normal),
+          ),
+          subtitle: Text(
+            t.lastMessageText,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _timeAgo(t.lastMessageAt),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_vert, size: 22),
+                onPressed: () => _showThreadMenu(context, t),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              ),
+            ],
+          ),
+          onTap: () async {
+            await context.push('/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}');
+            if (mounted) setState(() {});
+          },
+          onLongPress: () => _showThreadMenu(context, t),
+        );
+      },
     );
   }
 }
@@ -199,6 +345,7 @@ class _ChatThread {
     required this.peerAvatarUrl,
     required this.lastMessageText,
     required this.lastMessageAt,
+    required this.lastMessageSenderId,
   });
 
   final String peerId;
@@ -206,6 +353,7 @@ class _ChatThread {
   final String? peerAvatarUrl;
   final String lastMessageText;
   final DateTime lastMessageAt;
+  final String lastMessageSenderId;
 
   _ChatThread copyWith({
     String? peerName,
@@ -217,6 +365,7 @@ class _ChatThread {
       peerAvatarUrl: peerAvatarUrl ?? this.peerAvatarUrl,
       lastMessageText: lastMessageText,
       lastMessageAt: lastMessageAt,
+      lastMessageSenderId: lastMessageSenderId,
     );
   }
 }
@@ -230,4 +379,3 @@ String _timeAgo(DateTime dateTime) {
   if (diff.inDays < 7) return '${diff.inDays} дн';
   return '${dateTime.day}.${dateTime.month}.${dateTime.year}';
 }
-

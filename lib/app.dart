@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'core/storage/chat_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
@@ -33,12 +34,14 @@ class TmrTauApp extends StatefulWidget {
     required this.supabaseAnonKey,
     this.supabaseInitialized = true,
     required this.localReactionsStorage,
+    required this.chatListStorage,
   });
 
   final String supabaseUrl;
   final String supabaseAnonKey;
   final bool supabaseInitialized;
   final LocalReactionsStorage localReactionsStorage;
+  final ChatListStorage chatListStorage;
 
   @override
   State<TmrTauApp> createState() => _TmrTauAppState();
@@ -120,6 +123,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
       providers: [
         RepositoryProvider<LocalReactionsStorage>.value(
             value: widget.localReactionsStorage),
+        RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),
