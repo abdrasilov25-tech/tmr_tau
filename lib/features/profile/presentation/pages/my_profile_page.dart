@@ -313,7 +313,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
               title: const Text('Избранное'),
               onTap: () {
                 Navigator.pop(context);
-                context.go('/home/favorites');
+                context.push('/favorites');
               },
             ),
             ListTile(

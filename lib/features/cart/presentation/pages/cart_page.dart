@@ -33,6 +33,12 @@ class CartPage extends StatelessWidget {
                     'Корзина пуста',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Добавляйте товары кнопкой «В корзину» на странице товара',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
                 ],
               ),
             )

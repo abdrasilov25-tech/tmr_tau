@@ -171,6 +171,47 @@ class ProductRepositoryImpl implements ProductRepository {
     }
   }
 
+  @override
+  Future<List<ProductEntity>> getFavorites(String userId) async {
+    final favRes = await _client
+        .from(SupabaseConstants.favoritesTable)
+        .select('product_id')
+        .eq('user_id', userId);
+    final ids = (favRes as List)
+        .map((e) => (e as Map<String, dynamic>)['product_id'] as String)
+        .toList();
+    if (ids.isEmpty) return [];
+    final res = await _client
+        .from(SupabaseConstants.productsTable)
+        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
+        .inFilter('id', ids)
+        .order('created_at', ascending: false);
+    final list = _mapProducts(res as List);
+    return await _enrichWithUserState(list, userId);
+  }
+
+  @override
+  Future<void> toggleFavorite(String productId, String userId) async {
+    final existing = await _client
+        .from(SupabaseConstants.favoritesTable)
+        .select('product_id')
+        .eq('product_id', productId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from(SupabaseConstants.favoritesTable)
+          .delete()
+          .eq('product_id', productId)
+          .eq('user_id', userId);
+    } else {
+      await _client.from(SupabaseConstants.favoritesTable).insert({
+        'product_id': productId,
+        'user_id': userId,
+      });
+    }
+  }
+
   List<ProductEntity> _mapProducts(List<dynamic> list) {
     return list.map((e) => _mapProduct(e as Map<String, dynamic>)).toList();
   }
