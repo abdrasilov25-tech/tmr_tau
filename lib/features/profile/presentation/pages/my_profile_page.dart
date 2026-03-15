@@ -4,12 +4,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../widgets/account_switcher_sheet.dart';
 import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../auth/presentation/pages/login_result.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../product/domain/entities/product_entity.dart';
@@ -29,6 +32,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
   bool _loading = true;
   int _tabIndex = 0;
   bool _updatingAvatar = false;
+  bool _isSwitchingAccount = false;
 
   @override
   void initState() {
@@ -218,14 +222,21 @@ class _MyProfilePageState extends State<MyProfilePage> {
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(
-          context.read<AuthBloc>().state is AuthAuthenticated
-              ? (context.read<AuthBloc>().state as AuthAuthenticated).user.name ?? 'Профиль'
-              : 'Профиль',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
-              ),
+        title: GestureDetector(
+          onTap: () {
+            final state = context.read<AuthBloc>().state;
+            if (state is! AuthAuthenticated) return;
+            _showAccountSwitcher(context, state.user);
+          },
+          child: Text(
+            context.read<AuthBloc>().state is AuthAuthenticated
+                ? (context.read<AuthBloc>().state as AuthAuthenticated).user.name ?? 'Профиль'
+                : 'Профиль',
+            style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
         ),
         actions: [
           IconButton(
@@ -275,6 +286,86 @@ class _MyProfilePageState extends State<MyProfilePage> {
           );
         },
       ),
+    );
+  }
+
+  void _showAccountSwitcher(BuildContext context, AppUser currentUser) {
+    final accountStorage = context.read<MultiAccountStorage>();
+    final savedAccounts = accountStorage.getAccounts();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.9,
+        expand: false,
+        builder: (_, scrollController) => AccountSwitcherSheet(
+        scrollController: scrollController,
+        currentUser: currentUser,
+        savedAccounts: savedAccounts,
+        onAddAccount: () async {
+          await accountStorage.addAccount(
+            SavedAccount(
+              id: currentUser.id,
+              email: currentUser.email,
+              name: currentUser.name,
+              avatarUrl: currentUser.avatarUrl,
+            ),
+          );
+          final result = await context.push<dynamic>('/login', extra: {'addAccount': true});
+          if (!mounted) return;
+          if (result is LoginResult) {
+            if (result.password != null && result.password!.isNotEmpty) {
+              accountStorage.savePasswordImmediate(result.userId, result.email, result.password!);
+            }
+            await accountStorage.addAccount(
+              SavedAccount(
+                id: result.userId,
+                email: result.email,
+                name: result.name,
+                avatarUrl: result.avatarUrl,
+              ),
+              password: result.password,
+            );
+            setState(() {});
+          }
+        },
+        onSwitchAccount: (account, closeSheet) async {
+          if (_isSwitchingAccount) return;
+          _isSwitchingAccount = true;
+          closeSheet();
+          String? password;
+          try {
+            password = await accountStorage.getPassword(account.id, email: account.email);
+          } catch (_) {
+            password = null;
+          }
+          if (password == null || password.isEmpty) {
+            if (!mounted) {
+              _isSwitchingAccount = false;
+              return;
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Введите пароль для переключения')),
+            );
+            await context.push<void>('/login', extra: {'email': account.email});
+            if (mounted) setState(() => _isSwitchingAccount = false);
+            return;
+          }
+          if (!mounted) {
+            _isSwitchingAccount = false;
+            return;
+          }
+          context.read<AuthBloc>().add(AuthSwitchToAccountRequested(
+                email: account.email,
+                password: password,
+              ));
+          setState(() => _isSwitchingAccount = false);
+        },
+      ),
+    ),
     );
   }
 

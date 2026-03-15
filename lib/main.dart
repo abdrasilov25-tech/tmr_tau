@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/storage/chat_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
+import 'core/storage/multi_account_storage.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 bool _supabaseInitialized = false;
 
@@ -25,6 +27,7 @@ Future<void> main() async {
     await Supabase.initialize(
       url: supabaseUrl,
       anonKey: supabaseAnonKey,
+      debug: false,
     );
     _supabaseInitialized = true;
   } catch (e, st) {
@@ -34,6 +37,8 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
+  const secureStorage = FlutterSecureStorage();
+  final multiAccountStorage = MultiAccountStorage(prefs, secureStorage);
 
   runApp(TmrTauApp(
     supabaseUrl: supabaseUrl,
@@ -41,5 +46,6 @@ Future<void> main() async {
     supabaseInitialized: _supabaseInitialized,
     localReactionsStorage: localReactions,
     chatListStorage: chatListStorage,
+    multiAccountStorage: multiAccountStorage,
   ));
 }

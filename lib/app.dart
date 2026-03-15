@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/storage/chat_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
+import 'core/storage/multi_account_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
@@ -35,6 +36,7 @@ class TmrTauApp extends StatefulWidget {
     this.supabaseInitialized = true,
     required this.localReactionsStorage,
     required this.chatListStorage,
+    required this.multiAccountStorage,
   });
 
   final String supabaseUrl;
@@ -42,6 +44,7 @@ class TmrTauApp extends StatefulWidget {
   final bool supabaseInitialized;
   final LocalReactionsStorage localReactionsStorage;
   final ChatListStorage chatListStorage;
+  final MultiAccountStorage multiAccountStorage;
 
   @override
   State<TmrTauApp> createState() => _TmrTauAppState();
@@ -124,6 +127,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<LocalReactionsStorage>.value(
             value: widget.localReactionsStorage),
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
+        RepositoryProvider<MultiAccountStorage>.value(
+            value: widget.multiAccountStorage),
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),
