@@ -27,6 +27,15 @@ class OrdersPage extends StatelessWidget {
             Text(
               'Здесь появятся ваши заказы',
               style: Theme.of(context).textTheme.bodyLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Функция заказов готовится',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),

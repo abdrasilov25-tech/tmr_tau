@@ -7,6 +7,7 @@ import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/splash_page.dart';
+import '../../features/feed/presentation/pages/favorites_screen.dart';
 import '../../features/feed/presentation/pages/feed_page.dart';
 import '../../features/feed/presentation/pages/search_page.dart';
 import '../../features/news/presentation/pages/news_feed_page.dart';
@@ -81,6 +82,7 @@ class AppRouter {
           return ProductDetailPage(
             product: product,
             commentsRepository: commentsRepository,
+            productRepository: productRepository,
           );
         },
         routes: [
@@ -192,6 +194,12 @@ class AppRouter {
       GoRoute(
         path: '/chats',
         builder: (context, state) => const ChatsPage(),
+      ),
+      GoRoute(
+        path: '/favorites',
+        builder: (context, state) => FavoritesScreen(
+          productRepository: productRepository,
+        ),
       ),
       GoRoute(
         path: '/following',

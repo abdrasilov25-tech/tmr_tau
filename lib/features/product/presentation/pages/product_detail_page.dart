@@ -17,10 +17,12 @@ class ProductDetailPage extends StatefulWidget {
     super.key,
     required this.product,
     required this.commentsRepository,
+    this.productRepository,
   });
 
   final ProductEntity product;
   final CommentsRepository commentsRepository;
+  final ProductRepository? productRepository;
 
   @override
   State<ProductDetailPage> createState() => _ProductDetailPageState();
@@ -32,6 +34,8 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   bool _commentsLoading = true;
   final _commentController = TextEditingController();
   bool _sending = false;
+  bool _isInFavorites = false;
+  bool _favoriteToggling = false;
 
   @override
   void initState() {
@@ -112,6 +116,32 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       setState(() => _comments = _comments.where((c) => c.id != comment.id).toList());
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    final repo = widget.productRepository;
+    final authState = context.read<AuthBloc>().state;
+    if (repo == null || authState is! AuthAuthenticated) return;
+    setState(() => _favoriteToggling = true);
+    try {
+      await repo.toggleFavorite(_product.id, authState.user.id);
+      if (mounted) {
+        setState(() {
+          _isInFavorites = !_isInFavorites;
+          _favoriteToggling = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_isInFavorites ? 'Добавлено в избранное' : 'Удалено из избранного'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _favoriteToggling = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      }
     }
   }
 
@@ -275,9 +305,15 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   Row(
                     children: [
                       OutlinedButton.icon(
-                        onPressed: () {},
-                        icon: const Icon(Icons.favorite_border, size: 20),
-                        label: const Text('В избранное'),
+                        onPressed: _favoriteToggling || widget.productRepository == null
+                            ? null
+                            : _toggleFavorite,
+                        icon: Icon(
+                          _isInFavorites ? Icons.favorite : Icons.favorite_border,
+                          size: 20,
+                          color: _isInFavorites ? Colors.red : null,
+                        ),
+                        label: Text(_isInFavorites ? 'В избранном' : 'В избранное'),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 20,
