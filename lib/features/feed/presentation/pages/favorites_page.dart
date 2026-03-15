@@ -4,9 +4,14 @@ import '../../../../core/widgets/cached_product_image.dart';
 import '../../../product/domain/entities/product_entity.dart';
 
 class FavoritesPage extends StatelessWidget {
-  const FavoritesPage({super.key, this.items = const []});
+  const FavoritesPage({
+    super.key,
+    this.items = const [],
+    this.onRefresh,
+  });
 
   final List<ProductEntity> items;
+  final Future<void> Function()? onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -28,13 +33,16 @@ class FavoritesPage extends StatelessWidget {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text(
-                    'Сохраняйте товары кнопкой ♥',
+                    'Сохраняйте товары кнопкой «Сохранить в избранное» на странице товара',
                     style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
                   ),
                 ],
               ),
             )
-          : GridView.builder(
+          : RefreshIndicator(
+              onRefresh: onRefresh ?? () async {},
+              child: GridView.builder(
               padding: const EdgeInsets.all(16),
               gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: 2,
@@ -76,6 +84,7 @@ class FavoritesPage extends StatelessWidget {
                   ),
                 );
               },
+            ),
             ),
     );
   }

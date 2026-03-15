@@ -83,6 +83,6 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
         ),
       );
     }
-    return FavoritesPage(items: _items);
+    return FavoritesPage(items: _items, onRefresh: _load);
   }
 }
