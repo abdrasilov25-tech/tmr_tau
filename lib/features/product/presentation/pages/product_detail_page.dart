@@ -42,6 +42,20 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     super.initState();
     _product = widget.product;
     _loadComments();
+    _loadIsInFavorites();
+  }
+
+  /// Проверяем, есть ли товар уже в избранном (чтобы показать «В избранном»).
+  Future<void> _loadIsInFavorites() async {
+    final repo = widget.productRepository;
+    final authState = context.read<AuthBloc>().state;
+    if (repo == null || authState is! AuthAuthenticated) return;
+    try {
+      final list = await repo.getFavorites(authState.user.id);
+      if (mounted) {
+        setState(() => _isInFavorites = list.any((p) => p.id == _product.id));
+      }
+    } catch (_) {}
   }
 
   @override
@@ -302,37 +316,22 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     peerName: _product.sellerName ?? 'Продавец',
                   ),
                   const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: _favoriteToggling || widget.productRepository == null
-                            ? null
-                            : _toggleFavorite,
-                        icon: Icon(
-                          _isInFavorites ? Icons.favorite : Icons.favorite_border,
-                          size: 20,
-                          color: _isInFavorites ? Colors.red : null,
-                        ),
-                        label: Text(_isInFavorites ? 'В избранном' : 'В избранное'),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: FilledButton.icon(
-                          onPressed: () => context.push('/cart'),
-                          icon: const Icon(Icons.shopping_cart, size: 20),
-                          label: const Text('В корзину'),
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                        ),
-                      ),
-                    ],
+                  FilledButton.icon(
+                    onPressed: _favoriteToggling || widget.productRepository == null
+                        ? null
+                        : _toggleFavorite,
+                    icon: Icon(
+                      _isInFavorites ? Icons.favorite : Icons.favorite_border,
+                      size: 22,
+                      color: _isInFavorites ? Colors.white : null,
+                    ),
+                    label: Text(
+                      _isInFavorites ? 'В избранном' : 'Сохранить в избранное',
+                    ),
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      backgroundColor: _isInFavorites ? Colors.red : null,
+                    ),
                   ),
                   const SizedBox(height: 32),
                   Text(
