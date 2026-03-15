@@ -61,11 +61,27 @@ class _ChatsPageState extends State<ChatsPage> {
           lastMessageText: text,
           lastMessageAt: createdAt,
           lastMessageSenderId: senderId,
+          unreadCount: 0,
         );
       }
     }
 
     if (threadsByPeer.isEmpty) return const [];
+
+    for (final entry in threadsByPeer.entries) {
+      final peerId = entry.key;
+      final t = entry.value;
+      final lastRead = _chatStorage.getLastReadAt(peerId);
+      int unreadCount = 0;
+      for (final row in rows) {
+        final json = row as Map<String, dynamic>;
+        if (json['sender_id'] == peerId && json['receiver_id'] == _currentUserId) {
+          final msgAt = DateTime.parse(json['created_at'] as String);
+          if (lastRead == null || msgAt.isAfter(lastRead)) unreadCount++;
+        }
+      }
+      threadsByPeer[peerId] = t.copyWith(unreadCount: unreadCount);
+    }
 
     for (final peerId in threadsByPeer.keys) {
       try {
@@ -83,6 +99,7 @@ class _ChatsPageState extends State<ChatsPage> {
           threadsByPeer[peerId] = existing.copyWith(
             peerName: name?.isNotEmpty == true ? name! : existing.peerName,
             peerAvatarUrl: avatar ?? existing.peerAvatarUrl,
+            unreadCount: existing.unreadCount,
           );
         }
       } catch (_) {
@@ -91,7 +108,12 @@ class _ChatsPageState extends State<ChatsPage> {
     }
 
     final threads = threadsByPeer.values.toList()
-      ..sort((a, b) => b.lastMessageAt.compareTo(a.lastMessageAt));
+      ..sort((a, b) {
+        final aUnread = a.unreadCount > 0;
+        final bUnread = b.unreadCount > 0;
+        if (aUnread != bUnread) return aUnread ? -1 : 1;
+        return b.lastMessageAt.compareTo(a.lastMessageAt);
+      });
     return threads;
   }
 
@@ -160,22 +182,38 @@ class _ChatsPageState extends State<ChatsPage> {
 
   Future<void> _deleteChat(_ChatThread t) async {
     try {
-      await _client
-          .from(SupabaseConstants.messagesTable)
-          .delete()
-          .eq('sender_id', _currentUserId)
-          .eq('receiver_id', t.peerId);
-      await _client
-          .from(SupabaseConstants.messagesTable)
-          .delete()
-          .eq('sender_id', t.peerId)
-          .eq('receiver_id', _currentUserId);
+      try {
+        await _client.rpc('delete_chat', params: {'peer_id': t.peerId});
+      } catch (rpcError) {
+        debugPrint('delete_chat RPC error: $rpcError');
+        // Запасной вариант: удаление через два DELETE (нужны политики RLS на DELETE)
+        await _client
+            .from(SupabaseConstants.messagesTable)
+            .delete()
+            .eq('sender_id', _currentUserId)
+            .eq('receiver_id', t.peerId);
+        await _client
+            .from(SupabaseConstants.messagesTable)
+            .delete()
+            .eq('sender_id', t.peerId)
+            .eq('receiver_id', _currentUserId);
+      }
       await _chatStorage.setArchived(t.peerId, false);
-      if (mounted) setState(() => _threadsFuture = _loadThreads());
+      if (mounted) setState(() { _threadsFuture = _loadThreads(); });
     } catch (e) {
+      debugPrint('_deleteChat error: $e');
       if (mounted) {
+        final msg = e.toString();
+        final isRpcMissing = msg.contains('function') && msg.contains('does not exist');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось удалить чат: $e')),
+          SnackBar(
+            content: Text(
+              isRpcMissing
+                  ? 'Выполни в Supabase SQL Editor: drop + create function delete_chat (см. миграцию)'
+                  : 'Не удалось удалить чат: $msg',
+            ),
+            duration: const Duration(seconds: 5),
+          ),
         );
       }
     }
@@ -231,7 +269,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     const SizedBox(height: 12),
                     FilledButton(
                       onPressed: () {
-                        setState(() => _threadsFuture = _loadThreads());
+                        setState(() { _threadsFuture = _loadThreads(); });
                       },
                       child: const Text('Повторить'),
                     ),
@@ -271,37 +309,53 @@ class _ChatsPageState extends State<ChatsPage> {
     );
   }
 
+  Future<void> _openChat(_ChatThread t) async {
+    final isUnread = t.unreadCount > 0;
+    if (isUnread) {
+      final accept = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Новое сообщение'),
+          content: const Text(
+            'Принять сообщение (отметить прочитанным) или оставить непрочитанным?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Оставить непрочитанным'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Принять'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (accept == true) {
+        await _chatStorage.setLastReadAt(t.peerId, DateTime.now());
+      }
+      await context.push(
+        '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
+      );
+    } else {
+      await context.push('/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}');
+    }
+    if (mounted) setState(() { _threadsFuture = _loadThreads(); });
+  }
+
   Widget _buildThreadList(BuildContext context, List<_ChatThread> threads) {
     return ListView.separated(
       itemCount: threads.length,
       separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final t = threads[index];
-        final isUnread = t.lastMessageSenderId != _currentUserId &&
-            (_chatStorage.getLastReadAt(t.peerId) == null ||
-                t.lastMessageAt.isAfter(_chatStorage.getLastReadAt(t.peerId)!));
+        final isUnread = t.unreadCount > 0;
         return ListTile(
-          leading: Stack(
-            children: [
-              CachedAvatar(
-                imageUrl: t.peerAvatarUrl,
-                radius: 22,
-                fallbackText: t.peerName,
-              ),
-              if (isUnread)
-                Positioned(
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: const BoxDecoration(
-                      color: Colors.green,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-            ],
+          leading: CachedAvatar(
+            imageUrl: t.peerAvatarUrl,
+            radius: 22,
+            fallbackText: t.peerName,
           ),
           title: Text(
             t.peerName,
@@ -319,6 +373,34 @@ class _ChatsPageState extends State<ChatsPage> {
                 _timeAgo(t.lastMessageAt),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
+              if (isUnread) ...[
+                const SizedBox(width: 6),
+                if (t.unreadCount > 1)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.blue,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${t.unreadCount}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    width: 10,
+                    height: 10,
+                    decoration: const BoxDecoration(
+                      color: Colors.blue,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+              ],
               IconButton(
                 icon: const Icon(Icons.more_vert, size: 22),
                 onPressed: () => _showThreadMenu(context, t),
@@ -327,10 +409,7 @@ class _ChatsPageState extends State<ChatsPage> {
               ),
             ],
           ),
-          onTap: () async {
-            await context.push('/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}');
-            if (mounted) setState(() {});
-          },
+          onTap: () => _openChat(t),
           onLongPress: () => _showThreadMenu(context, t),
         );
       },
@@ -346,6 +425,7 @@ class _ChatThread {
     required this.lastMessageText,
     required this.lastMessageAt,
     required this.lastMessageSenderId,
+    this.unreadCount = 0,
   });
 
   final String peerId;
@@ -354,10 +434,12 @@ class _ChatThread {
   final String lastMessageText;
   final DateTime lastMessageAt;
   final String lastMessageSenderId;
+  final int unreadCount;
 
   _ChatThread copyWith({
     String? peerName,
     String? peerAvatarUrl,
+    int? unreadCount,
   }) {
     return _ChatThread(
       peerId: peerId,
@@ -366,6 +448,7 @@ class _ChatThread {
       lastMessageText: lastMessageText,
       lastMessageAt: lastMessageAt,
       lastMessageSenderId: lastMessageSenderId,
+      unreadCount: unreadCount ?? this.unreadCount,
     );
   }
 }

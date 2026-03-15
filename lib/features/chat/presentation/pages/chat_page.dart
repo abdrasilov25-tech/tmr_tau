@@ -12,10 +12,13 @@ class ChatPage extends StatefulWidget {
     super.key,
     required this.peerId,
     this.peerName = 'Продавец',
+    this.markReadOnOpen = true,
   });
 
   final String peerId;
   final String peerName;
+  /// Если true, при открытии чат помечается прочитанным. Если false — оставляем непрочитанным.
+  final bool markReadOnOpen;
 
   @override
   State<ChatPage> createState() => _ChatPageState();
@@ -35,7 +38,9 @@ class _ChatPageState extends State<ChatPage> {
     if (authState is AuthAuthenticated) {
       _currentUserId = authState.user.id;
     }
-    context.read<ChatListStorage>().setLastReadAt(widget.peerId, DateTime.now());
+    if (widget.markReadOnOpen) {
+      context.read<ChatListStorage>().setLastReadAt(widget.peerId, DateTime.now());
+    }
   }
 
   @override
