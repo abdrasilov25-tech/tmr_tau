@@ -64,7 +64,13 @@ class AppRouter {
       ),
       GoRoute(
         path: '/login',
-        builder: (context, state) => const LoginPage(),
+        builder: (context, state) {
+          final extra = state.extra;
+          final map = extra is Map ? extra as Map<dynamic, dynamic> : null;
+          final addAccountMode = map != null && map['addAccount'] == true;
+          final initialEmail = map != null && map['email'] is String ? map['email'] as String : null;
+          return LoginPage(addAccountMode: addAccountMode, initialEmail: initialEmail);
+        },
       ),
       GoRoute(
         path: '/register',

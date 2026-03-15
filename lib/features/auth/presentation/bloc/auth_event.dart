@@ -38,3 +38,11 @@ final class AuthSignUpRequested extends AuthEvent {
 final class AuthSignOutRequested extends AuthEvent {
   const AuthSignOutRequested();
 }
+
+final class AuthSwitchToAccountRequested extends AuthEvent {
+  const AuthSwitchToAccountRequested({required this.email, required this.password});
+  final String email;
+  final String password;
+  @override
+  List<Object?> get props => [email, password];
+}

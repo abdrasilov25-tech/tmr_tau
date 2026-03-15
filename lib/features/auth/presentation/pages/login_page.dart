@@ -5,8 +5,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/storage/local_reactions_storage.dart';
+import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/theme/login_theme_presets.dart';
 import '../bloc/auth_bloc.dart';
+import 'login_result.dart';
 
 /// Цвета неоновой палитры
 class _NeonColors {
@@ -22,7 +24,12 @@ class _NeonColors {
 }
 
 class LoginPage extends StatefulWidget {
-  const LoginPage({super.key});
+  const LoginPage({super.key, this.addAccountMode = false, this.initialEmail});
+
+  /// Если true, после входа возвращаем LoginResult (для добавления аккаунта в переключатель).
+  final bool addAccountMode;
+  /// Подставить email (например при переключении аккаунта — остаётся ввести только пароль).
+  final String? initialEmail;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -37,6 +44,7 @@ class _LoginPageState extends State<LoginPage>
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
   int _themeIndex = 0;
+  bool _authHandled = false;
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
   late AnimationController _themeButtonScaleController;
@@ -70,6 +78,9 @@ class _LoginPageState extends State<LoginPage>
     );
     _emailFocus.addListener(() => setState(() {}));
     _passwordFocus.addListener(() => setState(() {}));
+    if (widget.initialEmail != null && widget.initialEmail!.isNotEmpty) {
+      _emailController.text = widget.initialEmail!;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       try {
@@ -136,7 +147,45 @@ class _LoginPageState extends State<LoginPage>
     return BlocConsumer<AuthBloc, AuthState>(
       listener: (context, state) {
         if (state is AuthAuthenticated) {
-          context.go('/home/feed');
+          if (_authHandled) return;
+          _authHandled = true;
+          final password = _passwordController.text;
+          final storage = context.read<MultiAccountStorage>();
+          final doNavigate = () {
+            if (!context.mounted) return;
+            if (widget.addAccountMode) {
+              context.pop(LoginResult(
+                userId: state.user.id,
+                email: state.user.email,
+                name: state.user.name,
+                avatarUrl: state.user.avatarUrl,
+                password: password,
+              ));
+            } else {
+              context.go('/home/feed');
+            }
+          };
+          if (password.isEmpty) {
+            doNavigate();
+            return;
+          }
+          storage.savePasswordImmediate(state.user.id, state.user.email, password);
+          if (widget.addAccountMode) {
+            doNavigate();
+            return;
+          }
+          storage
+              .addAccount(
+                SavedAccount(
+                  id: state.user.id,
+                  email: state.user.email,
+                  name: state.user.name,
+                  avatarUrl: state.user.avatarUrl,
+                ),
+                password: password,
+              )
+              .then((_) => doNavigate())
+              .catchError((_) => doNavigate());
           return;
         }
         if (state is AuthError) {
