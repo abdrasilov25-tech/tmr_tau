@@ -188,7 +188,8 @@ class AppRouter {
         builder: (context, state) {
           final peerId = state.pathParameters['peerId']!;
           final peerName = state.uri.queryParameters['name'] ?? 'Продавец';
-          return ChatPage(peerId: peerId, peerName: peerName);
+          final markRead = state.uri.queryParameters['markRead'] != '0';
+          return ChatPage(peerId: peerId, peerName: peerName, markReadOnOpen: markRead);
         },
       ),
       GoRoute(
