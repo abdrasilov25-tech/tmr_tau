@@ -14,10 +14,11 @@ Future<void> main() async {
   final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
   final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
 
-  debugPrint('SUPABASE_URL: $supabaseUrl');
-  debugPrint(
-    'SUPABASE_ANON_KEY is set: ${supabaseAnonKey.isNotEmpty ? 'YES' : 'NO'}',
-  );
+  // Не логируем URL и ключи даже в debug — не попадут в логи/краши
+  assert(() {
+    debugPrint('Supabase config loaded (URL/keys not logged)');
+    return true;
+  }());
 
   try {
     await Supabase.initialize(
