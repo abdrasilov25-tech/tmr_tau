@@ -35,31 +35,18 @@
 
 ## Шаг 4. Подставить значения в приложение
 
-Открой в проекте файл **`lib/main.dart`** и замени плейсхолдеры на свои значения:
+В проекте ключи берутся из файла **`.env`** (он не коммитится в git).
 
-**Было:**
-```dart
-const String _supabaseUrl = String.fromEnvironment(
-  'SUPABASE_URL',
-  defaultValue: 'https://your-project.supabase.co',
-);
-const String _supabaseAnonKey = String.fromEnvironment(
-  'SUPABASE_ANON_KEY',
-  defaultValue: 'your-anon-key',
-);
-```
-
-**Стало (подставь свои URL и ключ):**
-```dart
-const String _supabaseUrl = 'https://ТВОЙ_ПРОЕКТ_ID.supabase.co';
-const String _supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';  // твой anon key
-```
-
-Либо оставь `String.fromEnvironment` и запускай так:
-
-```bash
-flutter run --dart-define=SUPABASE_URL=https://ТВОЙ_ПРОЕКТ.supabase.co --dart-define=SUPABASE_ANON_KEY=твой_anon_ключ
-```
+1. Скопируй шаблон в корне проекта:
+   ```bash
+   cp .env.example .env
+   ```
+2. Открой **`.env`** и подставь свои значения:
+   ```
+   SUPABASE_URL=https://ТВОЙ_ПРОЕКТ_REF.supabase.co
+   SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+   ```
+3. Файл **`.env`** не добавляй в git — он уже в `.gitignore`. Подробнее: **`docs/SECURITY.md`**.
 
 ---
 
@@ -96,7 +83,7 @@ ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES pos
 
 ## Шаг 6. Проверить приложение
 
-1. Сохрани изменения в `main.dart`.
+1. Убедись, что `.env` заполнен (см. шаг 4).
 2. Перезапусти приложение:
    ```bash
    flutter run
