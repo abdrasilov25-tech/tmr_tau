@@ -26,7 +26,8 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
-  List<ProductEntity> _results = [];
+  List<ProductEntity> _productResults = [];
+  List<SellerProfileEntity> _userResults = [];
   List<ProductEntity> _trending = [];
   List<SellerProfileEntity> _verifiedUsers = [];
   bool _loading = false;
@@ -69,7 +70,7 @@ class _SearchPageState extends State<SearchPage> {
     setState(() => _trendingLoading = true);
     try {
       final list = await widget.productRepository.getTrendingProducts(
-        limit: 10,
+        limit: 30,
         currentUserId: _currentUserId,
       );
       if (mounted) setState(() => _trending = list);
@@ -80,21 +81,51 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _search(String query) async {
     if (query.trim().isEmpty) {
-      setState(() => _results = []);
+      setState(() {
+        _productResults = [];
+        _userResults = [];
+      });
       return;
     }
     setState(() => _loading = true);
     try {
-      final list = await widget.productRepository.searchProducts(
-        query,
-        limit: 20,
-        currentUserId: _currentUserId,
-      );
-      if (mounted) setState(() => _results = list);
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      final results = await Future.wait([
+        widget.productRepository.searchProducts(
+          query,
+          limit: 30,
+          currentUserId: _currentUserId,
+        ),
+        widget.profileRepository.searchUsers(query, limit: 50),
+      ]);
+      if (mounted) {
+        setState(() {
+          _productResults = results[0] as List<ProductEntity>;
+          _userResults = results[1] as List<SellerProfileEntity>;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() {
+        _productResults = [];
+        _userResults = [];
+        _loading = false;
+      });
     }
   }
+
+  void _cancelSearch() {
+    _controller.clear();
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _productResults = [];
+      _userResults = [];
+    });
+  }
+
+  bool get _hasSearchResults =>
+      _productResults.isNotEmpty || _userResults.isNotEmpty;
+
+  bool get _hasSearchQuery => _controller.text.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -103,32 +134,259 @@ class _SearchPageState extends State<SearchPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: TextField(
-          controller: _controller,
-          decoration: const InputDecoration(
-            hintText: 'Товары и продавцы...',
-            border: InputBorder.none,
-          ),
-          onSubmitted: _search,
+        leading: Icon(
+          Icons.search,
+          size: 28,
+          color: Theme.of(context).colorScheme.onSurface,
         ),
+        titleSpacing: 0,
+        title: Align(
+          alignment: Alignment.centerLeft,
+          child: TextField(
+            controller: _controller,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontSize: 17,
+                ),
+            decoration: InputDecoration(
+              hintText: 'Поиск',
+              hintStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 17,
+                  ),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 14),
+              isDense: false,
+            ),
+            textInputAction: TextInputAction.search,
+            onSubmitted: _search,
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        actions: [
+          if (_hasSearchQuery)
+            TextButton(
+              onPressed: _cancelSearch,
+              child: const Text('Отмена'),
+            ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _results.isNotEmpty
-              ? _ProductGrid(products: _results)
-              : _controller.text.isEmpty
+          : _hasSearchResults
+              ? _SearchResultsView(
+                  products: _productResults,
+                  users: _userResults,
+                )
+              : _controller.text.trim().isEmpty
                   ? _TrendingSection(
                       trending: _trending,
                       loading: _trendingLoading,
                       verifiedUsers: _verifiedUsers,
                       verifiedLoading: _verifiedLoading,
                     )
-                  : Center(
-                      child: Text(
-                        'Ничего не найдено',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
+                  : _SimilarAndEmpty(
+                      query: _controller.text.trim(),
+                      trending: _trending,
                     ),
+    );
+  }
+}
+
+/// Когда по запросу ничего не найдено — показываем похожие товары.
+class _SimilarAndEmpty extends StatelessWidget {
+  const _SimilarAndEmpty({
+    required this.query,
+    required this.trending,
+  });
+
+  final String query;
+  final List<ProductEntity> trending;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+            child: Center(
+              child: Text(
+                'По запросу «$query» ничего не найдено',
+                style: Theme.of(context).textTheme.bodyLarge,
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              'Похожие товары',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+          ),
+        ),
+        if (trending.isEmpty)
+          const SliverFillRemaining(
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 4,
+                crossAxisSpacing: 4,
+                childAspectRatio: 1,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _ProductGridTile(product: trending[index]),
+                childCount: trending.length,
+              ),
+            ),
+          ),
+        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+      ],
+    );
+  }
+}
+
+/// Результаты поиска: пользователи сверху, товары сеткой 3 колонки.
+class _SearchResultsView extends StatelessWidget {
+  const _SearchResultsView({
+    required this.products,
+    required this.users,
+  });
+
+  final List<ProductEntity> products;
+  final List<SellerProfileEntity> users;
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: [
+        if (users.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Text(
+                'Пользователи',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+          ),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _UserTile(profile: users[index]),
+              childCount: users.length,
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
+        ],
+        if (products.isNotEmpty) ...[
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Товары',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 4,
+                crossAxisSpacing: 4,
+                childAspectRatio: 1,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) {
+                  final p = products[index];
+                  return _ProductGridTile(product: p);
+                },
+                childCount: products.length,
+              ),
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+      ],
+    );
+  }
+}
+
+/// Строка пользователя в результатах поиска: круглая аватарка слева, имя справа (как в Instagram).
+class _UserTile extends StatelessWidget {
+  const _UserTile({required this.profile});
+
+  final SellerProfileEntity profile;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => context.push('/profile/${profile.id}'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            CachedAvatar(
+              imageUrl: profile.avatarUrl,
+              radius: 32,
+              fallbackText: profile.name,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      profile.name,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (profile.isVerified) ...[
+                    const SizedBox(width: 8),
+                    const VerifiedBadge(size: 18),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Одна ячейка товара в сетке 3 колонки (квадрат, как в Instagram).
+class _ProductGridTile extends StatelessWidget {
+  const _ProductGridTile({required this.product});
+
+  final ProductEntity product;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => context.push('/product/${product.id}', extra: product),
+      child: AspectRatio(
+        aspectRatio: 1,
+        child: CachedProductImage(imageUrl: product.imageUrl),
+      ),
     );
   }
 }
@@ -148,43 +406,83 @@ class _TrendingSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
+    return CustomScrollView(
+      slivers: [
         if (verifiedLoading)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 12),
-            child: Center(child: SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2))),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  height: 24,
+                  width: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
           )
         else if (verifiedUsers.isNotEmpty) ...[
-          Text(
-            'Официальная страница',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Text(
+                'Официальная страница',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
           ),
-          const SizedBox(height: 12),
-          ...verifiedUsers.map((u) => _OfficialPageCard(profile: u)),
-          const SizedBox(height: 24),
+          SliverList(
+            delegate: SliverChildBuilderDelegate(
+              (context, index) => _OfficialPageCard(profile: verifiedUsers[index]),
+              childCount: verifiedUsers.length,
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 16)),
         ],
         if (loading)
-          const Center(child: CircularProgressIndicator())
+          const SliverFillRemaining(
+            child: Center(child: CircularProgressIndicator()),
+          )
         else if (trending.isEmpty && verifiedUsers.isEmpty)
-          Center(
-            child: Text(
-              'Введите запрос для поиска',
-              style: Theme.of(context).textTheme.bodyLarge,
+          SliverFillRemaining(
+            child: Center(
+              child: Text(
+                'Введите запрос для поиска товаров и пользователей',
+                style: Theme.of(context).textTheme.bodyLarge,
+                textAlign: TextAlign.center,
+              ),
             ),
           )
         else ...[
-          Text(
-            'В тренде',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'В тренде',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+            ),
           ),
-          const SizedBox(height: 12),
-          _ProductGrid(products: trending),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                mainAxisSpacing: 4,
+                crossAxisSpacing: 4,
+                childAspectRatio: 1,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => _ProductGridTile(product: trending[index]),
+                childCount: trending.length,
+              ),
+            ),
+          ),
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       ],
     );
@@ -199,7 +497,7 @@ class _OfficialPageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: InkWell(
         onTap: () => context.push('/profile/${profile.id}'),
@@ -232,71 +530,14 @@ class _OfficialPageCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Icon(Icons.chevron_right, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              Icon(
+                Icons.chevron_right,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ],
           ),
         ),
       ),
-    );
-  }
-}
-
-class _ProductGrid extends StatelessWidget {
-  const _ProductGrid({required this.products});
-
-  final List<ProductEntity> products;
-
-  @override
-  Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.only(bottom: 24),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.65,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      itemCount: products.length,
-      itemBuilder: (context, index) {
-        final p = products[index];
-        return Card(
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: InkWell(
-            onTap: () => context.push('/product/${p.id}', extra: p),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: CachedProductImage(
-                    imageUrl: p.imageUrl,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Text(
-                    p.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                  child: Text(
-                    p.priceFormatted,
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }

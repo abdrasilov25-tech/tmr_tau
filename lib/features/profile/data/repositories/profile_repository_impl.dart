@@ -93,6 +93,43 @@ class ProfileRepositoryImpl implements ProfileRepository {
   }
 
   @override
+  Future<List<SellerProfileEntity>> searchUsers(String query,
+      {int limit = 20}) async {
+    final q = query.trim();
+    if (q.isEmpty) return [];
+    // Экранируем кавычку; в Postgrest ilike принимает паттерн с %
+    final safe = q.replaceAll(r"'", r"''");
+    try {
+      // Поиск по имени и по bio (как в Instagram). is_verified может отсутствовать в БД.
+      final res = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar, bio')
+          .or('name.ilike.%$safe%,bio.ilike.%$safe%')
+          .limit(limit);
+      final list = res as List;
+      return list.map((e) {
+        final m = Map<String, dynamic>.from(e as Map);
+        final name = m['name'] ?? m['Name'];
+        return SellerProfileEntity(
+          id: m['id'] as String,
+          name: name != null ? name.toString() : 'Пользователь',
+          avatarUrl: (m['avatar'] ?? m['Avatar']) as String?,
+          bio: (m['bio'] ?? m['Bio']) as String?,
+          followersCount: 0,
+          followingCount: 0,
+          isFollowingByMe: false,
+          products: const [],
+          isVerified: (m['is_verified'] ?? m['isVerified']) as bool? ?? false,
+        );
+      }).toList();
+    } on PostgrestException catch (e) {
+      // ignore: avoid_print
+      print('searchUsers PostgrestException: ${e.message}');
+      return [];
+    }
+  }
+
+  @override
   Future<List<SellerProfileEntity>> getFollowingUsers(String followerId) async {
     // Сначала берём всех, на кого подписан пользователь.
     final followersRes = await _client

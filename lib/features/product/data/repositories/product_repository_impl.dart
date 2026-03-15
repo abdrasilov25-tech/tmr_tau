@@ -52,17 +52,25 @@ class ProductRepositoryImpl implements ProductRepository {
   @override
   Future<List<ProductEntity>> searchProducts(String query,
       {int limit = 20, String? currentUserId}) async {
-    if (query.trim().isEmpty) {
+    final q = query.trim();
+    if (q.isEmpty) {
       return getFeedProducts(limit: limit, currentUserId: currentUserId);
     }
-    final res = await _client
-        .from(SupabaseConstants.productsTable)
-        .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
-        .or('title.ilike.%$query%,description.ilike.%$query%')
-        .order('created_at', ascending: false)
-        .limit(limit);
-    final list = _mapProducts(res as List);
-    return await _enrichWithUserState(list, currentUserId);
+    // Экранируем одинарную кавычку, чтобы не сломать фильтр Postgrest
+    final safe = q.replaceAll(r"'", r"''");
+    try {
+      final res = await _client
+          .from(SupabaseConstants.productsTable)
+          .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
+          .or('title.ilike.%$safe%,description.ilike.%$safe%')
+          .order('created_at', ascending: false)
+          .limit(limit);
+      final list = _mapProducts(res as List);
+      return await _enrichWithUserState(list, currentUserId);
+    } catch (_) {
+      // При ошибке (например неверный символ) возвращаем ленту как "похожие"
+      return getFeedProducts(limit: limit, currentUserId: currentUserId);
+    }
   }
 
   @override
