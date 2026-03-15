@@ -7,6 +7,8 @@ abstract class ProfileRepository {
   });
   /// Verified/official accounts (e.g. tmr_tau official page), for search top.
   Future<List<SellerProfileEntity>> getVerifiedUsers();
+  /// Поиск пользователей по имени (для глобального поиска).
+  Future<List<SellerProfileEntity>> searchUsers(String query, {int limit = 20});
   /// Users that the given user is following.
   Future<List<SellerProfileEntity>> getFollowingUsers(String followerId);
   /// Users that are following the given user.
