@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/storage/chat_list_storage.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 
 class ChatPage extends StatefulWidget {
@@ -34,6 +35,7 @@ class _ChatPageState extends State<ChatPage> {
     if (authState is AuthAuthenticated) {
       _currentUserId = authState.user.id;
     }
+    context.read<ChatListStorage>().setLastReadAt(widget.peerId, DateTime.now());
   }
 
   @override
