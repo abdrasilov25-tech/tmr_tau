@@ -175,6 +175,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
                 email: state.user.email,
                 refreshToken: refreshToken,
                 accessToken: session?.accessToken,
+                username: state.user.username,
               );
               await context.read<AccountManager>().addOrUpdateAccount(account);
             }
