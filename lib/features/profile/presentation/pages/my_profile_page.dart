@@ -231,14 +231,31 @@ class _MyProfilePageState extends State<MyProfilePage> {
             if (state is! AuthAuthenticated) return;
             _showAccountSwitcher(context, state.user);
           },
-          child: Text(
-            context.read<AuthBloc>().state is AuthAuthenticated
-                ? (context.read<AuthBloc>().state as AuthAuthenticated).user.name ?? 'Профиль'
-                : 'Профиль',
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: Colors.black87,
-                  fontWeight: FontWeight.w600,
-                ),
+          child: Builder(
+            builder: (context) {
+              final state = context.read<AuthBloc>().state;
+              if (state is! AuthAuthenticated) {
+                return Text(
+                  'Профиль',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w600,
+                      ),
+                );
+              }
+              final user = state.user;
+              final primary = (user.username != null &&
+                      user.username!.isNotEmpty)
+                  ? user.username!
+                  : user.email;
+              return Text(
+                primary,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.black87,
+                      fontWeight: FontWeight.w600,
+                    ),
+              );
+            },
           ),
         ),
         actions: [
@@ -631,11 +648,23 @@ class _ProfileContent extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    user.name ?? user.email,
+                    (user.username != null && user.username!.isNotEmpty)
+                        ? '@${user.username}'
+                        : user.email,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
                   ),
+                  if (user.name != null && user.name!.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      user.name!,
+                      style:
+                          Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                color: Colors.grey.shade700,
+                              ),
+                    ),
+                  ],
                   if ((user.bio ?? profile?.bio) != null &&
                       (user.bio ?? profile?.bio)!.isNotEmpty) ...[
                     const SizedBox(height: 4),
