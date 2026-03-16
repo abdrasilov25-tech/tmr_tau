@@ -1,5 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import '../../../../core/storage/multi_account_storage.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 
@@ -7,7 +8,7 @@ part 'auth_event.dart';
 part 'auth_state.dart';
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
-  AuthBloc(this._authRepository) : super(AuthInitial()) {
+  AuthBloc(this._authRepository, this._multiAccountStorage) : super(AuthInitial()) {
     on<AuthCheckRequested>(_onCheckRequested);
     on<AuthSignInRequested>(_onSignInRequested);
     on<AuthSignInWithGoogleRequested>(_onSignInWithGoogleRequested);
@@ -17,11 +18,16 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   final AuthRepository _authRepository;
+  final MultiAccountStorage _multiAccountStorage;
 
   void _onCheckRequested(AuthCheckRequested event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
       final user = await _authRepository.getCurrentUserOnce();
+      if (user != null) {
+        // При успешном восстановлении сессии сохраняем последний активный аккаунт.
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+      }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (_) {
       if (!isClosed) emit(AuthUnauthenticated());
@@ -33,6 +39,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     try {
       await _authRepository.signInWithEmail(event.email, event.password);
       final user = _authRepository.currentUser;
+      if (user != null) {
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+      }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
@@ -44,6 +53,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     try {
       await _authRepository.signInWithGoogle();
       final user = _authRepository.currentUser;
+      if (user != null) {
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+      }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
@@ -55,6 +67,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     try {
       await _authRepository.signUpWithEmail(event.email, event.password, event.name);
       final user = _authRepository.currentUser;
+      if (user != null) {
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+      }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
@@ -87,6 +102,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       await Future.delayed(const Duration(milliseconds: 300));
       await _authRepository.signInWithEmail(event.email, event.password);
       final user = _authRepository.currentUser;
+      if (user != null) {
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+      }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
