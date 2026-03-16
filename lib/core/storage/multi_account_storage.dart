@@ -43,6 +43,7 @@ class MultiAccountStorage {
   final FlutterSecureStorage _secure;
 
   static const _accountsKey = 'tmr_tau_saved_accounts';
+  static const _lastActiveAccountIdKey = 'tmr_tau_last_active_account_id';
   /// Один ключ: карта email -> пароль (как в Instagram — все аккаунты локально).
   static const _passwordsMapKey = 'tmr_tau_passwords_map';
   static const _passwordKeyPrefix = 'tmr_tau_acc_pwd_';
@@ -60,6 +61,21 @@ class MultiAccountStorage {
     } catch (_) {
       return [];
     }
+  }
+
+  /// ID последнего активного аккаунта (для автоподстановки/автовхода).
+  String? getLastActiveAccountId() {
+    final raw = _prefs.getString(_lastActiveAccountIdKey);
+    if (raw == null || raw.isEmpty) return null;
+    return raw;
+  }
+
+  Future<void> setLastActiveAccountId(String? id) async {
+    if (id == null || id.trim().isEmpty) {
+      await _prefs.remove(_lastActiveAccountIdKey);
+      return;
+    }
+    await _prefs.setString(_lastActiveAccountIdKey, _normId(id));
   }
 
   Future<void> addAccount(SavedAccount account, {String? password}) async {
@@ -114,7 +130,10 @@ class MultiAccountStorage {
     final accounts = getAccounts();
     String? email;
     for (final a in accounts) {
-      if (a.id == userId) { email = a.email; break; }
+      if (a.id == userId) {
+        email = a.email;
+        break;
+      }
     }
     final list = accounts.where((a) => a.id != userId).toList();
     await _prefs.setString(_accountsKey, jsonEncode(list.map((e) => e.toJson()).toList()));
@@ -128,6 +147,11 @@ class MultiAccountStorage {
       final map = _getPasswordsMap();
       map.remove(normEmail);
       _setPasswordsMap(map);
+    }
+    // Если удаляем последний активный аккаунт — очищаем ссылку.
+    final lastId = getLastActiveAccountId();
+    if (lastId != null && lastId == key) {
+      await _prefs.remove(_lastActiveAccountIdKey);
     }
   }
 

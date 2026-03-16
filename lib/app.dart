@@ -143,8 +143,10 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<PostRepository>.value(value: _postRepository),
       ],
       child: BlocProvider(
-        create: (context) =>
-            AuthBloc(_authRepository)..add(const AuthCheckRequested()),
+        create: (context) => AuthBloc(
+          _authRepository,
+          widget.multiAccountStorage,
+        )..add(const AuthCheckRequested()),
         child: BlocProvider(
           create: (context) => FeedBloc(
             _feedRepository,
