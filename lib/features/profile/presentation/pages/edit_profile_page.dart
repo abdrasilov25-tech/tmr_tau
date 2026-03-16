@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/storage/multi_account_storage.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/repositories/profile_repository.dart';
 
@@ -26,7 +27,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     final authState = context.read<AuthBloc>().state;
     final user = authState is AuthAuthenticated ? authState.user : null;
     _nameController = TextEditingController(text: user?.name ?? '');
-    _usernameController = TextEditingController();
+    _usernameController = TextEditingController(text: user?.username ?? '');
     _bioController = TextEditingController(text: user?.bio ?? '');
   }
 
@@ -42,13 +43,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
     if (!_formKey.currentState!.validate()) return;
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) return;
+    final user = authState.user;
     setState(() => _saving = true);
     try {
+      final newName = _nameController.text.trim().isEmpty
+          ? null
+          : _nameController.text.trim();
       await context.read<ProfileRepository>().updateProfile(
-            userId: authState.user.id,
-            name: _nameController.text.trim().isEmpty
-                ? null
-                : _nameController.text.trim(),
+            userId: user.id,
+            name: newName,
             bio: _bioController.text.trim().isEmpty
                 ? null
                 : _bioController.text.trim(),
@@ -58,6 +61,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
             gender: _gender,
           );
       if (!mounted) return;
+      // Обновим локальное имя в сохранённых аккаунтах (для свитчера и быстрого входа).
+      try {
+        final storage = context.read<MultiAccountStorage>();
+        await storage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: newName ?? user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
+      } catch (_) {}
       // Обновим профиль в AuthBloc.
       context.read<AuthBloc>().add(const AuthCheckRequested());
       context.pop();

@@ -5,6 +5,7 @@ class AppUser extends Equatable {
     required this.id,
     required this.email,
     this.name,
+    this.username,
     this.avatarUrl,
     this.bio,
     this.followersCount = 0,
@@ -14,6 +15,7 @@ class AppUser extends Equatable {
   final String id;
   final String email;
   final String? name;
+  final String? username;
   final String? avatarUrl;
   final String? bio;
   final int followersCount;
@@ -21,5 +23,5 @@ class AppUser extends Equatable {
 
   @override
   List<Object?> get props =>
-      [id, email, name, avatarUrl, bio, followersCount, followingCount];
+      [id, email, name, username, avatarUrl, bio, followersCount, followingCount];
 }

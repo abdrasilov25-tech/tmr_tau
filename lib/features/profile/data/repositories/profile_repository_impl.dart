@@ -255,6 +255,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
   }) async {
     final updates = <String, dynamic>{};
     if (name != null) updates['name'] = name;
+    if (username != null) updates['username'] = username;
     if (avatarUrl != null) updates['avatar'] = avatarUrl;
     if (bio != null) updates['bio'] = bio;
     if (updates.isEmpty) return;
