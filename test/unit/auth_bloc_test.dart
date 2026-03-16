@@ -1,14 +1,18 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:tmr_tau/core/storage/multi_account_storage.dart';
 import 'package:tmr_tau/features/auth/domain/entities/app_user.dart';
 import 'package:tmr_tau/features/auth/domain/repositories/auth_repository.dart';
 import 'package:tmr_tau/features/auth/presentation/bloc/auth_bloc.dart';
 
 class MockAuthRepository extends Mock implements AuthRepository {}
 
+class MockMultiAccountStorage extends Mock implements MultiAccountStorage {}
+
 void main() {
   late MockAuthRepository mockAuthRepository;
+  late MockMultiAccountStorage mockMultiAccountStorage;
 
   const testUser = AppUser(
     id: 'user-1',
@@ -18,12 +22,13 @@ void main() {
 
   setUp(() {
     mockAuthRepository = MockAuthRepository();
+    mockMultiAccountStorage = MockMultiAccountStorage();
   });
 
   group('AuthBloc', () {
     test('initial state is AuthInitial', () {
       expect(
-        AuthBloc(mockAuthRepository).state,
+        AuthBloc(mockAuthRepository, mockMultiAccountStorage).state,
         isA<AuthInitial>(),
       );
     });
@@ -33,7 +38,7 @@ void main() {
       build: () {
         when(() => mockAuthRepository.getCurrentUserOnce())
             .thenAnswer((_) async => null);
-        return AuthBloc(mockAuthRepository);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
@@ -48,7 +53,7 @@ void main() {
         when(() => mockAuthRepository.getCurrentUserOnce())
             .thenAnswer((_) async => testUser);
         when(() => mockAuthRepository.currentUser).thenReturn(testUser);
-        return AuthBloc(mockAuthRepository);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
@@ -62,7 +67,7 @@ void main() {
       build: () {
         when(() => mockAuthRepository.getCurrentUserOnce())
             .thenThrow(Exception('network'));
-        return AuthBloc(mockAuthRepository);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
@@ -77,7 +82,7 @@ void main() {
         when(() => mockAuthRepository.signInWithEmail(any(), any()))
             .thenAnswer((_) async => {});
         when(() => mockAuthRepository.currentUser).thenReturn(testUser);
-        return AuthBloc(mockAuthRepository);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthSignInRequested(
         email: 'a@b.com',
@@ -94,7 +99,7 @@ void main() {
       build: () {
         when(() => mockAuthRepository.signInWithEmail(any(), any()))
             .thenThrow(Exception('Invalid login credentials'));
-        return AuthBloc(mockAuthRepository);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthSignInRequested(
         email: 'a@b.com',
@@ -110,7 +115,7 @@ void main() {
       'AuthSignOutRequested -> AuthUnauthenticated',
       build: () {
         when(() => mockAuthRepository.signOut()).thenAnswer((_) async => {});
-        return AuthBloc(mockAuthRepository);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthSignOutRequested()),
       expect: () => [isA<AuthUnauthenticated>()],

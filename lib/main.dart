@@ -3,6 +3,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
+import 'core/accounts/account_repository.dart';
 import 'core/storage/chat_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
@@ -39,6 +40,7 @@ Future<void> main() async {
   final chatListStorage = ChatListStorage(prefs);
   const secureStorage = FlutterSecureStorage();
   final multiAccountStorage = MultiAccountStorage(prefs, secureStorage);
+  final accountRepository = AccountRepositoryImpl(prefs);
 
   runApp(TmrTauApp(
     supabaseUrl: supabaseUrl,
@@ -47,5 +49,6 @@ Future<void> main() async {
     localReactionsStorage: localReactions,
     chatListStorage: chatListStorage,
     multiAccountStorage: multiAccountStorage,
+    accountRepository: accountRepository,
   ));
 }
