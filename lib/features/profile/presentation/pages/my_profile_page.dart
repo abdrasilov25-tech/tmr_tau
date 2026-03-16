@@ -4,12 +4,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import '../../../../core/accounts/account_manager.dart';
+import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../widgets/account_switcher_sheet.dart';
+import '../widgets/account_switcher_token_sheet.dart';
 import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/pages/login_result.dart';
@@ -290,10 +293,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
   }
 
   void _showAccountSwitcher(BuildContext context, AppUser currentUser) {
-    final accountStorage = context.read<MultiAccountStorage>();
+    final rootContext = context;
+    final accountStorage = rootContext.read<MultiAccountStorage>();
+    final accountManager = rootContext.read<AccountManager>();
     final savedAccounts = accountStorage.getAccounts();
     showModalBottomSheet<void>(
-      context: context,
+      context: rootContext,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (ctx) => DraggableScrollableSheet(
@@ -301,71 +306,185 @@ class _MyProfilePageState extends State<MyProfilePage> {
         minChildSize: 0.3,
         maxChildSize: 0.9,
         expand: false,
-        builder: (_, scrollController) => AccountSwitcherSheet(
-        scrollController: scrollController,
-        currentUser: currentUser,
-        savedAccounts: savedAccounts,
-        onAddAccount: () async {
-          await accountStorage.addAccount(
-            SavedAccount(
-              id: currentUser.id,
-              email: currentUser.email,
-              name: currentUser.name,
-              avatarUrl: currentUser.avatarUrl,
-            ),
-          );
-          final result = await context.push<dynamic>('/login', extra: {'addAccount': true});
-          if (!mounted) return;
-          if (result is LoginResult) {
-            if (result.password != null && result.password!.isNotEmpty) {
-              accountStorage.savePasswordImmediate(result.userId, result.email, result.password!);
+        builder: (_, scrollController) => FutureBuilder<List<AccountModel>>(
+          future: accountManager.loadAccounts(),
+          builder: (sheetContext, snapshot) {
+            final accounts = snapshot.data ?? const [];
+            final active = accountManager.activeAccount;
+            if (accounts.isEmpty) {
+              // Fallback на старый переключатель, если ещё нет токен-аккаунтов.
+              return AccountSwitcherSheet(
+                scrollController: scrollController,
+                currentUser: currentUser,
+                savedAccounts: savedAccounts,
+                onAddAccount: () async {
+                  await accountStorage.addAccount(
+                    SavedAccount(
+                      id: currentUser.id,
+                      email: currentUser.email,
+                      name: currentUser.name,
+                      avatarUrl: currentUser.avatarUrl,
+                    ),
+                  );
+                  final result = await rootContext.push<dynamic>(
+                    '/login',
+                    extra: {'addAccount': true},
+                  );
+                  if (!mounted) return;
+                  if (result is LoginResult) {
+                    if (result.password != null &&
+                        result.password!.isNotEmpty) {
+                      accountStorage.savePasswordImmediate(
+                        result.userId,
+                        result.email,
+                        result.password!,
+                      );
+                    }
+                    await accountStorage.addAccount(
+                      SavedAccount(
+                        id: result.userId,
+                        email: result.email,
+                        name: result.name,
+                        avatarUrl: result.avatarUrl,
+                      ),
+                      password: result.password,
+                    );
+                    setState(() {});
+                  }
+                },
+                onSwitchAccount: (account, closeSheet) async {
+                  if (_isSwitchingAccount) return;
+                  _isSwitchingAccount = true;
+                  closeSheet();
+                  String? password;
+                  try {
+                    password = await accountStorage.getPassword(
+                      account.id,
+                      email: account.email,
+                    );
+                  } catch (_) {
+                    password = null;
+                  }
+                  if (password == null || password.isEmpty) {
+                    if (!mounted) {
+                      _isSwitchingAccount = false;
+                      return;
+                    }
+                    ScaffoldMessenger.of(rootContext).showSnackBar(
+                      const SnackBar(
+                        content: Text('Введите пароль для переключения'),
+                      ),
+                    );
+                    await rootContext.push<void>(
+                      '/login',
+                      extra: {'email': account.email},
+                    );
+                    if (mounted) {
+                      setState(() => _isSwitchingAccount = false);
+                    }
+                    return;
+                  }
+                  if (!mounted) {
+                    _isSwitchingAccount = false;
+                    return;
+                  }
+                  rootContext.read<AuthBloc>().add(
+                        AuthSwitchToAccountRequested(
+                          email: account.email,
+                          password: password,
+                        ),
+                      );
+                  setState(() => _isSwitchingAccount = false);
+                },
+              );
             }
-            await accountStorage.addAccount(
-              SavedAccount(
-                id: result.userId,
-                email: result.email,
-                name: result.name,
-                avatarUrl: result.avatarUrl,
-              ),
-              password: result.password,
+            return AccountSwitcherTokenSheet(
+              scrollController: scrollController,
+              activeAccount: active,
+              accounts: accounts,
+              savedAccounts: savedAccounts,
+              onAddAccount: () async {
+                await accountStorage.addAccount(
+                  SavedAccount(
+                    id: currentUser.id,
+                    email: currentUser.email,
+                    name: currentUser.name,
+                    avatarUrl: currentUser.avatarUrl,
+                  ),
+                );
+                final result = await rootContext.push<dynamic>(
+                  '/login',
+                  extra: {'addAccount': true},
+                );
+                if (!mounted) return;
+                if (result is LoginResult) {
+                  if (result.password != null && result.password!.isNotEmpty) {
+                    accountStorage.savePasswordImmediate(
+                      result.userId,
+                      result.email,
+                      result.password!,
+                    );
+                  }
+                  await accountStorage.addAccount(
+                    SavedAccount(
+                      id: result.userId,
+                      email: result.email,
+                      name: result.name,
+                      avatarUrl: result.avatarUrl,
+                    ),
+                    password: result.password,
+                  );
+                  setState(() {});
+                }
+              },
+              onSelectAccount: (account) async {
+                if (_isSwitchingAccount) return;
+                _isSwitchingAccount = true;
+                Navigator.of(sheetContext).pop();
+                try {
+                  await accountManager.switchAccount(account);
+                } on supa.AuthApiException catch (e) {
+                  final code = e.code ?? '';
+                  final message = e.message.toLowerCase();
+                  final isInvalidRefreshToken =
+                      code == 'refresh_token_not_found' ||
+                      message.contains('invalid refresh token');
+                  if (isInvalidRefreshToken) {
+                    if (!mounted) {
+                      _isSwitchingAccount = false;
+                      return;
+                    }
+                    ScaffoldMessenger.of(rootContext).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'Сессия аккаунта устарела. Войдите заново.',
+                        ),
+                      ),
+                    );
+                    await rootContext.push<void>(
+                      '/login',
+                      extra: {'email': account.email},
+                    );
+                    if (mounted) {
+                      setState(() => _isSwitchingAccount = false);
+                    }
+                    return;
+                  }
+                  rethrow;
+                }
+                if (!mounted) {
+                  _isSwitchingAccount = false;
+                  return;
+                }
+                rootContext
+                    .read<AuthBloc>()
+                    .add(const AuthCheckRequested());
+                setState(() => _isSwitchingAccount = false);
+              },
             );
-            setState(() {});
-          }
-        },
-        onSwitchAccount: (account, closeSheet) async {
-          if (_isSwitchingAccount) return;
-          _isSwitchingAccount = true;
-          closeSheet();
-          String? password;
-          try {
-            password = await accountStorage.getPassword(account.id, email: account.email);
-          } catch (_) {
-            password = null;
-          }
-          if (password == null || password.isEmpty) {
-            if (!mounted) {
-              _isSwitchingAccount = false;
-              return;
-            }
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Введите пароль для переключения')),
-            );
-            await context.push<void>('/login', extra: {'email': account.email});
-            if (mounted) setState(() => _isSwitchingAccount = false);
-            return;
-          }
-          if (!mounted) {
-            _isSwitchingAccount = false;
-            return;
-          }
-          context.read<AuthBloc>().add(AuthSwitchToAccountRequested(
-                email: account.email,
-                password: password,
-              ));
-          setState(() => _isSwitchingAccount = false);
-        },
+          },
+        ),
       ),
-    ),
     );
   }
 

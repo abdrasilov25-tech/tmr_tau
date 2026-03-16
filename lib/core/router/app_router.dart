@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/storage/local_reactions_storage.dart';
 import '../../core/theme/login_theme_presets.dart';
-import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/splash_page.dart';
@@ -66,10 +65,14 @@ class AppRouter {
         path: '/login',
         builder: (context, state) {
           final extra = state.extra;
-          final map = extra is Map ? extra as Map<dynamic, dynamic> : null;
+          final map = extra is Map<String, dynamic> ? extra : null;
           final addAccountMode = map != null && map['addAccount'] == true;
-          final initialEmail = map != null && map['email'] is String ? map['email'] as String : null;
-          return LoginPage(addAccountMode: addAccountMode, initialEmail: initialEmail);
+          final initialEmail =
+              map != null && map['email'] is String ? map['email'] as String : null;
+          return LoginPage(
+            addAccountMode: addAccountMode,
+            initialEmail: initialEmail,
+          );
         },
       ),
       GoRoute(

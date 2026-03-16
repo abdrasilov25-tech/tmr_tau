@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../../../../core/accounts/account_manager.dart';
+import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/local_reactions_storage.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/theme/login_theme_presets.dart';
@@ -45,6 +47,7 @@ class _LoginPageState extends State<LoginPage>
   bool _obscurePassword = true;
   int _themeIndex = 0;
   bool _authHandled = false;
+  List<AccountModel> _quickAccounts = const [];
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
   late AnimationController _themeButtonScaleController;
@@ -87,6 +90,17 @@ class _LoginPageState extends State<LoginPage>
         final storage = context.read<LocalReactionsStorage>();
         final saved = storage.getLoginThemeIndex();
         if (saved != _themeIndex) setState(() => _themeIndex = saved);
+      } catch (_) {}
+      try {
+        final manager = context.read<AccountManager>();
+        manager.loadAccounts().then((accounts) {
+          if (!mounted) return;
+          if (accounts.isNotEmpty) {
+            setState(() {
+              _quickAccounts = accounts;
+            });
+          }
+        }).catchError((_) {});
       } catch (_) {}
     });
   }
@@ -282,12 +296,92 @@ class _LoginPageState extends State<LoginPage>
                   ),
                 ),
                 const SizedBox(height: 32),
+                if (_quickAccounts.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Быстрый вход',
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                      color: subtitleColor,
+                    ),
+                    textAlign: TextAlign.left,
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 70,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _quickAccounts.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(width: 12),
+                      itemBuilder: (context, index) {
+                        final acc = _quickAccounts[index];
+                        final initials = acc.email.isNotEmpty
+                            ? acc.email[0].toUpperCase()
+                            : '?';
+                        return GestureDetector(
+                          onTap: loading
+                              ? null
+                              : () async {
+                                  await _quickSwitchToAccount(acc);
+                                },
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircleAvatar(
+                                radius: 18,
+                                child: Text(initials),
+                              ),
+                              const SizedBox(height: 4),
+                              SizedBox(
+                                width: 80,
+                                child: Text(
+                                  acc.email,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 11,
+                                    color: subtitleColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  Future<void> _quickSwitchToAccount(AccountModel account) async {
+    try {
+      final manager = context.read<AccountManager>();
+      await manager.switchAccount(account);
+      if (!mounted) return;
+      context.read<AuthBloc>().add(const AuthCheckRequested());
+      if (!mounted) return;
+      context.go('/home/feed');
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Не удалось войти в сохранённый аккаунт. Войдите заново.',
+          ),
+        ),
+      );
+      _emailController.text = account.email;
+    }
   }
 
   Widget _buildThemeButton() {

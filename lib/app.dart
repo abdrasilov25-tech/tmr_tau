@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import 'core/accounts/account_manager.dart';
+import 'core/accounts/account_model.dart';
+import 'core/accounts/account_repository.dart';
+import 'core/accounts/session_restorer.dart';
 import 'core/storage/chat_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
@@ -37,6 +41,7 @@ class TmrTauApp extends StatefulWidget {
     required this.localReactionsStorage,
     required this.chatListStorage,
     required this.multiAccountStorage,
+    required this.accountRepository,
   });
 
   final String supabaseUrl;
@@ -45,13 +50,14 @@ class TmrTauApp extends StatefulWidget {
   final LocalReactionsStorage localReactionsStorage;
   final ChatListStorage chatListStorage;
   final MultiAccountStorage multiAccountStorage;
+  final AccountRepository accountRepository;
 
   @override
   State<TmrTauApp> createState() => _TmrTauAppState();
 }
 
 class _TmrTauAppState extends State<TmrTauApp> {
-  late final SupabaseClient _client;
+  late final supa.SupabaseClient _client;
   late final AuthRepository _authRepository;
   late final ProductRepository _productRepository;
   late final CategoriesRepository _categoriesRepository;
@@ -62,6 +68,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final NotificationsRepository _notificationsRepository;
   late final PostRepository _postRepository;
   late final AppRouter _appRouter;
+  late final AccountManager _accountManager;
 
   @override
   void initState() {
@@ -69,7 +76,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     if (!widget.supabaseInitialized) {
       return;
     }
-    _client = Supabase.instance.client;
+    _client = supa.Supabase.instance.client;
     final authDataSource = AuthRemoteDataSourceImpl(_client);
     _authRepository = AuthRepositoryImpl(authDataSource, _client);
     _productRepository = ProductRepositoryImpl(_client);
@@ -80,6 +87,10 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _storiesRepository = StoriesRepositoryImpl(_client);
     _notificationsRepository = NotificationsRepositoryImpl(_client);
     _postRepository = PostRepositoryImpl(_client);
+    _accountManager = AccountManager(
+      widget.accountRepository,
+      SessionRestorer(_client),
+    );
     _appRouter = AppRouter(
       feedRepository: _feedRepository,
       productRepository: _productRepository,
@@ -129,6 +140,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
         RepositoryProvider<MultiAccountStorage>.value(
             value: widget.multiAccountStorage),
+        RepositoryProvider<AccountRepository>.value(
+            value: widget.accountRepository),
+        RepositoryProvider<AccountManager>.value(value: _accountManager),
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),
@@ -147,18 +161,37 @@ class _TmrTauAppState extends State<TmrTauApp> {
           _authRepository,
           widget.multiAccountStorage,
         )..add(const AuthCheckRequested()),
-        child: BlocProvider(
-          create: (context) => FeedBloc(
-            _feedRepository,
-            widget.localReactionsStorage,
-          ),
-          child: Container(
-            color: Colors.black,
-            child: MaterialApp.router(
-              title: 'tmr_tau',
-              debugShowCheckedModeBanner: false,
-              theme: AppTheme.light,
-              routerConfig: _appRouter.router,
+        child: BlocListener<AuthBloc, AuthState>(
+          listener: (context, state) async {
+            if (state is AuthAuthenticated) {
+              final session =
+                  supa.Supabase.instance.client.auth.currentSession;
+              final refreshToken = session?.refreshToken;
+              if (refreshToken == null || refreshToken.isEmpty) {
+                return;
+              }
+              final account = AccountModel(
+                userId: state.user.id,
+                email: state.user.email,
+                refreshToken: refreshToken,
+                accessToken: session?.accessToken,
+              );
+              await context.read<AccountManager>().addOrUpdateAccount(account);
+            }
+          },
+          child: BlocProvider(
+            create: (context) => FeedBloc(
+              _feedRepository,
+              widget.localReactionsStorage,
+            ),
+            child: Container(
+              color: Colors.black,
+              child: MaterialApp.router(
+                title: 'tmr_tau',
+                debugShowCheckedModeBanner: false,
+                theme: AppTheme.light,
+                routerConfig: _appRouter.router,
+              ),
             ),
           ),
         ),
