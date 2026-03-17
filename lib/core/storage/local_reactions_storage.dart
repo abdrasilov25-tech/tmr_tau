@@ -40,6 +40,12 @@ class LocalReactionsStorage {
     await _prefs.setStringList(_repostedIdsKey, set.toList());
   }
 
+  /// Полностью очищает локальные лайки/репосты (например, при переключении аккаунта).
+  Future<void> clearReactions() async {
+    await _prefs.remove(_likedIdsKey);
+    await _prefs.remove(_repostedIdsKey);
+  }
+
   /// Индекс темы экрана входа (0–5). По умолчанию 0.
   int getLoginThemeIndex() {
     return _prefs.getInt(_loginThemeIndexKey) ?? 0;

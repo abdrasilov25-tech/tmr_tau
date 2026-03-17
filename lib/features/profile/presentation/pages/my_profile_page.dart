@@ -272,9 +272,16 @@ class _MyProfilePageState extends State<MyProfilePage> {
           ),
         ],
       ),
-      body: BlocBuilder<AuthBloc, AuthState>(
-        builder: (context, state) {
-          final user = state is AuthAuthenticated ? state.user : null;
+      body: BlocListener<AuthBloc, AuthState>(
+        listenWhen: (prev, curr) =>
+            curr is AuthAuthenticated &&
+            (prev is! AuthAuthenticated || (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+        listener: (context, state) {
+          if (state is AuthAuthenticated) _load();
+        },
+        child: BlocBuilder<AuthBloc, AuthState>(
+          builder: (context, state) {
+            final user = state is AuthAuthenticated ? state.user : null;
           if (user == null) {
             return Center(
               child: Column(
@@ -305,6 +312,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             updatingAvatar: _updatingAvatar,
           );
         },
+        ),
       ),
     );
   }

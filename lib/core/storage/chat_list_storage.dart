@@ -32,4 +32,15 @@ class ChatListStorage {
   Future<void> setLastReadAt(String peerId, DateTime at) async {
     await _prefs.setInt(_readPrefix + peerId, at.millisecondsSinceEpoch);
   }
+
+  /// Полностью очищает локальное состояние чатов (архив/непрочитанное).
+  Future<void> clearAll() async {
+    await _prefs.remove(_archivedKey);
+    final keys = _prefs.getKeys();
+    for (final key in keys) {
+      if (key.startsWith(_readPrefix)) {
+        await _prefs.remove(key);
+      }
+    }
+  }
 }
