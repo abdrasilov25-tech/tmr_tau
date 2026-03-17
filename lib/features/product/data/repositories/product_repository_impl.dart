@@ -14,11 +14,12 @@ class ProductRepositoryImpl implements ProductRepository {
     int offset = 0,
     String? currentUserId,
   }) async {
+    final safeLimit = limit.clamp(1, 100);
     final res = await _client
         .from(SupabaseConstants.productsTable)
         .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .order('created_at', ascending: false)
-        .range(offset, offset + limit - 1);
+        .range(offset, offset + safeLimit - 1);
     final list = _mapProducts(res as List);
     return await _enrichWithUserState(list, currentUserId);
   }
@@ -78,11 +79,12 @@ class ProductRepositoryImpl implements ProductRepository {
     int limit = 10,
     String? currentUserId,
   }) async {
+    final safeLimit = limit.clamp(1, 100);
     final res = await _client
         .from(SupabaseConstants.productsTable)
         .select('id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)')
         .order('created_at', ascending: false)
-        .limit(limit);
+        .limit(safeLimit);
     final list = _mapProducts(res as List);
     return await _enrichWithUserState(list, currentUserId);
   }
@@ -251,6 +253,7 @@ class ProductRepositoryImpl implements ProductRepository {
   ) async {
     if (currentUserId == null || list.isEmpty) return list;
     final ids = list.map((e) => e.id).toList();
+    if (ids.isEmpty) return list;
     final sellerIds = list.map((e) => e.sellerId).toSet().toList();
     Set<String> likedIds = {};
     Set<String> followingIds = {};
