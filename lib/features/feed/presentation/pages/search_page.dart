@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -26,6 +28,7 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _controller = TextEditingController();
+  Timer? _debounce;
   List<ProductEntity> _productResults = [];
   List<SellerProfileEntity> _userResults = [];
   List<ProductEntity> _trending = [];
@@ -57,6 +60,7 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -159,7 +163,14 @@ class _SearchPageState extends State<SearchPage> {
             ),
             textInputAction: TextInputAction.search,
             onSubmitted: _search,
-            onChanged: (_) => setState(() {}),
+            onChanged: (value) {
+              setState(() {});
+              _debounce?.cancel();
+              _debounce = Timer(const Duration(milliseconds: 400), () {
+                if (!mounted) return;
+                _search(value);
+              });
+            },
           ),
         ),
         actions: [

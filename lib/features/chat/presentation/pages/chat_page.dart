@@ -55,14 +55,38 @@ class _ChatPageState extends State<ChatPage> {
     }
     final me = _currentUserId!;
     final peer = widget.peerId;
-    // Все сообщения между текущим пользователем и собеседником
-    return _client
+    // Стримим только сообщения, где текущий пользователь участвует как отправитель или получатель.
+    // Это уменьшает объём данных по сравнению со стримом по всей таблице.
+    final baseStream = _client
         .from(SupabaseConstants.messagesTable)
-        .stream(primaryKey: ['id'])
-        .map((list) => list
-            .where((m) => (m['sender_id'] == me && m['receiver_id'] == peer) || (m['sender_id'] == peer && m['receiver_id'] == me))
+        .stream(primaryKey: ['id']);
+
+    return baseStream.map(
+      (list) {
+        final dialogMessages = list
+            // Оставляем только конкретный диалог me <-> peer
+            .where(
+              (m) =>
+                  (m['sender_id'] == me && m['receiver_id'] == peer) ||
+                  (m['sender_id'] == peer && m['receiver_id'] == me),
+            )
             .toList()
-          ..sort((a, b) => (a['created_at'] as String).compareTo(b['created_at'] as String)));
+          ..sort(
+            (a, b) => (a['created_at'] as String)
+                .compareTo(b['created_at'] as String),
+          );
+
+        // Ограничиваем количество сообщений в памяти (например, последние 200)
+        const maxMessages = 200;
+        if (dialogMessages.length <= maxMessages) {
+          return dialogMessages;
+        }
+        return dialogMessages.sublist(
+          dialogMessages.length - maxMessages,
+          dialogMessages.length,
+        );
+      },
+    );
   }
 
   Future<void> _sendMessage() async {
