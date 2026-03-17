@@ -21,9 +21,18 @@ class NewsFeedPage extends StatelessWidget {
         : context.read<AuthRepository>().currentUser?.id;
     return BlocProvider(
       create: (c) => NewsBloc(c.read<PostRepository>())..add(NewsLoaded(currentUserId: userId)),
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
+      child: BlocListener<AuthBloc, AuthState>(
+        listenWhen: (prev, curr) =>
+            curr is AuthAuthenticated &&
+            (prev is! AuthAuthenticated || (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+        listener: (context, state) {
+          if (state is AuthAuthenticated) {
+            context.read<NewsBloc>().add(NewsRefresh(currentUserId: state.user.id));
+          }
+        },
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
           title: Text(
@@ -123,6 +132,7 @@ class NewsFeedPage extends StatelessWidget {
             return const Center(child: AppLoading());
           },
         ),
+      ),
       ),
     );
   }

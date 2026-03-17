@@ -164,6 +164,10 @@ class _TmrTauAppState extends State<TmrTauApp> {
         child: BlocListener<AuthBloc, AuthState>(
           listener: (context, state) async {
             if (state is AuthAuthenticated) {
+              // При входе/переключении аккаунта очищаем локальные лайки/репосты и состояние чатов,
+              // чтобы прошлый аккаунт не «перетекал» в новый.
+              await widget.localReactionsStorage.clearReactions();
+              await widget.chatListStorage.clearAll();
               final session =
                   supa.Supabase.instance.client.auth.currentSession;
               final refreshToken = session?.refreshToken;
@@ -180,18 +184,27 @@ class _TmrTauAppState extends State<TmrTauApp> {
               await context.read<AccountManager>().addOrUpdateAccount(account);
             }
           },
-          child: BlocProvider(
+          child: BlocProvider<FeedBloc>(
             create: (context) => FeedBloc(
               _feedRepository,
               widget.localReactionsStorage,
             ),
-            child: Container(
-              color: Colors.black,
-              child: MaterialApp.router(
-                title: 'tmr_tau',
-                debugShowCheckedModeBanner: false,
-                theme: AppTheme.light,
-                routerConfig: _appRouter.router,
+            child: BlocListener<AuthBloc, AuthState>(
+              listenWhen: (prev, curr) =>
+                  curr is AuthAuthenticated && (prev is! AuthAuthenticated || (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+              listener: (context, state) {
+                if (state is AuthAuthenticated) {
+                  context.read<FeedBloc>().add(FeedLoaded(currentUserId: state.user.id));
+                }
+              },
+              child: Container(
+                color: Colors.black,
+                child: MaterialApp.router(
+                  title: 'tmr_tau',
+                  debugShowCheckedModeBanner: false,
+                  theme: AppTheme.light,
+                  routerConfig: _appRouter.router,
+                ),
               ),
             ),
           ),
