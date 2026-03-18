@@ -385,7 +385,6 @@ class _StoryCircle extends StatelessWidget {
             const SizedBox(height: 4),
             SizedBox(
               width: 64,
-              height: 14,
               child: Text(
                 label,
                 maxLines: 1,

@@ -1,0 +1,43 @@
+---
+description: Чистая архитектура — слои feature (domain/data/presentation), зависимости внутрь
+alwaysApply: true
+---
+
+# Чистая архитектура (Clean Architecture)
+
+При любых изменениях в коде придерживайся чистой архитектуры проекта.
+
+## Слои фичи (feature-first)
+
+Каждая фича живёт в `lib/features/<feature>/` и имеет три слоя:
+
+- **domain/** — ядро, без зависимостей от Flutter/Supabase/UI.
+  - `entities/` — модели данных (без методов работы с сетью/БД).
+  - `repositories/` — абстрактные интерфейсы репозиториев (abstract class).
+  - Допустимы: `exceptions/`, `repositories/` (только контракты).
+
+- **data/** — реализация доступа к данным.
+  - `repositories/` — классы, реализующие интерфейсы из domain (например `*_repository_impl.dart`).
+  - `datasources/` — удалённые/локальные источники (API, Supabase, SharedPreferences).
+  - data зависит только от **domain** (и core), не от presentation.
+
+- **presentation/** — UI и состояние.
+  - `pages/`, `widgets/`, `bloc/` (или cubit).
+  - presentation зависит от **domain** (и при необходимости от data только через инъекцию репозиториев), не наоборот.
+
+## Правила зависимостей
+
+- **domain** не импортирует ни data, ни presentation, ни `package:supabase_flutter`, ни виджеты.
+- **data** импортирует domain (entities, репозитории) и может использовать Supabase, http, storage.
+- **presentation** импортирует domain (и по необходимости data только для виджетов, которые получают репозитории через конструктор/Provider). Bloc/Cubit получают репозитории через конструктор.
+
+## Общее (core)
+
+- `lib/core/` — общие сущности: router, theme, constants, storage, widgets, которые могут использоваться из разных фич.
+- В core не помещать фиче-специфичную бизнес-логику; при расширении core проверять, что слой не тянет за собой UI или конкретный data-источник в domain.
+
+## Пример
+
+- Добавить новый метод в репозиторий: объявить его в `domain/repositories/...`, реализовать в `data/repositories/..._impl.dart`, использовать в bloc/pages.
+- Новая фича: создать папку `features/<name>/` с подпапками `domain`, `data`, `presentation` и расставить файлы по слоям.
+- Не добавлять прямые вызовы Supabase или детали БД в domain или в presentation; только контракты в domain и реализация в data.

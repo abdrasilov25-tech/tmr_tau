@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../core/storage/local_reactions_storage.dart';
-import '../../core/theme/login_theme_presets.dart';
+import '../../core/theme/theme_decoration_helper.dart';
+import '../../core/theme/theme_index_notifier.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/splash_page.dart';
@@ -294,9 +294,15 @@ class _MainShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeIndex = context.read<LocalReactionsStorage>().getLoginThemeIndex();
-    final decoration = LoginThemePresets.gradientDecoration(themeIndex);
-    return Scaffold(
+    final themeNotifier = context.read<ThemeIndexNotifier>();
+    return ListenableBuilder(
+      listenable: themeNotifier.listenable,
+      builder: (context, _) {
+        final decoration = themeDecoration(
+          themeNotifier.value,
+          themeNotifier.customImagePath,
+        );
+        return Scaffold(
       backgroundColor: Colors.transparent,
       body: Stack(
         fit: StackFit.expand,
@@ -348,6 +354,8 @@ class _MainShell extends StatelessWidget {
           ],
         ),
       ),
+        );
+      },
     );
   }
 }
