@@ -60,6 +60,8 @@ class _LoginPageState extends State<LoginPage>
   late Animation<double> _themeButtonScaleAnimation;
   late AnimationController _themeButtonGlowController;
   late Animation<double> _themeButtonGlowAnimation;
+  bool _isPhoneLogin = false;
+  bool _otpDialogOpen = false;
 
   @override
   void initState() {
@@ -124,21 +126,17 @@ class _LoginPageState extends State<LoginPage>
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    final emailOrPhone = _emailController.text.trim();
-    // Восстановление пароля и email/password вход поддерживаются для email.
-    if (!emailOrPhone.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Вход по телефону пока не поддерживается. Укажите email.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    final contact = _emailController.text.trim();
+    if (_isPhoneLogin) {
+      context.read<AuthBloc>().add(AuthSignInWithSmsOtpRequested(phone: contact));
       return;
     }
-    context.read<AuthBloc>().add(AuthSignInRequested(
-          email: emailOrPhone,
-          password: _passwordController.text,
-        ));
+    context.read<AuthBloc>().add(
+      AuthSignInRequested(
+        email: contact,
+        password: _passwordController.text,
+      ),
+    );
   }
 
   void _showForgotPasswordDialog() {
@@ -234,8 +232,19 @@ class _LoginPageState extends State<LoginPage>
       listener: (context, state) {
         if (state is AuthAuthenticated) {
           if (_authHandled) return;
+          if (_otpDialogOpen) {
+            // Если мы сейчас в режиме ввода SMS-кода, сначала закрываем диалог,
+            // чтобы навигация не конфликтовала с dispose диалога.
+            if (Navigator.of(context).canPop()) {
+              _otpDialogOpen = false;
+              Navigator.of(context).pop();
+            } else {
+              _otpDialogOpen = false;
+            }
+          }
           _authHandled = true;
-          final password = _passwordController.text;
+          final password = _passwordController.text.trim();
+          final passwordOrNull = password.isEmpty ? null : password;
           final storage = context.read<MultiAccountStorage>();
           final doNavigate = () {
             if (!context.mounted) return;
@@ -245,17 +254,17 @@ class _LoginPageState extends State<LoginPage>
                 email: state.user.email,
                 name: state.user.name,
                 avatarUrl: state.user.avatarUrl,
-                password: password,
+                password: passwordOrNull,
               ));
             } else {
               context.go('/home/feed');
             }
           };
-          if (password.isEmpty) {
+          if (passwordOrNull == null) {
             doNavigate();
             return;
           }
-          storage.savePasswordImmediate(state.user.id, state.user.email, password);
+          storage.savePasswordImmediate(state.user.id, state.user.email, passwordOrNull);
           if (widget.addAccountMode) {
             doNavigate();
             return;
@@ -268,11 +277,66 @@ class _LoginPageState extends State<LoginPage>
                   name: state.user.name,
                   avatarUrl: state.user.avatarUrl,
                 ),
-                password: password,
+                password: passwordOrNull,
               )
               .then((_) => doNavigate())
               .catchError((_) => doNavigate());
           return;
+        }
+        if (state is AuthSmsOtpSent) {
+          if (_otpDialogOpen) return;
+          _otpDialogOpen = true;
+
+          final phone = state.phone;
+          showDialog<void>(
+            context: context,
+            barrierDismissible: false,
+            builder: (dialogContext) {
+              final otpController = TextEditingController();
+              return AlertDialog(
+                title: const Text('Код из SMS'),
+                content: TextField(
+                  controller: otpController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    hintText: 'Введите код',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('Отмена'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      final token = otpController.text.trim();
+                      if (token.isEmpty || token.length < 4) {
+                        ScaffoldMessenger.of(dialogContext).showSnackBar(
+                          const SnackBar(
+                            content: Text('Введите код из SMS.'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                        return;
+                      }
+                      dialogContext.read<AuthBloc>().add(
+                            AuthVerifySmsOtpRequested(
+                              phone: phone,
+                              token: token,
+                            ),
+                          );
+                    },
+                    child: const Text('Проверить'),
+                  ),
+                ],
+              );
+            },
+          ).whenComplete(() {
+            if (mounted) {
+              _otpDialogOpen = false;
+            }
+          });
         }
         if (state is AuthError) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -387,52 +451,92 @@ class _LoginPageState extends State<LoginPage>
                   ],
                 ),
                 const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => setState(() => _isPhoneLogin = false),
+                        child: Text(
+                          'Email',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: _isPhoneLogin ? FontWeight.w500 : FontWeight.w700,
+                            color: _isPhoneLogin ? subtitleColor : const Color(0xFF1A1A1E),
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: TextButton(
+                        onPressed: () => setState(() => _isPhoneLogin = true),
+                        child: Text(
+                          'Телефон',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            fontWeight: _isPhoneLogin ? FontWeight.w700 : FontWeight.w500,
+                            color: _isPhoneLogin ? const Color(0xFF1A1A1E) : subtitleColor,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 _NeonTextField(
                   controller: _emailController,
                   focusNode: _emailFocus,
                   isFocused: _emailFocus.hasFocus,
-                  hint: 'Email',
-                  keyboardType: TextInputType.emailAddress,
-                  borderColor: _NeonColors.cyan,
+                  hint: _isPhoneLogin ? 'Телефон' : 'Email',
+                  keyboardType:
+                      _isPhoneLogin ? TextInputType.phone : TextInputType.emailAddress,
+                  borderColor: _isPhoneLogin ? _NeonColors.teal : _NeonColors.cyan,
                   lightSurface: true,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) {
-                      return 'Введите email';
+                      return _isPhoneLogin ? 'Введите телефон' : 'Введите email';
                     }
-                    if (!v.contains('@')) {
-                      return 'Некорректный email';
+                    final value = v.trim();
+                    if (_isPhoneLogin) {
+                      final phoneRe = RegExp(r'^\+?[0-9]{7,15}$');
+                      if (!phoneRe.hasMatch(value)) {
+                        return 'Формат: +79990001122';
+                      }
+                      return null;
                     }
+                    if (!value.contains('@')) return 'Некорректный email';
                     return null;
                   },
                 ),
                 const SizedBox(height: 16),
-                _NeonTextField(
-                  controller: _passwordController,
-                  focusNode: _passwordFocus,
-                  isFocused: _passwordFocus.hasFocus,
-                  hint: 'Пароль',
-                  obscureText: _obscurePassword,
-                  borderColor: _NeonColors.pink,
-                  lightSurface: true,
-                  toggleObscure: () =>
-                      setState(() => _obscurePassword = !_obscurePassword),
-                  validator: (v) =>
-                      (v == null || v.isEmpty) ? 'Введите пароль' : null,
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: TextButton(
-                    onPressed: loading ? null : _showForgotPasswordDialog,
-                    child: Text(
-                      'Забыли пароль?',
-                      style: GoogleFonts.poppins(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: const Color(0xFF4B4BFF),
+                if (!_isPhoneLogin) ...[
+                  _NeonTextField(
+                    controller: _passwordController,
+                    focusNode: _passwordFocus,
+                    isFocused: _passwordFocus.hasFocus,
+                    hint: 'Пароль',
+                    obscureText: _obscurePassword,
+                    borderColor: _NeonColors.pink,
+                    lightSurface: true,
+                    toggleObscure: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
+                    validator: (v) =>
+                        (v == null || v.isEmpty) ? 'Введите пароль' : null,
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: loading ? null : _showForgotPasswordDialog,
+                      child: Text(
+                        'Забыли пароль?',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: const Color(0xFF4B4BFF),
+                        ),
                       ),
                     ),
                   ),
-                ),
+                ],
                 const SizedBox(height: 28),
                 _NeonLoginButton(
                   scaleAnimation: _scaleAnimation,
@@ -440,6 +544,7 @@ class _LoginPageState extends State<LoginPage>
                   onTapUp: () => _scaleController.reverse(),
                   onTapCancel: () => _scaleController.reverse(),
                   onPressed: loading ? null : _submit,
+                  label: _isPhoneLogin ? 'Получить код' : 'Войти',
                   loading: loading,
                 ),
                 const SizedBox(height: 24),
@@ -1016,6 +1121,7 @@ class _NeonLoginButton extends StatelessWidget {
     required this.onTapUp,
     required this.onTapCancel,
     required this.onPressed,
+    this.label = 'Войти',
     required this.loading,
   });
 
@@ -1024,6 +1130,7 @@ class _NeonLoginButton extends StatelessWidget {
   final VoidCallback onTapUp;
   final VoidCallback onTapCancel;
   final VoidCallback? onPressed;
+  final String label;
   final bool loading;
 
   static const _radius = 32.0;
@@ -1089,7 +1196,7 @@ class _NeonLoginButton extends StatelessWidget {
                         ),
                       )
                     : Text(
-                        'Войти',
+                        label,
                         style: GoogleFonts.poppins(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,

@@ -116,6 +116,44 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<void> signInWithSmsOtp(String phone) async {
+    await _client.auth.signInWithOtp(
+      phone: phone,
+      // По умолчанию это sms, но явно задаём чтобы не было сюрпризов.
+      channel: OtpChannel.sms,
+    );
+  }
+
+  @override
+  Future<void> verifySmsOtp(String phone, String token) async {
+    await _client.auth.verifyOTP(
+      type: OtpType.sms,
+      token: token,
+      phone: phone,
+    );
+
+    final authUser = _client.auth.currentUser;
+    final uid = authUser?.id;
+    if (uid == null) return;
+
+    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    if (_cachedUser == null) {
+      try {
+        await _ensureUserRow(uid, phone, _getName(authUser) ?? phone);
+        _cachedUser = await _dataSource.fetchUserProfile(uid);
+      } catch (_) {
+        // Профиль в БД не создался — пускаем в приложение с данными из сессии
+      }
+      _cachedUser ??= AppUser(
+        id: uid,
+        email: authUser?.email ?? '',
+        name: _getName(authUser) ?? phone,
+        followersCount: 0,
+      );
+    }
+  }
+
+  @override
   Future<void> resetPasswordForEmail(String email) async {
     await _client.auth.resetPasswordForEmail(
       email,

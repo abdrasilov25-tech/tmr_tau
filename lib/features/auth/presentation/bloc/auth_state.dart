@@ -23,6 +23,14 @@ final class AuthPasswordResetSent extends AuthState {
   const AuthPasswordResetSent();
 }
 
+final class AuthSmsOtpSent extends AuthState {
+  const AuthSmsOtpSent({required this.phone});
+  final String phone;
+
+  @override
+  List<Object?> get props => [phone];
+}
+
 final class AuthError extends AuthState {
   const AuthError(this.message);
   final String message;

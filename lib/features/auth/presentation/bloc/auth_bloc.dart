@@ -14,6 +14,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthSignInRequested>(_onSignInRequested);
     on<AuthSignInWithGoogleRequested>(_onSignInWithGoogleRequested);
     on<AuthSignInWithAppleRequested>(_onSignInWithAppleRequested);
+    on<AuthSignInWithSmsOtpRequested>(_onSignInWithSmsOtpRequested);
+    on<AuthVerifySmsOtpRequested>(_onVerifySmsOtpRequested);
     on<AuthSignUpRequested>(_onSignUpRequested);
     on<AuthSignOutRequested>(_onSignOutRequested);
     on<AuthSwitchToAccountRequested>(_onSwitchToAccountRequested);
@@ -88,6 +90,44 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(AuthLoading());
     try {
       await _authRepository.signInWithApple();
+      final user = _authRepository.currentUser;
+      if (user != null) {
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+        await _multiAccountStorage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
+      }
+      if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
+    } catch (e) {
+      if (!isClosed) emit(AuthError(_authErrorMessage(e)));
+    }
+  }
+
+  Future<void> _onSignInWithSmsOtpRequested(
+    AuthSignInWithSmsOtpRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.signInWithSmsOtp(event.phone);
+      if (!isClosed) emit(AuthSmsOtpSent(phone: event.phone));
+    } catch (e) {
+      if (!isClosed) emit(AuthError(_authErrorMessage(e)));
+    }
+  }
+
+  Future<void> _onVerifySmsOtpRequested(
+    AuthVerifySmsOtpRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.verifySmsOtp(event.phone, event.token);
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
