@@ -7,6 +7,8 @@ abstract class AuthRepository {
   Future<void> signUpWithEmail(String email, String password, String name);
   Future<void> signInWithGoogle();
   Future<void> signInWithApple();
+  Future<void> signInWithSmsOtp(String phone);
+  Future<void> verifySmsOtp(String phone, String token);
   Future<void> resetPasswordForEmail(String email);
   Future<void> signOut();
 }

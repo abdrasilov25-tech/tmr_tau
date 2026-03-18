@@ -26,6 +26,21 @@ final class AuthSignInWithAppleRequested extends AuthEvent {
   const AuthSignInWithAppleRequested();
 }
 
+final class AuthSignInWithSmsOtpRequested extends AuthEvent {
+  const AuthSignInWithSmsOtpRequested({required this.phone});
+  final String phone;
+  @override
+  List<Object?> get props => [phone];
+}
+
+final class AuthVerifySmsOtpRequested extends AuthEvent {
+  const AuthVerifySmsOtpRequested({required this.phone, required this.token});
+  final String phone;
+  final String token;
+  @override
+  List<Object?> get props => [phone, token];
+}
+
 final class AuthSignUpRequested extends AuthEvent {
   const AuthSignUpRequested({
     required this.email,
