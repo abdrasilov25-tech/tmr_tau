@@ -22,6 +22,10 @@ final class AuthSignInWithGoogleRequested extends AuthEvent {
   const AuthSignInWithGoogleRequested();
 }
 
+final class AuthSignInWithAppleRequested extends AuthEvent {
+  const AuthSignInWithAppleRequested();
+}
+
 final class AuthSignUpRequested extends AuthEvent {
   const AuthSignUpRequested({
     required this.email,
@@ -45,4 +49,11 @@ final class AuthSwitchToAccountRequested extends AuthEvent {
   final String password;
   @override
   List<Object?> get props => [email, password];
+}
+
+final class AuthResetPasswordRequested extends AuthEvent {
+  const AuthResetPasswordRequested({required this.email});
+  final String email;
+  @override
+  List<Object?> get props => [email];
 }
