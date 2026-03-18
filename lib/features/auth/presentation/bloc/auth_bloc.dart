@@ -1,6 +1,7 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../../core/storage/multi_account_storage.dart';
+import '../../../../core/storage/multi_account_storage.dart' show SavedAccount;
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 
@@ -41,6 +42,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
+        await _multiAccountStorage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
       }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
@@ -55,6 +64,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
+        await _multiAccountStorage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
       }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
@@ -69,6 +86,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
+        await _multiAccountStorage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
       }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
@@ -91,6 +116,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   Future<void> _onSignOutRequested(AuthSignOutRequested event, Emitter<AuthState> emit) async {
+    // Если выходим явно, удаляем текущий аккаунт из быстрого входа
+    // и сбрасываем lastActiveAccountId, чтобы он не появлялся в списке.
+    final current = _authRepository.currentUser;
+    if (current != null) {
+      await _multiAccountStorage.removeAccount(current.id);
+      await _multiAccountStorage.setLastActiveAccountId(null);
+    }
     await _authRepository.signOut();
     if (!isClosed) emit(AuthUnauthenticated());
   }
@@ -104,6 +136,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
+        await _multiAccountStorage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
       }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {

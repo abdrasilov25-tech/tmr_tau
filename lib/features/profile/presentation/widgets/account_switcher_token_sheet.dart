@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/multi_account_storage.dart';
+import '../../../../core/widgets/cached_avatar.dart';
 
 class AccountSwitcherTokenSheet extends StatelessWidget {
   const AccountSwitcherTokenSheet({
@@ -85,20 +86,16 @@ class AccountSwitcherTokenSheet extends StatelessWidget {
                               username.isNotEmpty)
                           ? '@$username'
                           : (saved?.displayName ?? activeAccount!.email);
-                      final avatarUrl = saved?.avatarUrl;
-                      final initials = primary.isNotEmpty
-                          ? primary[0].toUpperCase()
-                          : '?';
+                      final originalUrl = saved?.avatarUrl;
+                      final avatarUrl = (originalUrl != null &&
+                              originalUrl.isNotEmpty)
+                          ? '$originalUrl?uid=${activeAccount!.userId}'
+                          : null;
                       return ListTile(
-                        leading: CircleAvatar(
+                        leading: CachedAvatar(
+                          imageUrl: avatarUrl,
                           radius: 20,
-                          backgroundImage: avatarUrl != null &&
-                                  avatarUrl.isNotEmpty
-                              ? NetworkImage(avatarUrl)
-                              : null,
-                          child: (avatarUrl == null || avatarUrl.isEmpty)
-                              ? Text(initials)
-                              : null,
+                          fallbackText: primary,
                         ),
                         title: Text(
                           primary,
@@ -118,20 +115,16 @@ class AccountSwitcherTokenSheet extends StatelessWidget {
                               username.isNotEmpty)
                           ? '@$username'
                           : (saved?.displayName ?? a.email);
-                      final avatarUrl = saved?.avatarUrl;
-                      final initials = primary.isNotEmpty
-                          ? primary[0].toUpperCase()
-                          : '?';
+                      final originalUrl = saved?.avatarUrl;
+                      final avatarUrl = (originalUrl != null &&
+                              originalUrl.isNotEmpty)
+                          ? '$originalUrl?uid=${a.userId}'
+                          : null;
                       return ListTile(
-                        leading: CircleAvatar(
+                        leading: CachedAvatar(
+                          imageUrl: avatarUrl,
                           radius: 20,
-                          backgroundImage: avatarUrl != null &&
-                                  avatarUrl.isNotEmpty
-                              ? NetworkImage(avatarUrl)
-                              : null,
-                          child: (avatarUrl == null || avatarUrl.isEmpty)
-                              ? Text(initials)
-                              : null,
+                          fallbackText: primary,
                         ),
                         title: Text(primary),
                         onTap: () => onSelectAccount(a),
