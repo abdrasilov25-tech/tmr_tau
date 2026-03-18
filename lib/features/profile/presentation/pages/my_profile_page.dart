@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -11,6 +12,8 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/theme/theme_index_notifier.dart';
+import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../widgets/account_switcher_sheet.dart';
 import '../widgets/account_switcher_token_sheet.dart';
 import '../../../auth/domain/entities/app_user.dart';
@@ -266,7 +269,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           IconButton(
             icon: const Icon(Icons.menu_rounded, size: 26),
             onPressed: () {
-              // Меню: чаты, избранное, выйти
+              // Меню: темки, чаты, избранное, выйти
               _showProfileMenu(context);
             },
           ),
@@ -513,6 +516,37 @@ class _MyProfilePageState extends State<MyProfilePage> {
     );
   }
 
+  void _showThemePicker(BuildContext context, {ThemeIndexNotifier? themeNotifier}) {
+    final notifier = themeNotifier ?? context.read<ThemeIndexNotifier>();
+    final currentIndex = notifier.value;
+    showThemePickerSheet(
+      context,
+      currentIndex: currentIndex,
+      onSelect: (index) => notifier.setIndex(index),
+      onAddCustom: () async {
+        final picker = ImagePicker();
+        final xFile = await picker.pickImage(source: ImageSource.gallery);
+        if (kDebugMode) {
+          debugPrint('[Темки] pickImage result: ${xFile != null ? "ok ${xFile.path}" : "null"}');
+        }
+        if (xFile == null || !context.mounted) return;
+        final bytes = await xFile.readAsBytes();
+        if (kDebugMode) {
+          debugPrint('[Темки] readAsBytes: ${bytes.length} bytes');
+        }
+        if (!context.mounted) return;
+        await notifier.setCustomThemeFromImageBytes(bytes);
+        if (kDebugMode) {
+          debugPrint('[Темки] setCustomThemeFromImageBytes done');
+        }
+      },
+    );
+  }
+
+  void _showThemePickerWithNotifier(BuildContext context, ThemeIndexNotifier notifier) {
+    _showThemePicker(context, themeNotifier: notifier);
+  }
+
   void _showProfileMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -524,6 +558,21 @@ class _MyProfilePageState extends State<MyProfilePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Темки'),
+              onTap: () {
+                final themeNotifier = context.read<ThemeIndexNotifier>();
+                final navigator = Navigator.of(context);
+                navigator.pop();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  final overlayContext = navigator.context;
+                  if (overlayContext.mounted) {
+                    _showThemePickerWithNotifier(overlayContext, themeNotifier);
+                  }
+                });
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.chat_bubble_outline),
               title: const Text('Мои чаты'),
@@ -538,6 +587,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
               onTap: () {
                 Navigator.pop(context);
                 context.push('/favorites');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Редактировать профиль'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/edit-profile');
               },
             ),
             const Divider(height: 1),
@@ -685,11 +742,6 @@ class _ProfileContent extends StatelessWidget {
                     ),
                   ],
                   const SizedBox(height: 20),
-                  TextButton(
-                    onPressed: () => context.push('/edit-profile'),
-                    child: const Text('Редактировать профиль'),
-                  ),
-                  const SizedBox(height: 8),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [

@@ -9,6 +9,9 @@ import 'core/storage/chat_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/domain/theme_repository.dart';
+import 'core/theme/data/theme_repository_impl.dart';
+import 'core/theme/theme_index_notifier.dart';
 import 'core/router/app_router.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
@@ -69,6 +72,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final PostRepository _postRepository;
   late final AppRouter _appRouter;
   late final AccountManager _accountManager;
+  late final ThemeRepository _themeRepository;
+  late final ThemeIndexNotifier _themeIndexNotifier;
 
   @override
   void initState() {
@@ -76,6 +81,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
     if (!widget.supabaseInitialized) {
       return;
     }
+    _themeRepository = ThemeRepositoryImpl(widget.localReactionsStorage);
+    _themeIndexNotifier = ThemeIndexNotifier(_themeRepository);
     _client = supa.Supabase.instance.client;
     final authDataSource = AuthRemoteDataSourceImpl(_client);
     _authRepository = AuthRepositoryImpl(authDataSource, _client);
@@ -143,6 +150,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<AccountRepository>.value(
             value: widget.accountRepository),
         RepositoryProvider<AccountManager>.value(value: _accountManager),
+        RepositoryProvider<ThemeIndexNotifier>.value(value: _themeIndexNotifier),
         RepositoryProvider<AuthRepository>.value(value: _authRepository),
         RepositoryProvider<FeedRepository>.value(value: _feedRepository),
         RepositoryProvider<ProductRepository>.value(value: _productRepository),

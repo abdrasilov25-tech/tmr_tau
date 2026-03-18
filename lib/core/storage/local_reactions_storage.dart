@@ -9,6 +9,7 @@ class LocalReactionsStorage {
   static const _likedIdsKey = 'tmr_tau_liked_product_ids';
   static const _repostedIdsKey = 'tmr_tau_reposted_product_ids';
   static const _loginThemeIndexKey = 'tmr_tau_login_theme_index';
+  static const _customThemeImagePathKey = 'tmr_tau_custom_theme_image_path';
 
   Set<String> getLikedIds() {
     final list = _prefs.getStringList(_likedIdsKey);
@@ -46,12 +47,25 @@ class LocalReactionsStorage {
     await _prefs.remove(_repostedIdsKey);
   }
 
-  /// Индекс темы экрана входа (0–5). По умолчанию 0.
+  /// Индекс темы (0–6: 0–5 пресеты, 6 — своя из галереи). По умолчанию 0.
   int getLoginThemeIndex() {
     return _prefs.getInt(_loginThemeIndexKey) ?? 0;
   }
 
   Future<void> setLoginThemeIndex(int index) async {
-    await _prefs.setInt(_loginThemeIndexKey, index.clamp(0, 5));
+    await _prefs.setInt(_loginThemeIndexKey, index.clamp(0, 6));
+  }
+
+  /// Путь к файлу своей темы (фон из галереи). null — не задана.
+  String? getCustomThemeImagePath() {
+    return _prefs.getString(_customThemeImagePathKey);
+  }
+
+  Future<void> setCustomThemeImagePath(String? path) async {
+    if (path == null || path.isEmpty) {
+      await _prefs.remove(_customThemeImagePathKey);
+    } else {
+      await _prefs.setString(_customThemeImagePathKey, path);
+    }
   }
 }

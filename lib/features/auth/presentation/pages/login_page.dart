@@ -4,11 +4,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
+
 import '../../../../core/accounts/account_manager.dart';
 import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/local_reactions_storage.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/theme/login_theme_presets.dart';
+import '../../../../core/theme/theme_decoration_helper.dart';
+import '../../../../core/theme/theme_index_notifier.dart';
+import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../bloc/auth_bloc.dart';
 import 'login_result.dart';
 
@@ -45,7 +50,6 @@ class _LoginPageState extends State<LoginPage>
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
-  int _themeIndex = 0;
   bool _authHandled = false;
   List<AccountModel> _quickAccounts = const [];
   late AnimationController _scaleController;
@@ -87,11 +91,6 @@ class _LoginPageState extends State<LoginPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       try {
-        final storage = context.read<LocalReactionsStorage>();
-        final saved = storage.getLoginThemeIndex();
-        if (saved != _themeIndex) setState(() => _themeIndex = saved);
-      } catch (_) {}
-      try {
         final manager = context.read<AccountManager>();
         manager.loadAccounts().then((accounts) {
           if (!mounted) return;
@@ -132,8 +131,17 @@ class _LoginPageState extends State<LoginPage>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Фон: градиент фиолетовый → розовый → оранжевый → жёлтый → бирюзовый
-          _buildGradientBackground(),
+          ListenableBuilder(
+            listenable: context.read<ThemeIndexNotifier>().listenable,
+            builder: (context, _) {
+              final notifier = context.read<ThemeIndexNotifier>();
+              return Positioned.fill(
+                child: Container(
+                  decoration: themeDecoration(notifier.value, notifier.customImagePath),
+                ),
+              );
+            },
+          ),
           // Глубина: размытые светящиеся пятна
           _buildGlowSpots(),
           // Волнистые световые линии (неоновые волны)
@@ -214,7 +222,8 @@ class _LoginPageState extends State<LoginPage>
       },
       builder: (context, state) {
         final loading = state is AuthLoading;
-        final isLightTheme = _themeIndex == 1;
+        final themeIndex = context.read<ThemeIndexNotifier>().value;
+        final isLightTheme = themeIndex == 1;
         final titleColor = isLightTheme ? Colors.black87 : _NeonColors.white;
         final subtitleColor = isLightTheme ? Colors.black54 : _NeonColors.white60;
         return SingleChildScrollView(
@@ -440,36 +449,19 @@ class _LoginPageState extends State<LoginPage>
   }
 
   void _showThemeBottomSheet() {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => _ThemeBottomSheet(
-        currentIndex: _themeIndex,
-        onSelect: (index) {
-          setState(() => _themeIndex = index);
-          context.read<LocalReactionsStorage>().setLoginThemeIndex(index);
-          Navigator.of(context).pop();
-        },
-      ),
-    );
-  }
-
-  Widget _buildGradientBackground() {
-    final colors = LoginThemePresets.preset(_themeIndex);
-    return Positioned.fill(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.easeInOut,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: colors,
-            stops: const [0.0, 0.2, 0.35, 0.5, 0.6, 0.75, 0.85, 0.92, 1.0],
-          ),
-        ),
-      ),
+    final themeNotifier = context.read<ThemeIndexNotifier>();
+    showThemePickerSheet(
+      context,
+      currentIndex: themeNotifier.value,
+      onSelect: (index) => themeNotifier.setIndex(index),
+      onAddCustom: () async {
+        final picker = ImagePicker();
+        final xFile = await picker.pickImage(source: ImageSource.gallery);
+        if (xFile == null || !mounted) return;
+        final bytes = await xFile.readAsBytes();
+        if (!mounted) return;
+        await themeNotifier.setCustomThemeFromImageBytes(bytes);
+      },
     );
   }
 
