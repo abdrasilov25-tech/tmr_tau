@@ -124,10 +124,68 @@ class _LoginPageState extends State<LoginPage>
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
+    final emailOrPhone = _emailController.text.trim();
+    // Восстановление пароля и email/password вход поддерживаются для email.
+    if (!emailOrPhone.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Вход по телефону пока не поддерживается. Укажите email.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
     context.read<AuthBloc>().add(AuthSignInRequested(
-          email: _emailController.text.trim(),
+          email: emailOrPhone,
           password: _passwordController.text,
         ));
+  }
+
+  void _showForgotPasswordDialog() {
+    final initial = _emailController.text.trim();
+    final dialogController = TextEditingController(
+      text: initial.contains('@') ? initial : '',
+    );
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Восстановить пароль'),
+        content: TextField(
+          controller: dialogController,
+          keyboardType: TextInputType.emailAddress,
+          decoration: const InputDecoration(
+            hintText: 'Email',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final email = dialogController.text.trim();
+              if (email.isEmpty || !email.contains('@')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Введите корректный email для восстановления.'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+                return;
+              }
+              context
+                  .read<AuthBloc>()
+                  .add(AuthResetPasswordRequested(email: email));
+              Navigator.pop(ctx);
+            },
+            child: const Text('Восстановить'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -225,6 +283,14 @@ class _LoginPageState extends State<LoginPage>
             ),
           );
         }
+        if (state is AuthPasswordResetSent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Ссылка для восстановления отправлена на email.'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       },
       builder: (context, state) {
         final loading = state is AuthLoading;
@@ -282,22 +348,71 @@ class _LoginPageState extends State<LoginPage>
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 36),
+                const SizedBox(height: 26),
+                _OAuthButton(
+                  icon: Icons.apple_rounded,
+                  label: 'Продолжить через Apple',
+                  onPressed: loading
+                      ? null
+                      : () => context
+                          .read<AuthBloc>()
+                          .add(const AuthSignInWithAppleRequested()),
+                ),
+                const SizedBox(height: 12),
+                _OAuthButton(
+                  icon: Icons.g_mobiledata_rounded,
+                  label: 'Продолжить через Google',
+                  onPressed: loading
+                      ? null
+                      : () => context
+                          .read<AuthBloc>()
+                          .add(const AuthSignInWithGoogleRequested()),
+                ),
+                const SizedBox(height: 18),
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Divider(
+                        color: Color(0xFFE6E7EC),
+                        height: 1,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        'или',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: subtitleColor,
+                        ),
+                      ),
+                    ),
+                    const Expanded(
+                      child: Divider(
+                        color: Color(0xFFE6E7EC),
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
                 _NeonTextField(
                   controller: _emailController,
                   focusNode: _emailFocus,
                   isFocused: _emailFocus.hasFocus,
-                  hint: 'Email',
+                  hint: 'Email или телефон',
                   keyboardType: TextInputType.emailAddress,
                   borderColor: _NeonColors.cyan,
                   lightSurface: true,
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Введите email';
-                    if (!v.contains('@')) return 'Некорректный email';
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Введите email или телефон';
+                    }
                     return null;
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 _NeonTextField(
                   controller: _passwordController,
                   focusNode: _passwordFocus,
@@ -311,7 +426,21 @@ class _LoginPageState extends State<LoginPage>
                   validator: (v) =>
                       (v == null || v.isEmpty) ? 'Введите пароль' : null,
                 ),
-                const SizedBox(height: 40),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: loading ? null : _showForgotPasswordDialog,
+                    child: Text(
+                      'Забыли пароль?',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF4B4BFF),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 28),
                 _NeonLoginButton(
                   scaleAnimation: _scaleAnimation,
                   onTapDown: () => _scaleController.forward(),
@@ -977,6 +1106,47 @@ class _NeonLoginButton extends StatelessWidget {
                       ),
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Кнопка OAuth (Apple/Google) в стиле “современных” приложений.
+class _OAuthButton extends StatelessWidget {
+  const _OAuthButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 54,
+      child: OutlinedButton.icon(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.white.withValues(alpha: 0.9),
+          foregroundColor: Colors.black87,
+          side: BorderSide(color: const Color(0xFFE6E7EC), width: 1),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+        label: Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.2,
           ),
         ),
       ),

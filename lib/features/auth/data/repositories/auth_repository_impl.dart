@@ -89,6 +89,40 @@ class AuthRepositoryImpl implements AuthRepository {
     }
   }
 
+  @override
+  Future<void> signInWithApple() async {
+    await _client.auth.signInWithOAuth(
+      OAuthProvider.apple,
+      redirectTo: 'tmrtau://auth/callback',
+    );
+    final authUser = _client.auth.currentUser;
+    final uid = authUser?.id;
+    if (uid == null) return;
+    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    if (_cachedUser == null) {
+      try {
+        await _ensureUserRow(uid, authUser?.email ?? '', _getName(authUser) ?? '');
+        _cachedUser = await _dataSource.fetchUserProfile(uid);
+      } catch (_) {
+        // Профиль в БД не создался — пускаем в приложение с данными из сессии
+      }
+      _cachedUser ??= AppUser(
+        id: uid,
+        email: authUser?.email ?? '',
+        name: _getName(authUser),
+        followersCount: 0,
+      );
+    }
+  }
+
+  @override
+  Future<void> resetPasswordForEmail(String email) async {
+    await _client.auth.resetPasswordForEmail(
+      email,
+      redirectTo: 'tmrtau://auth/callback',
+    );
+  }
+
   String? _getName(User? user) {
     if (user == null) return null;
     final meta = user.userMetadata;

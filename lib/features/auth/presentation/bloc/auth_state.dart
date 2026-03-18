@@ -19,6 +19,10 @@ final class AuthAuthenticated extends AuthState {
 
 final class AuthUnauthenticated extends AuthState {}
 
+final class AuthPasswordResetSent extends AuthState {
+  const AuthPasswordResetSent();
+}
+
 final class AuthError extends AuthState {
   const AuthError(this.message);
   final String message;

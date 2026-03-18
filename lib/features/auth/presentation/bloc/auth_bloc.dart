@@ -13,9 +13,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthCheckRequested>(_onCheckRequested);
     on<AuthSignInRequested>(_onSignInRequested);
     on<AuthSignInWithGoogleRequested>(_onSignInWithGoogleRequested);
+    on<AuthSignInWithAppleRequested>(_onSignInWithAppleRequested);
     on<AuthSignUpRequested>(_onSignUpRequested);
     on<AuthSignOutRequested>(_onSignOutRequested);
     on<AuthSwitchToAccountRequested>(_onSwitchToAccountRequested);
+    on<AuthResetPasswordRequested>(_onResetPasswordRequested);
   }
 
   final AuthRepository _authRepository;
@@ -61,6 +63,31 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     emit(AuthLoading());
     try {
       await _authRepository.signInWithGoogle();
+      final user = _authRepository.currentUser;
+      if (user != null) {
+        await _multiAccountStorage.setLastActiveAccountId(user.id);
+        await _multiAccountStorage.addAccount(
+          SavedAccount(
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            avatarUrl: user.avatarUrl,
+          ),
+        );
+      }
+      if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
+    } catch (e) {
+      if (!isClosed) emit(AuthError(_authErrorMessage(e)));
+    }
+  }
+
+  Future<void> _onSignInWithAppleRequested(
+    AuthSignInWithAppleRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.signInWithApple();
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
@@ -146,6 +173,19 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         );
       }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
+    } catch (e) {
+      if (!isClosed) emit(AuthError(_authErrorMessage(e)));
+    }
+  }
+
+  Future<void> _onResetPasswordRequested(
+    AuthResetPasswordRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    emit(AuthLoading());
+    try {
+      await _authRepository.resetPasswordForEmail(event.email);
+      if (!isClosed) emit(const AuthPasswordResetSent());
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
     }

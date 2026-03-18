@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import '../../core/theme/theme_decoration_helper.dart';
 import '../../core/theme/theme_index_notifier.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/register_page.dart';
 import '../../features/auth/presentation/pages/splash_page.dart';
+import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/feed/presentation/pages/favorites_screen.dart';
 import '../../features/feed/presentation/pages/feed_page.dart';
 import '../../features/feed/presentation/pages/search_page.dart';
@@ -78,6 +80,14 @@ class AppRouter {
       GoRoute(
         path: '/register',
         builder: (context, state) => const RegisterPage(),
+      ),
+      GoRoute(
+        path: '/auth/callback',
+        builder: (context, state) {
+          final code = state.uri.queryParameters['code'] ??
+              state.uri.queryParameters['auth_code'];
+          return _AuthCallbackPage(authCode: code);
+        },
       ),
       GoRoute(
         path: '/product/:id',
@@ -285,6 +295,55 @@ class AppRouter {
       ),
     ],
   );
+}
+
+class _AuthCallbackPage extends StatefulWidget {
+  const _AuthCallbackPage({required this.authCode});
+
+  final String? authCode;
+
+  @override
+  State<_AuthCallbackPage> createState() => _AuthCallbackPageState();
+}
+
+class _AuthCallbackPageState extends State<_AuthCallbackPage> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _exchangeAndCheck());
+  }
+
+  Future<void> _exchangeAndCheck() async {
+    final code = widget.authCode;
+    if (code != null && code.isNotEmpty) {
+      try {
+        await supa.Supabase.instance.client.auth.exchangeCodeForSession(code);
+      } catch (_) {
+        // Если обмен кода не удался — просто продолжаем до проверки AuthBloc.
+      }
+    }
+    if (!mounted) return;
+    context.read<AuthBloc>().add(const AuthCheckRequested());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<AuthBloc, AuthState>(
+      listener: (context, state) {
+        if (state is AuthAuthenticated) {
+          context.go('/home/feed');
+        }
+        if (state is AuthUnauthenticated || state is AuthError) {
+          context.go('/login');
+        }
+      },
+      child: const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      ),
+    );
+  }
 }
 
 class _MainShell extends StatelessWidget {
