@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
@@ -61,9 +62,13 @@ class _SellerProfileView extends StatelessWidget {
       slivers: [
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            child: DecoratedBox(
+              decoration: ThemedContentSurface.profileCardDecoration(),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
                 GestureDetector(
                   onTap: () {
                     final imageUrl = profile.avatarUrl;
@@ -98,7 +103,9 @@ class _SellerProfileView extends StatelessWidget {
                   children: [
                     Text(
                       profile.name,
-                      style: Theme.of(context).textTheme.titleLarge,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            color: ThemedContentSurface.profileTextPrimary,
+                          ),
                     ),
                     if (profile.isVerified) ...[
                       const SizedBox(width: 6),
@@ -108,10 +115,26 @@ class _SellerProfileView extends StatelessWidget {
                 ),
                 if (profile.bio != null && profile.bio!.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  Text(
-                    profile.bio!,
-                    style: Theme.of(context).textTheme.bodyMedium,
-                    textAlign: TextAlign.center,
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Text(
+                      profile.bio!,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: ThemedContentSurface.profileTextSecondary,
+                            height: 1.35,
+                          ),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
@@ -120,17 +143,23 @@ class _SellerProfileView extends StatelessWidget {
                   children: [
                     Text(
                       '${profile.followersCount} подписчиков',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: ThemedContentSurface.profileTextSecondary,
+                          ),
                     ),
                     const SizedBox(width: 24),
                     Text(
                       '${profile.followingCount} подписок',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: ThemedContentSurface.profileTextSecondary,
+                          ),
                     ),
                     const SizedBox(width: 24),
                     Text(
                       '${profile.products.length} товаров',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: ThemedContentSurface.profileTextSecondary,
+                          ),
                     ),
                   ],
                 ),
@@ -143,7 +172,6 @@ class _SellerProfileView extends StatelessWidget {
                         child: FilledButton(
                           onPressed: () {
                             final uid = (context.read<AuthBloc>().state as AuthAuthenticated).user.id;
-                            print('UI: Toggle follow pressed, uid=$uid, followingId=${profile.id}');
                             context.read<ProfileBloc>().add(
                                   ProfileToggleFollow(
                                     followerId: uid,
@@ -166,16 +194,27 @@ class _SellerProfileView extends StatelessWidget {
                     ],
                   ),
                 ],
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),
         SliverToBoxAdapter(
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'Товары',
-              style: Theme.of(context).textTheme.titleMedium,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: DecoratedBox(
+              decoration: ThemedContentSurface.profileCardDecoration(radius: 16),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                child: Text(
+                  'Товары',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: ThemedContentSurface.profileTextPrimary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
             ),
           ),
         ),

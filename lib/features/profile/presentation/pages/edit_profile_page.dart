@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/storage/multi_account_storage.dart';
+import '../../../../core/theme/themed_content_surface.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/repositories/profile_repository.dart';
 
@@ -95,11 +96,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+          child: DecoratedBox(
+            decoration: ThemedContentSurface.profileCardDecoration(),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                 TextFormField(
                   controller: _nameController,
                   decoration: const InputDecoration(
@@ -128,7 +133,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 24),
                 Text(
                   'Пол',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: ThemedContentSurface.profileTextPrimary,
+                      ),
                 ),
                 RadioListTile<String?>(
                   value: 'male',
@@ -159,7 +166,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         )
                       : const Text('Сохранить'),
                 ),
-              ],
+                  ],
+                ),
+              ),
             ),
           ),
         ),

@@ -62,6 +62,7 @@ class _ChatsPageState extends State<ChatsPage> {
           lastMessageAt: createdAt,
           lastMessageSenderId: senderId,
           unreadCount: 0,
+          lastIncomingAt: null,
         );
       }
     }
@@ -73,14 +74,24 @@ class _ChatsPageState extends State<ChatsPage> {
       final t = entry.value;
       final lastRead = _chatStorage.getLastReadAt(peerId);
       int unreadCount = 0;
+      DateTime? lastIncomingAt;
       for (final row in rows) {
         final json = row as Map<String, dynamic>;
-        if (json['sender_id'] == peerId && json['receiver_id'] == _currentUserId) {
+        if (json['sender_id'] == peerId &&
+            json['receiver_id'] == _currentUserId) {
           final msgAt = DateTime.parse(json['created_at'] as String);
-          if (lastRead == null || msgAt.isAfter(lastRead)) unreadCount++;
+          if (lastIncomingAt == null || msgAt.isAfter(lastIncomingAt)) {
+            lastIncomingAt = msgAt;
+          }
+          if (lastRead == null || msgAt.isAfter(lastRead)) {
+            unreadCount++;
+          }
         }
       }
-      threadsByPeer[peerId] = t.copyWith(unreadCount: unreadCount);
+      threadsByPeer[peerId] = t.copyWith(
+        unreadCount: unreadCount,
+        lastIncomingAt: lastIncomingAt,
+      );
     }
 
     for (final peerId in threadsByPeer.keys) {
@@ -311,7 +322,13 @@ class _ChatsPageState extends State<ChatsPage> {
 
   Future<void> _openChat(_ChatThread t) async {
     final isUnread = t.unreadCount > 0;
-    if (isUnread) {
+    final lastIncoming = t.lastIncomingAt;
+    final lastDialog = _chatStorage.getLastDialogShownAt(t.peerId);
+    final shouldShowDialog = isUnread &&
+        lastIncoming != null &&
+        (lastDialog == null || lastIncoming.isAfter(lastDialog));
+
+    if (shouldShowDialog) {
       final accept = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -332,8 +349,11 @@ class _ChatsPageState extends State<ChatsPage> {
         ),
       );
       if (!mounted) return;
+      if (lastIncoming != null) {
+        await _chatStorage.setLastDialogShownAt(t.peerId, lastIncoming);
+      }
       if (accept == true) {
-        await _chatStorage.setLastReadAt(t.peerId, DateTime.now());
+        await _chatStorage.setLastReadAt(t.peerId, lastIncoming ?? DateTime.now());
       }
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
@@ -426,6 +446,7 @@ class _ChatThread {
     required this.lastMessageAt,
     required this.lastMessageSenderId,
     this.unreadCount = 0,
+    this.lastIncomingAt,
   });
 
   final String peerId;
@@ -435,11 +456,13 @@ class _ChatThread {
   final DateTime lastMessageAt;
   final String lastMessageSenderId;
   final int unreadCount;
+  final DateTime? lastIncomingAt;
 
   _ChatThread copyWith({
     String? peerName,
     String? peerAvatarUrl,
     int? unreadCount,
+    DateTime? lastIncomingAt,
   }) {
     return _ChatThread(
       peerId: peerId,
@@ -449,6 +472,7 @@ class _ChatThread {
       lastMessageAt: lastMessageAt,
       lastMessageSenderId: lastMessageSenderId,
       unreadCount: unreadCount ?? this.unreadCount,
+      lastIncomingAt: lastIncomingAt ?? this.lastIncomingAt,
     );
   }
 }

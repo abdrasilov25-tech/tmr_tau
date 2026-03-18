@@ -12,6 +12,7 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../widgets/account_switcher_sheet.dart';
@@ -647,179 +648,388 @@ class _ProfileContent extends StatelessWidget {
         slivers: [
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Column(
-                children: [
-                  Stack(
-                    alignment: Alignment.bottomRight,
+              padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
+              child: DecoratedBox(
+                decoration: ThemedContentSurface.profileCardDecoration(
+                  radius: ThemedContentSurface.profileUnifiedRadius,
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(
+                    ThemedContentSurface.profileUnifiedRadius,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      GestureDetector(
-                        onTap: () {
-                          final imageUrl = user.avatarUrl ?? profile?.avatarUrl;
-                          if (imageUrl == null || imageUrl.isEmpty) return;
-                          showDialog<void>(
-                            context: context,
-                            builder: (ctx) => Dialog(
-                              backgroundColor: Colors.black,
-                              insetPadding: const EdgeInsets.all(24),
-                              child: AspectRatio(
-                                aspectRatio: 1,
-                                child: InteractiveViewer(
-                                  child: Image.network(
-                                    imageUrl,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                        child: CachedAvatar(
-                          imageUrl: user.avatarUrl ?? profile?.avatarUrl,
-                          radius: 48,
-                          fallbackText: user.name ?? user.email,
+                      DecoratedBox(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Color(0xFFE8EDF5),
+                              Color(0xFFF8FAFD),
+                              Colors.white,
+                            ],
+                            stops: [0.0, 0.45, 1.0],
+                          ),
                         ),
-                      ),
-                      Positioned(
-                        right: 2,
-                        bottom: 2,
-                        child: GestureDetector(
-                          onTap: updatingAvatar ? null : onAvatarTap,
-                          child: Container(
-                            width: 22,
-                            height: 22,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.blueAccent,
-                              border: Border.all(color: Colors.white, width: 2),
-                            ),
-                            child: updatingAvatar
-                                ? const Padding(
-                                    padding: EdgeInsets.all(3),
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation(Colors.white),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 26, 20, 18),
+                          child: Column(
+                            children: [
+                              Stack(
+                                alignment: Alignment.bottomRight,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary
+                                              .withValues(alpha: 0.18),
+                                          blurRadius: 20,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
                                     ),
-                                  )
-                                : const Icon(
-                                    Icons.add,
-                                    size: 14,
-                                    color: Colors.white,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(3),
+                                      decoration: const BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          final imageUrl =
+                                              user.avatarUrl ?? profile?.avatarUrl;
+                                          if (imageUrl == null ||
+                                              imageUrl.isEmpty) {
+                                            return;
+                                          }
+                                          showDialog<void>(
+                                            context: context,
+                                            builder: (ctx) => Dialog(
+                                              backgroundColor: Colors.black,
+                                              insetPadding:
+                                                  const EdgeInsets.all(24),
+                                              child: AspectRatio(
+                                                aspectRatio: 1,
+                                                child: InteractiveViewer(
+                                                  child: Image.network(
+                                                    imageUrl,
+                                                    fit: BoxFit.cover,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        child: CachedAvatar(
+                                          imageUrl: user.avatarUrl ??
+                                              profile?.avatarUrl,
+                                          radius: 46,
+                                          fallbackText:
+                                              user.name ?? user.email,
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    (user.username != null && user.username!.isNotEmpty)
-                        ? '@${user.username}'
-                        : user.email,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                  ),
-                  if (user.name != null && user.name!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      user.name!,
-                      style:
-                          Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                color: Colors.grey.shade700,
+                                  Positioned(
+                                    right: 0,
+                                    bottom: 0,
+                                    child: GestureDetector(
+                                      onTap: updatingAvatar ? null : onAvatarTap,
+                                      child: Container(
+                                        width: 26,
+                                        height: 26,
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                          border: Border.all(
+                                            color: Colors.white,
+                                            width: 2.5,
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black
+                                                  .withValues(alpha: 0.12),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: updatingAvatar
+                                            ? const Padding(
+                                                padding: EdgeInsets.all(4),
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                  valueColor:
+                                                      AlwaysStoppedAnimation<
+                                                          Color>(Colors.white),
+                                                ),
+                                              )
+                                            : const Icon(
+                                                Icons.add_rounded,
+                                                size: 16,
+                                                color: Colors.white,
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                    ),
-                  ],
-                  if ((user.bio ?? profile?.bio) != null &&
-                      (user.bio ?? profile?.bio)!.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      user.bio ?? profile?.bio ?? '',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey.shade700,
+                              const SizedBox(height: 16),
+                              Text(
+                                (user.username != null &&
+                                        user.username!.isNotEmpty)
+                                    ? '@${user.username}'
+                                    : user.email,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -0.3,
+                                      color: ThemedContentSurface
+                                          .profileTextPrimary,
+                                    ),
+                              ),
+                              if (user.name != null &&
+                                  user.name!.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text(
+                                  user.name!,
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyLarge
+                                      ?.copyWith(
+                                        color: ThemedContentSurface
+                                            .profileTextSecondary,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                ),
+                              ],
+                            ],
                           ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _StatItem(
-                        value: _publicationsCount,
-                        label: 'публикаций',
+                        ),
                       ),
-                      _StatItem(
-                        value: profile?.followersCount ?? user.followersCount,
-                        label: 'подписчиков',
-                        onTap: () => context.push('/followers'),
+                      if ((user.bio ?? profile?.bio) != null &&
+                          (user.bio ?? profile?.bio)!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+                          child: Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF3F5F9),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              user.bio ?? profile?.bio ?? '',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(
+                                    color: ThemedContentSurface
+                                        .profileTextSecondary,
+                                    height: 1.45,
+                                  ),
+                            ),
+                          ),
+                        ),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          12,
+                          (user.bio ?? profile?.bio)?.isNotEmpty == true
+                              ? 18
+                              : 14,
+                          12,
+                          16,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _StatItem(
+                                value: _publicationsCount,
+                                label: 'публикаций',
+                              ),
+                            ),
+                            _statDivider(),
+                            Expanded(
+                              child: _StatItem(
+                                value: profile?.followersCount ??
+                                    user.followersCount,
+                                label: 'подписчиков',
+                                onTap: () => context.push('/followers'),
+                              ),
+                            ),
+                            _statDivider(),
+                            Expanded(
+                              child: _StatItem(
+                                value: profile?.followingCount ??
+                                    user.followingCount,
+                                label: 'подписок',
+                                onTap: () => context.push('/following'),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      _StatItem(
-                        value: profile?.followingCount ?? user.followingCount,
-                        label: 'подписок',
-                        onTap: () => context.push('/following'),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                        child: _ProfileTabBar(
+                          tabIndex: tabIndex,
+                          onChanged: onTabChanged,
+                        ),
+                      ),
+                      ColoredBox(
+                        color: const Color(0xFFF2F3F7),
+                        child: SizedBox(
+                          height: 400,
+                          child: tabIndex == 0
+                              ? _ProductsGrid(
+                                  products: profile?.products ?? [],
+                                )
+                              : _PostsGrid(posts: posts),
+                        ),
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
             ),
           ),
-          SliverToBoxAdapter(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: () => onTabChanged(0),
-                          icon: Icon(
-                            Icons.grid_on_rounded,
-                            size: 22,
-                            color: tabIndex == 0 ? Colors.black87 : Colors.grey,
-                          ),
-                          label: Text(
-                            'Товары',
-                            style: TextStyle(
-                              fontWeight: tabIndex == 0 ? FontWeight.w600 : FontWeight.normal,
-                              color: tabIndex == 0 ? Colors.black87 : Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ),
-                      Container(width: 1, height: 24, color: Colors.grey.shade300),
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: () => onTabChanged(1),
-                          icon: Icon(
-                            Icons.article_outlined,
-                            size: 22,
-                            color: tabIndex == 1 ? Colors.black87 : Colors.grey,
-                          ),
-                          label: Text(
-                            'Новости',
-                            style: TextStyle(
-                              fontWeight: tabIndex == 1 ? FontWeight.w600 : FontWeight.normal,
-                              color: tabIndex == 1 ? Colors.black87 : Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                SizedBox(
-                  height: 400,
-                  child: tabIndex == 0
-                      ? _ProductsGrid(products: profile?.products ?? [])
-                      : _PostsGrid(posts: posts),
-                ),
-              ],
+        ],
+      ),
+    );
+  }
+}
+
+Widget _statDivider() => Container(
+      width: 1,
+      height: 38,
+      margin: const EdgeInsets.symmetric(vertical: 2),
+      color: const Color(0xFFE2E5EB),
+    );
+
+/// Переключатель «Товары / Новости» в одной карточке профиля.
+class _ProfileTabBar extends StatelessWidget {
+  const _ProfileTabBar({
+    required this.tabIndex,
+    required this.onChanged,
+  });
+
+  final int tabIndex;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 46,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFECEEF2),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _ProfileTabChip(
+              selected: tabIndex == 0,
+              icon: Icons.grid_view_rounded,
+              label: 'Товары',
+              onTap: () => onChanged(0),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _ProfileTabChip(
+              selected: tabIndex == 1,
+              icon: Icons.article_rounded,
+              label: 'Новости',
+              onTap: () => onChanged(1),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ProfileTabChip extends StatelessWidget {
+  const _ProfileTabChip({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(11),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
+            boxShadow: selected
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 19,
+                color: selected
+                    ? ThemedContentSurface.profileTextPrimary
+                    : const Color(0xFF8E92A0),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                  color: selected
+                      ? ThemedContentSurface.profileTextPrimary
+                      : const Color(0xFF8E92A0),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -845,22 +1055,24 @@ class _StatItem extends StatelessWidget {
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 18,
+            color: ThemedContentSurface.profileTextPrimary,
           ),
         ),
         Text(
           label,
           style: TextStyle(
             fontSize: 13,
-            color: Colors.grey.shade600,
+            color: ThemedContentSurface.profileTextSecondary,
           ),
         ),
       ],
     );
-    if (onTap == null) return content;
+    final wrapped = Center(child: content);
+    if (onTap == null) return wrapped;
     return GestureDetector(
       onTap: onTap,
       behavior: HitTestBehavior.opaque,
-      child: content,
+      child: wrapped,
     );
   }
 }
