@@ -54,5 +54,9 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Нам нужен доступ к фото, чтобы выбрать аватар и кастомную тему из галереи.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Нам нужен доступ к фото, чтобы сохранять выбранные изображения в приложение (если требуется).</string>
 </dict>
 </plist>

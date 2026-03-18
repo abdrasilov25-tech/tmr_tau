@@ -358,16 +358,6 @@ class _LoginPageState extends State<LoginPage>
                           .read<AuthBloc>()
                           .add(const AuthSignInWithAppleRequested()),
                 ),
-                const SizedBox(height: 12),
-                _OAuthButton(
-                  icon: Icons.g_mobiledata_rounded,
-                  label: 'Продолжить через Google',
-                  onPressed: loading
-                      ? null
-                      : () => context
-                          .read<AuthBloc>()
-                          .add(const AuthSignInWithGoogleRequested()),
-                ),
                 const SizedBox(height: 18),
                 Row(
                   children: [
@@ -401,13 +391,16 @@ class _LoginPageState extends State<LoginPage>
                   controller: _emailController,
                   focusNode: _emailFocus,
                   isFocused: _emailFocus.hasFocus,
-                  hint: 'Email или телефон',
+                  hint: 'Email',
                   keyboardType: TextInputType.emailAddress,
                   borderColor: _NeonColors.cyan,
                   lightSurface: true,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) {
-                      return 'Введите email или телефон';
+                      return 'Введите email';
+                    }
+                    if (!v.contains('@')) {
+                      return 'Некорректный email';
                     }
                     return null;
                   },
