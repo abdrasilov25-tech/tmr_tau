@@ -91,7 +91,10 @@ class _SellerProfileView extends StatelessWidget {
                     );
                   },
                   child: CachedAvatar(
-                    imageUrl: profile.avatarUrl,
+                    imageUrl: profile.avatarUrl != null &&
+                            profile.avatarUrl!.isNotEmpty
+                        ? '${profile.avatarUrl}?uid=${profile.id}'
+                        : null,
                     radius: 48,
                     fallbackText: profile.name,
                   ),

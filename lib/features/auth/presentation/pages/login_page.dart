@@ -14,6 +14,7 @@ import '../../../../core/theme/login_theme_presets.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
+import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../bloc/auth_bloc.dart';
 import 'login_result.dart';
@@ -95,11 +96,15 @@ class _LoginPageState extends State<LoginPage>
         final manager = context.read<AccountManager>();
         manager.loadAccounts().then((accounts) {
           if (!mounted) return;
-          if (accounts.isNotEmpty) {
-            setState(() {
-              _quickAccounts = accounts;
-            });
+          if (accounts.isEmpty) return;
+          // Удаляем дубликаты по userId: оставляем последний вариант.
+          final byId = <String, AccountModel>{};
+          for (final acc in accounts) {
+            byId[acc.userId] = acc;
           }
+          setState(() {
+            _quickAccounts = byId.values.toList();
+          });
         }).catchError((_) {});
       } catch (_) {}
     });
@@ -343,46 +348,65 @@ class _LoginPageState extends State<LoginPage>
                   ),
                   const SizedBox(height: 8),
                   SizedBox(
-                    height: 70,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _quickAccounts.length,
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        final acc = _quickAccounts[index];
-                        final initials = acc.email.isNotEmpty
-                            ? acc.email[0].toUpperCase()
-                            : '?';
-                        return GestureDetector(
-                          onTap: loading
-                              ? null
-                              : () async {
-                                  await _quickSwitchToAccount(acc);
-                                },
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CircleAvatar(
-                                radius: 18,
-                                child: Text(initials),
+                    height: 76,
+                    child: Builder(
+                      builder: (context) {
+                        final saved =
+                            context.read<MultiAccountStorage>().getAccounts();
+                        return ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          itemCount: _quickAccounts.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(width: 12),
+                          itemBuilder: (context, index) {
+                            final acc = _quickAccounts[index];
+                            final savedMatch = saved.firstWhere(
+                              (s) =>
+                                  s.id == acc.userId ||
+                                  s.email.toLowerCase() ==
+                                      acc.email.toLowerCase(),
+                              orElse: () => SavedAccount(
+                                id: acc.userId,
+                                email: acc.email,
                               ),
-                              const SizedBox(height: 4),
-                              SizedBox(
-                                width: 80,
-                                child: Text(
-                                  acc.email,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  textAlign: TextAlign.center,
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 11,
-                                    color: subtitleColor,
+                            );
+                            final originalUrl = savedMatch.avatarUrl;
+                            final uniqueUrl = (originalUrl != null &&
+                                    originalUrl.isNotEmpty)
+                                ? '$originalUrl?uid=${savedMatch.id}'
+                                : null;
+                            return GestureDetector(
+                              onTap: loading
+                                  ? null
+                                  : () async {
+                                      await _quickSwitchToAccount(acc);
+                                    },
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  CachedAvatar(
+                                    imageUrl: uniqueUrl,
+                                    radius: 18,
+                                    fallbackText: savedMatch.displayName,
                                   ),
-                                ),
+                                  const SizedBox(height: 4),
+                                  SizedBox(
+                                    width: 80,
+                                    child: Text(
+                                      savedMatch.displayName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.poppins(
+                                        fontSize: 11,
+                                        color: subtitleColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
+                            );
+                          },
                         );
                       },
                     ),

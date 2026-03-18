@@ -18,7 +18,8 @@ class CachedAvatar extends StatelessWidget {
     final fallback = fallbackText != null && fallbackText!.isNotEmpty
         ? fallbackText![0].toUpperCase()
         : '?';
-    if (imageUrl == null || imageUrl!.isEmpty) {
+    final rawUrl = imageUrl;
+    if (rawUrl == null || rawUrl.isEmpty) {
       return CircleAvatar(
         radius: radius,
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -28,6 +29,11 @@ class CachedAvatar extends StatelessWidget {
         ),
       );
     }
+    // Для разных аккаунтов мы используем уникальный URL (uid в query),
+    // а также сбрасываем кэш по этому URL, чтобы cached_network_image
+    // не подсовывал старую картинку другого пользователя.
+    final url = rawUrl;
+    CachedNetworkImage.evictFromCache(url);
     return GestureDetector(
       onTap: () {
         final url = imageUrl;
@@ -54,7 +60,7 @@ class CachedAvatar extends StatelessWidget {
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
         child: ClipOval(
           child: CachedNetworkImage(
-            imageUrl: imageUrl!,
+            imageUrl: url,
             width: radius * 2,
             height: radius * 2,
             fit: BoxFit.cover,

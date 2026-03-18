@@ -603,8 +603,24 @@ class _MyProfilePageState extends State<MyProfilePage> {
               leading: const Icon(Icons.logout),
               title: const Text('Выйти'),
               onTap: () {
-                Navigator.pop(context);
-                context.read<AuthBloc>().add(const AuthSignOutRequested());
+                final navigator = Navigator.of(context);
+                final rootContext = navigator.context;
+                final authState = rootContext.read<AuthBloc>().state;
+                if (authState is AuthAuthenticated) {
+                  final userId = authState.user.id;
+                  // Удаляем токен-аккаунт и сохранённый аккаунт текущего пользователя,
+                  // чтобы он не появлялся в «Быстром входе» после выхода.
+                  try {
+                    rootContext.read<AccountManager>().removeAccount(userId);
+                  } catch (_) {}
+                  try {
+                    rootContext.read<MultiAccountStorage>().removeAccount(userId);
+                  } catch (_) {}
+                }
+                navigator.pop();
+                rootContext
+                    .read<AuthBloc>()
+                    .add(const AuthSignOutRequested());
               },
             ),
           ],
@@ -728,8 +744,14 @@ class _ProfileContent extends StatelessWidget {
                                           );
                                         },
                                         child: CachedAvatar(
-                                          imageUrl: user.avatarUrl ??
-                                              profile?.avatarUrl,
+                                          imageUrl: (() {
+                                            final base =
+                                                user.avatarUrl ?? profile?.avatarUrl;
+                                            if (base == null || base.isEmpty) {
+                                              return null;
+                                            }
+                                            return '$base?uid=${user.id}';
+                                          })(),
                                           radius: 46,
                                           fallbackText:
                                               user.name ?? user.email,
