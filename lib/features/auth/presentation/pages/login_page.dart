@@ -11,6 +11,7 @@ import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/local_reactions_storage.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/theme/login_theme_presets.dart';
+import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
@@ -222,18 +223,40 @@ class _LoginPageState extends State<LoginPage>
       },
       builder: (context, state) {
         final loading = state is AuthLoading;
-        final themeIndex = context.read<ThemeIndexNotifier>().value;
-        final isLightTheme = themeIndex == 1;
-        final titleColor = isLightTheme ? Colors.black87 : _NeonColors.white;
-        final subtitleColor = isLightTheme ? Colors.black54 : _NeonColors.white60;
+        const titleColor = Color(0xFF1A1A1E);
+        const subtitleColor = Color(0xFF5C5C66);
         return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
+          padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 56),
+                const SizedBox(height: 44),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: ThemedContentSurface.loginPanel,
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(
+                          color: Colors.black.withValues(alpha: 0.06),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.08),
+                            blurRadius: 24,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
                 Text(
                   'tmr_tau',
                   style: GoogleFonts.poppins(
@@ -254,7 +277,7 @@ class _LoginPageState extends State<LoginPage>
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 48),
+                const SizedBox(height: 36),
                 _NeonTextField(
                   controller: _emailController,
                   focusNode: _emailFocus,
@@ -262,6 +285,7 @@ class _LoginPageState extends State<LoginPage>
                   hint: 'Email',
                   keyboardType: TextInputType.emailAddress,
                   borderColor: _NeonColors.cyan,
+                  lightSurface: true,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return 'Введите email';
                     if (!v.contains('@')) return 'Некорректный email';
@@ -276,6 +300,7 @@ class _LoginPageState extends State<LoginPage>
                   hint: 'Пароль',
                   obscureText: _obscurePassword,
                   borderColor: _NeonColors.pink,
+                  lightSurface: true,
                   toggleObscure: () =>
                       setState(() => _obscurePassword = !_obscurePassword),
                   validator: (v) =>
@@ -364,6 +389,13 @@ class _LoginPageState extends State<LoginPage>
                   ),
                   const SizedBox(height: 24),
                 ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -680,6 +712,7 @@ class _NeonTextField extends StatelessWidget {
     this.borderColor = _NeonColors.cyan,
     this.toggleObscure,
     this.validator,
+    this.lightSurface = false,
   });
 
   final TextEditingController controller;
@@ -691,6 +724,7 @@ class _NeonTextField extends StatelessWidget {
   final Color borderColor;
   final VoidCallback? toggleObscure;
   final String? Function(String?)? validator;
+  final bool lightSurface;
 
   static const _radius = 20.0;
 
@@ -700,70 +734,127 @@ class _NeonTextField extends StatelessWidget {
       tween: Tween(begin: 0, end: isFocused ? 1 : 0),
       duration: const Duration(milliseconds: 200),
       builder: (context, value, child) {
-        final glowOpacity = 0.3 + 0.4 * value;
+        final glowOpacity = lightSurface
+            ? (0.08 + 0.12 * value)
+            : (0.3 + 0.4 * value);
+        final fillColor = lightSurface
+            ? Colors.grey.shade50
+            : Colors.white.withValues(alpha: 0.12);
+        final hintColor =
+            lightSurface ? Colors.grey.shade600 : _NeonColors.white40;
+        final iconColor =
+            lightSurface ? Colors.grey.shade700 : _NeonColors.white60;
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(_radius),
             boxShadow: [
               BoxShadow(
                 color: borderColor.withValues(alpha: glowOpacity),
-                blurRadius: isFocused ? 20 : 8,
+                blurRadius: isFocused ? 16 : 6,
                 spreadRadius: isFocused ? 1 : 0,
               ),
             ],
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(_radius),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(_radius),
-                  border: Border.all(
-                    color: borderColor.withValues(
-                        alpha: isFocused ? 0.9 : 0.5),
-                    width: isFocused ? 2 : 1.5,
-                  ),
-                  color: Colors.white.withValues(alpha: 0.12),
-                ),
-                child: TextFormField(
-                  controller: controller,
-                  focusNode: focusNode,
-                  keyboardType: keyboardType,
-                  obscureText: obscureText,
-                  validator: validator,
-                  style: GoogleFonts.poppins(
-                    fontSize: 16,
-                    color: Colors.black,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: hint,
-                    hintStyle: GoogleFonts.poppins(
-                      color: _NeonColors.white40,
-                      fontSize: 15,
+            child: lightSurface
+                ? Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(_radius),
+                      border: Border.all(
+                        color: borderColor.withValues(
+                            alpha: isFocused ? 0.85 : 0.45),
+                        width: isFocused ? 2 : 1.5,
+                      ),
+                      color: fillColor,
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 18,
+                    child: TextFormField(
+                      controller: controller,
+                      focusNode: focusNode,
+                      keyboardType: keyboardType,
+                      obscureText: obscureText,
+                      validator: validator,
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: hint,
+                        hintStyle: GoogleFonts.poppins(
+                          color: hintColor,
+                          fontSize: 15,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 18,
+                        ),
+                        border: InputBorder.none,
+                        suffixIcon: toggleObscure != null
+                            ? IconButton(
+                                icon: Icon(
+                                  obscureText
+                                      ? Icons.visibility_off_rounded
+                                      : Icons.visibility_rounded,
+                                  color: iconColor,
+                                  size: 22,
+                                ),
+                                onPressed: toggleObscure,
+                              )
+                            : null,
+                      ),
                     ),
-                    border: InputBorder.none,
-                    suffixIcon: toggleObscure != null
-                        ? IconButton(
-                            icon: Icon(
-                              obscureText
-                                  ? Icons.visibility_off_rounded
-                                  : Icons.visibility_rounded,
-                              color: _NeonColors.white60,
-                              size: 22,
-                            ),
-                            onPressed: toggleObscure,
-                          )
-                        : null,
+                  )
+                : BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(_radius),
+                        border: Border.all(
+                          color: borderColor.withValues(
+                              alpha: isFocused ? 0.9 : 0.5),
+                          width: isFocused ? 2 : 1.5,
+                        ),
+                        color: fillColor,
+                      ),
+                      child: TextFormField(
+                        controller: controller,
+                        focusNode: focusNode,
+                        keyboardType: keyboardType,
+                        obscureText: obscureText,
+                        validator: validator,
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          color: Colors.black,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: hint,
+                          hintStyle: GoogleFonts.poppins(
+                            color: hintColor,
+                            fontSize: 15,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 18,
+                          ),
+                          border: InputBorder.none,
+                          suffixIcon: toggleObscure != null
+                              ? IconButton(
+                                  icon: Icon(
+                                    obscureText
+                                        ? Icons.visibility_off_rounded
+                                        : Icons.visibility_rounded,
+                                    color: iconColor,
+                                    size: 22,
+                                  ),
+                                  onPressed: toggleObscure,
+                                )
+                              : null,
+                        ),
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            ),
           ),
         );
       },

@@ -8,6 +8,7 @@ class ChatListStorage {
 
   static const _archivedKey = 'tmr_tau_chat_archived_ids';
   static const _readPrefix = 'tmr_tau_chat_read_';
+  static const _dialogPrefix = 'tmr_tau_chat_dialog_';
 
   Set<String> getArchivedPeerIds() {
     final list = _prefs.getStringList(_archivedKey);
@@ -33,12 +34,22 @@ class ChatListStorage {
     await _prefs.setInt(_readPrefix + peerId, at.millisecondsSinceEpoch);
   }
 
+  /// Время, когда последний раз показывали диалог «принять сообщение» для этого собеседника.
+  DateTime? getLastDialogShownAt(String peerId) {
+    final millis = _prefs.getInt(_dialogPrefix + peerId);
+    return millis != null ? DateTime.fromMillisecondsSinceEpoch(millis) : null;
+  }
+
+  Future<void> setLastDialogShownAt(String peerId, DateTime at) async {
+    await _prefs.setInt(_dialogPrefix + peerId, at.millisecondsSinceEpoch);
+  }
+
   /// Полностью очищает локальное состояние чатов (архив/непрочитанное).
   Future<void> clearAll() async {
     await _prefs.remove(_archivedKey);
     final keys = _prefs.getKeys();
     for (final key in keys) {
-      if (key.startsWith(_readPrefix)) {
+      if (key.startsWith(_readPrefix) || key.startsWith(_dialogPrefix)) {
         await _prefs.remove(key);
       }
     }

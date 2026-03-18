@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/storage/chat_list_storage.dart';
+import '../../../../core/theme/theme_decoration_helper.dart';
+import '../../../../core/theme/theme_index_notifier.dart';
+import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 
 class ChatPage extends StatefulWidget {
@@ -144,117 +149,167 @@ class _ChatPageState extends State<ChatPage> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.peerName),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
-        ),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: _messagesStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Text(
-                      'Ошибка загрузки сообщений',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  );
-                }
-                final messages = snapshot.data ?? const [];
-                if (messages.isEmpty) {
-                  return Center(
-                    child: Text(
-                      'Напишите первое сообщение',
-                      style: Theme.of(context).textTheme.bodyMedium,
-                    ),
-                  );
-                }
-                final me = _currentUserId;
-                return ListView.builder(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
-                  ),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final m = messages[index];
-                    final senderId = m['sender_id'] as String?;
-                    final text = m['text'] as String? ?? '';
-                    final isMe = senderId == me;
-                    return Align(
-                      alignment:
-                          isMe ? Alignment.centerRight : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
+    final themeNotifier = context.read<ThemeIndexNotifier>();
+
+    return ListenableBuilder(
+      listenable: themeNotifier.listenable,
+      builder: (context, _) {
+        final decoration = themeDecoration(
+          themeNotifier.value,
+          themeNotifier.customImagePath,
+        );
+        return Container(
+          decoration: decoration,
+          child: Scaffold(
+            backgroundColor: Colors.transparent,
+            appBar: AppBar(
+              backgroundColor: Colors.transparent,
+              surfaceTintColor: Colors.transparent,
+              title: Text(widget.peerName),
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: () => context.pop(),
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.palette_outlined),
+                  onPressed: _showThemePicker,
+                ),
+              ],
+            ),
+            body: Column(
+              children: [
+                Expanded(
+                  child: StreamBuilder<List<Map<String, dynamic>>>(
+                    stream: _messagesStream(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState ==
+                          ConnectionState.waiting) {
+                        return const Center(
+                            child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Center(
+                          child: Text(
+                            'Ошибка загрузки сообщений',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        );
+                      }
+                      final messages = snapshot.data ?? const [];
+                      if (messages.isEmpty) {
+                        return Center(
+                          child: Text(
+                            'Напишите первое сообщение',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        );
+                      }
+                      final me = _currentUserId;
+                      return ListView.builder(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
                           vertical: 8,
                         ),
-                        decoration: BoxDecoration(
-                          color: isMe
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          text,
-                          style: TextStyle(
-                            color: isMe ? Colors.white : Colors.black87,
+                        itemCount: messages.length,
+                        itemBuilder: (context, index) {
+                          final m = messages[index];
+                          final senderId = m['sender_id'] as String?;
+                          final text = m['text'] as String? ?? '';
+                          final isMe = senderId == me;
+                          return Align(
+                            alignment: isMe
+                                ? Alignment.centerRight
+                                : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isMe
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.grey.shade200,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                text,
+                                style: TextStyle(
+                                  color:
+                                      isMe ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                SafeArea(
+                  top: false,
+                  child: Material(
+                    color: ThemedContentSurface.scaffoldElevated,
+                    elevation: 8,
+                    shadowColor: Colors.black26,
+                    child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _controller,
+                            minLines: 1,
+                            maxLines: 5,
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (_) => _sendMessage(),
+                            decoration: const InputDecoration(
+                              hintText: 'Сообщение',
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
                           ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      minLines: 1,
-                      maxLines: 5,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _sendMessage(),
-                      decoration: const InputDecoration(
-                        hintText: 'Сообщение',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                        const SizedBox(width: 8),
+                        IconButton.filled(
+                          onPressed: _sending ? null : _sendMessage,
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.send),
+                        ),
+                      ],
+                    ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _sendMessage,
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-        ],
-      ),
+        );
+      },
+    );
+  }
+
+  void _showThemePicker() {
+    final themeNotifier = context.read<ThemeIndexNotifier>();
+    showThemePickerSheet(
+      context,
+      currentIndex: themeNotifier.value,
+      onSelect: (index) => themeNotifier.setIndex(index),
+      onAddCustom: () async {
+        final picker = ImagePicker();
+        final xFile = await picker.pickImage(source: ImageSource.gallery);
+        if (xFile == null || !mounted) return;
+        final bytes = await xFile.readAsBytes();
+        if (!mounted) return;
+        await themeNotifier.setCustomThemeFromImageBytes(bytes);
+      },
     );
   }
 }
