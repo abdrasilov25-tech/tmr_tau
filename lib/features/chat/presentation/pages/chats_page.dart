@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -5,8 +6,13 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/storage/chat_list_storage.dart';
+import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../stories/domain/entities/story_group_entity.dart';
+import '../../../stories/domain/repositories/stories_repository.dart';
+import '../../../stories/presentation/pages/story_viewer_args.dart';
+import '../widgets/chat_stories_friends_strip.dart';
 
 class ChatsPage extends StatefulWidget {
   const ChatsPage({super.key});
@@ -19,20 +25,200 @@ class _ChatsPageState extends State<ChatsPage> {
   late final SupabaseClient _client;
   late final String _currentUserId;
   late final ChatListStorage _chatStorage;
-  late Future<List<_ChatThread>> _threadsFuture;
+  late final ChatStoryListStorage _storySeenStorage;
+  late final StoriesRepository _storiesRepository;
+  late Future<_ChatsPageData> _pageFuture;
+
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     final authState = context.read<AuthBloc>().state;
     _chatStorage = context.read<ChatListStorage>();
+    _storySeenStorage = context.read<ChatStoryListStorage>();
+    _storiesRepository = context.read<StoriesRepository>();
     if (authState is! AuthAuthenticated) {
-      _threadsFuture = Future.value(const []);
+      _pageFuture = Future.value(
+        const _ChatsPageData(
+          threads: [],
+          visibleStoryGroups: [],
+          newStoriesByUserId: <String, bool>{},
+        ),
+      );
       return;
     }
     _currentUserId = authState.user.id;
     _client = Supabase.instance.client;
-    _threadsFuture = _loadThreads();
+    _pageFuture = _loadPageData();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<_ChatsPageData> _loadPageData() async {
+    final threads = await _loadThreads();
+    final peerIds = threads.map((t) => t.peerId).toSet();
+    if (peerIds.isEmpty) {
+      return _ChatsPageData(
+        threads: threads,
+        visibleStoryGroups: const [],
+        newStoriesByUserId: const <String, bool>{},
+      );
+    }
+
+    final allStoriesGroups = await _storiesRepository.getStoriesGroupedByUser();
+    final visibleStoryGroups = allStoriesGroups
+        .where((g) => peerIds.contains(g.userId))
+        .toList(growable: false);
+
+    final newStoriesByUserId = <String, bool>{};
+    for (final g in visibleStoryGroups) {
+      final latestStoryAt = g.firstStory.createdAt;
+      final lastSeenAt = _storySeenStorage.getLastSeenAt(g.userId);
+      newStoriesByUserId[g.userId] =
+          lastSeenAt == null || latestStoryAt.isAfter(lastSeenAt);
+    }
+
+    return _ChatsPageData(
+      threads: threads,
+      visibleStoryGroups: visibleStoryGroups,
+      newStoriesByUserId: newStoriesByUserId,
+    );
+  }
+
+  Future<void> _showCreateChatDialog() async {
+    final controller = TextEditingController();
+    List<_UserSuggestion> suggestions = const [];
+    bool loading = false;
+
+    Timer? debounce;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setStateDialog) {
+            Future<List<_UserSuggestion>> _fetchSuggestions(String q) async {
+              final query = q.trim();
+              if (query.isEmpty) return const [];
+              final res = await _client
+                  .from(SupabaseConstants.usersTable)
+                  .select('id,name,avatar')
+                  .ilike('name', '%$query%')
+                  .limit(10);
+              final list = res as List<dynamic>;
+              return list
+                  .map((e) => e as Map<String, dynamic>)
+                  .map(
+                    (j) => _UserSuggestion(
+                      userId: j['id'] as String,
+                      name: j['name'] as String?,
+                      avatarUrl: j['avatar'] as String?,
+                    ),
+                  )
+                  .toList();
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 12,
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 12,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.7,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            decoration: const InputDecoration(
+                              hintText: 'Имя пользователя',
+                              prefixIcon: Icon(Icons.search_rounded),
+                            ),
+                            onChanged: (v) {
+                              debounce?.cancel();
+                              debounce = Timer(const Duration(milliseconds: 350), () async {
+                                setStateDialog(() => loading = true);
+                                try {
+                                  final res = await _fetchSuggestions(v);
+                                  if (!mounted) return;
+                                  setStateDialog(() {
+                                    suggestions = res;
+                                    loading = false;
+                                  });
+                                } catch (_) {
+                                  if (!mounted) return;
+                                  setStateDialog(() {
+                                    suggestions = const [];
+                                    loading = false;
+                                  });
+                                }
+                              });
+                            },
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: loading
+                          ? const Center(child: CircularProgressIndicator())
+                          : suggestions.isEmpty
+                              ? const Center(
+                                  child: Text('Ничего не найдено'),
+                                )
+                              : ListView.separated(
+                                  itemCount: suggestions.length,
+                                  separatorBuilder: (c, i) =>
+                                      const Divider(height: 1),
+                                  itemBuilder: (c, i) {
+                                    final s = suggestions[i];
+                                    return ListTile(
+                                      leading: CachedAvatar(
+                                        imageUrl: s.avatarUrl,
+                                        radius: 20,
+                                        fallbackText: s.name ?? 'Пользователь',
+                                      ),
+                                      title: Text(s.name ?? 'Пользователь'),
+                                      onTap: () {
+                                        Navigator.pop(ctx);
+                                        context.push(
+                                          '/chat/${s.userId}?name=${Uri.encodeComponent(s.name ?? 'Пользователь')}',
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    debounce?.cancel();
+    controller.dispose();
   }
 
   Future<List<_ChatThread>> _loadThreads() async {
@@ -69,6 +255,9 @@ class _ChatsPageState extends State<ChatsPage> {
 
     if (threadsByPeer.isEmpty) return const [];
 
+    final peerIds = threadsByPeer.keys.toList(growable: false);
+    final blockedIds = await _loadBlockedPeerIds(peerIds);
+
     for (final entry in threadsByPeer.entries) {
       final peerId = entry.key;
       final t = entry.value;
@@ -91,6 +280,7 @@ class _ChatsPageState extends State<ChatsPage> {
       threadsByPeer[peerId] = t.copyWith(
         unreadCount: unreadCount,
         lastIncomingAt: lastIncomingAt,
+        isBlocked: blockedIds.contains(peerId),
       );
     }
 
@@ -128,20 +318,35 @@ class _ChatsPageState extends State<ChatsPage> {
     return threads;
   }
 
+  Future<Set<String>> _loadBlockedPeerIds(List<String> peerIds) async {
+    if (peerIds.isEmpty) return const {};
+    try {
+      final res = await _client
+          .from('blocked_users')
+          .select('blocked_user_id')
+          .eq('blocker_id', _currentUserId)
+          .inFilter('blocked_user_id', peerIds);
+      return (res as List)
+          .map((e) => (e as Map)['blocked_user_id'] as String)
+          .toSet();
+    } catch (_) {
+      return const {};
+    }
+  }
+
   List<_ChatThread> _filterByTab(List<_ChatThread> threads, int tabIndex) {
     final archived = _chatStorage.getArchivedPeerIds();
+    final q = _searchQuery.trim().toLowerCase();
+
+    bool matchesSearch(_ChatThread t) {
+      if (q.isEmpty) return true;
+      return t.peerName.toLowerCase().contains(q);
+    }
+
     if (tabIndex == 0) {
-      return threads.where((t) => !archived.contains(t.peerId)).toList();
+      return threads.where((t) => !archived.contains(t.peerId) && matchesSearch(t)).toList();
     }
-    if (tabIndex == 1) {
-      return threads.where((t) {
-        if (archived.contains(t.peerId)) return false;
-        final lastRead = _chatStorage.getLastReadAt(t.peerId);
-        final fromPeer = t.lastMessageSenderId != _currentUserId;
-        return fromPeer && (lastRead == null || t.lastMessageAt.isAfter(lastRead));
-      }).toList();
-    }
-    return threads.where((t) => archived.contains(t.peerId)).toList();
+    return threads.where((t) => archived.contains(t.peerId) && matchesSearch(t)).toList();
   }
 
   void _showThreadMenu(BuildContext context, _ChatThread t) {
@@ -163,7 +368,30 @@ class _ChatsPageState extends State<ChatsPage> {
               onTap: () async {
                 Navigator.pop(ctx);
                 await _chatStorage.setArchived(t.peerId, !isArchived);
-                setState(() {});
+                if (!mounted) return;
+                setState(() => _pageFuture = _loadPageData());
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                t.isBlocked ? Icons.block : Icons.block_outlined,
+                color: t.isBlocked ? Colors.orange : null,
+              ),
+              title: Text(
+                t.isBlocked ? 'Разблокировать' : 'Заблокировать',
+                style: t.isBlocked
+                    ? const TextStyle(color: Colors.orange)
+                    : null,
+              ),
+              onTap: () async {
+                Navigator.pop(ctx);
+                if (t.isBlocked) {
+                  await _unblockPeer(t.peerId);
+                } else {
+                  await _blockPeer(t.peerId);
+                }
+                if (!mounted) return;
+                setState(() => _pageFuture = _loadPageData());
               },
             ),
             ListTile(
@@ -191,6 +419,21 @@ class _ChatsPageState extends State<ChatsPage> {
     );
   }
 
+  Future<void> _blockPeer(String peerId) async {
+    await _client.from('blocked_users').insert({
+      'blocker_id': _currentUserId,
+      'blocked_user_id': peerId,
+    });
+  }
+
+  Future<void> _unblockPeer(String peerId) async {
+    await _client
+        .from('blocked_users')
+        .delete()
+        .eq('blocker_id', _currentUserId)
+        .eq('blocked_user_id', peerId);
+  }
+
   Future<void> _deleteChat(_ChatThread t) async {
     try {
       try {
@@ -210,7 +453,7 @@ class _ChatsPageState extends State<ChatsPage> {
             .eq('receiver_id', _currentUserId);
       }
       await _chatStorage.setArchived(t.peerId, false);
-      if (mounted) setState(() { _threadsFuture = _loadThreads(); });
+      if (mounted) setState(() { _pageFuture = _loadPageData(); });
     } catch (e) {
       debugPrint('_deleteChat error: $e');
       if (mounted) {
@@ -253,20 +496,25 @@ class _ChatsPageState extends State<ChatsPage> {
     }
 
     return DefaultTabController(
-      length: 3,
+      length: 2,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Мои чаты'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.person_add_alt_1_outlined),
+              onPressed: () => _showCreateChatDialog(),
+            ),
+          ],
           bottom: const TabBar(
             tabs: [
-              Tab(text: 'Основные'),
-              Tab(text: 'Непрочитанное'),
+              Tab(text: 'Чаты'),
               Tab(text: 'Архив'),
             ],
           ),
         ),
-        body: FutureBuilder<List<_ChatThread>>(
-          future: _threadsFuture,
+        body: FutureBuilder<_ChatsPageData>(
+          future: _pageFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
@@ -280,7 +528,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     const SizedBox(height: 12),
                     FilledButton(
                       onPressed: () {
-                        setState(() { _threadsFuture = _loadThreads(); });
+                        setState(() { _pageFuture = _loadPageData(); });
                       },
                       child: const Text('Повторить'),
                     ),
@@ -288,31 +536,72 @@ class _ChatsPageState extends State<ChatsPage> {
                 ),
               );
             }
-            final allThreads = snapshot.data ?? [];
-            return TabBarView(
-              children: [0, 1, 2].map((tabIndex) {
-                final threads = _filterByTab(allThreads, tabIndex);
-                if (threads.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.chat_bubble_outline, size: 56, color: Colors.grey.shade400),
-                        const SizedBox(height: 12),
-                        Text(
-                          tabIndex == 0
-                              ? 'Пока нет чатов'
-                              : tabIndex == 1
-                                  ? 'Нет непрочитанных'
-                                  : 'В архиве пусто',
-                          style: TextStyle(color: Colors.grey.shade600),
-                        ),
-                      ],
+            final data = snapshot.data;
+            if (data == null) {
+              return const SizedBox.shrink();
+            }
+
+            return Column(
+              children: [
+                ChatStoriesFriendsStrip(
+                  groups: data.visibleStoryGroups,
+                  newStoriesByUserId: data.newStoriesByUserId,
+                  onStoryTap: (group) async {
+                    final latestStoryAt = group.firstStory.createdAt;
+                    await _storySeenStorage.setLastSeenAt(group.userId, latestStoryAt);
+                    if (!mounted) return;
+                    setState(() => _pageFuture = _loadPageData());
+                    await context.push(
+                      '/stories',
+                      extra: StoryViewerArgs(groups: [group]),
+                    );
+                  },
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                    decoration: InputDecoration(
+                      hintText: 'Поиск по пользователю',
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      filled: true,
+                      fillColor: Colors.grey.shade900.withValues(alpha: 0.2),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: Colors.grey.shade700),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide(color: Colors.grey.shade700),
+                      ),
                     ),
-                  );
-                }
-                return _buildThreadList(context, threads);
-              }).toList(),
+                  ),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [0, 1].map((tabIndex) {
+                      final threads = _filterByTab(data.threads, tabIndex);
+                      if (threads.isEmpty) {
+                        return Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.chat_bubble_outline, size: 56, color: Colors.grey.shade400),
+                              const SizedBox(height: 12),
+                              Text(
+                                tabIndex == 0 ? 'Пока нет чатов' : 'В архиве пусто',
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      return _buildThreadList(context, threads);
+                    }).toList(),
+                  ),
+                ),
+              ],
             );
           },
         ),
@@ -353,7 +642,8 @@ class _ChatsPageState extends State<ChatsPage> {
         await _chatStorage.setLastDialogShownAt(t.peerId, lastIncoming);
       }
       if (accept == true) {
-        await _chatStorage.setLastReadAt(t.peerId, lastIncoming ?? DateTime.now());
+        final at = (lastIncoming ?? DateTime.now()).add(const Duration(milliseconds: 1));
+        await _chatStorage.setLastReadAt(t.peerId, at);
       }
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
@@ -361,78 +651,172 @@ class _ChatsPageState extends State<ChatsPage> {
     } else {
       await context.push('/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}');
     }
-    if (mounted) setState(() { _threadsFuture = _loadThreads(); });
+    if (mounted) setState(() { _pageFuture = _loadPageData(); });
+  }
+
+  Future<void> _markThreadRead(_ChatThread t) async {
+    final readAt = (t.lastIncomingAt ?? t.lastMessageAt).add(const Duration(milliseconds: 1));
+    await _chatStorage.setLastReadAt(t.peerId, readAt);
+    if (!mounted) return;
+    setState(() => _pageFuture = _loadPageData());
+  }
+
+  Future<void> _setThreadArchived(_ChatThread t, bool archived) async {
+    await _chatStorage.setArchived(t.peerId, archived);
+    if (!mounted) return;
+    setState(() => _pageFuture = _loadPageData());
   }
 
   Widget _buildThreadList(BuildContext context, List<_ChatThread> threads) {
-    return ListView.separated(
-      itemCount: threads.length,
-      separatorBuilder: (context, index) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final t = threads[index];
-        final isUnread = t.unreadCount > 0;
-        return ListTile(
-          leading: CachedAvatar(
-            imageUrl: t.peerAvatarUrl,
-            radius: 22,
-            fallbackText: t.peerName,
-          ),
-          title: Text(
-            t.peerName,
-            style: TextStyle(fontWeight: isUnread ? FontWeight.bold : FontWeight.normal),
-          ),
-          subtitle: Text(
-            t.lastMessageText,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _timeAgo(t.lastMessageAt),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              if (isUnread) ...[
-                const SizedBox(width: 6),
-                if (t.unreadCount > 1)
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: Colors.blue,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      '${t.unreadCount}',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    width: 10,
-                    height: 10,
-                    decoration: const BoxDecoration(
-                      color: Colors.blue,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-              ],
-              IconButton(
-                icon: const Icon(Icons.more_vert, size: 22),
-                onPressed: () => _showThreadMenu(context, t),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-              ),
-            ],
-          ),
-          onTap: () => _openChat(t),
-          onLongPress: () => _showThreadMenu(context, t),
-        );
+    return RefreshIndicator(
+      onRefresh: () async {
+        final f = _loadPageData();
+        if (!mounted) return;
+        setState(() => _pageFuture = f);
+        await f;
       },
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: threads.length,
+        separatorBuilder: (context, index) => const Divider(height: 1),
+        itemBuilder: (context, index) {
+          final t = threads[index];
+          final isUnread = t.unreadCount > 0;
+          return Dismissible(
+            key: ValueKey(t.peerId),
+            direction: DismissDirection.horizontal,
+            confirmDismiss: (direction) async {
+              if (direction == DismissDirection.startToEnd) {
+                await _markThreadRead(t);
+                return false;
+              }
+              if (direction == DismissDirection.endToStart) {
+                await _setThreadArchived(t, true);
+                return false;
+              }
+              return false;
+            },
+            background: _SwipeActionBackground(
+              color: Colors.blue.withValues(alpha: 0.18),
+              icon: Icons.mark_chat_read_outlined,
+              label: 'Прочитано',
+              alignRight: false,
+            ),
+            secondaryBackground: _SwipeActionBackground(
+              color: Colors.orange.withValues(alpha: 0.18),
+              icon: Icons.archive_outlined,
+              label: 'В архив',
+              alignRight: true,
+            ),
+            child: ListTile(
+              leading: SizedBox(
+                width: 44,
+                height: 44,
+                child: Center(
+                  child: CachedAvatar(
+                    imageUrl: t.peerAvatarUrl,
+                    radius: 22,
+                    fallbackText: t.peerName,
+                  ),
+                ),
+              ),
+              title: Text(
+                t.peerName,
+                style: TextStyle(
+                  fontWeight: isUnread ? FontWeight.bold : FontWeight.normal,
+                ),
+              ),
+              subtitle: Text(
+                t.lastMessageText,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _timeAgo(t.lastMessageAt),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  if (isUnread) ...[
+                    const SizedBox(width: 6),
+                    if (t.unreadCount > 1)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.blue,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          '${t.unreadCount}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: const BoxDecoration(
+                          color: Colors.blue,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                  ],
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, size: 22),
+                    onPressed: () => _showThreadMenu(context, t),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                  ),
+                ],
+              ),
+              onTap: () => _openChat(t),
+              onLongPress: () => _showThreadMenu(context, t),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SwipeActionBackground extends StatelessWidget {
+  const _SwipeActionBackground({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.alignRight,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+  final bool alignRight;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: color,
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 24),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -447,6 +831,7 @@ class _ChatThread {
     required this.lastMessageSenderId,
     this.unreadCount = 0,
     this.lastIncomingAt,
+    this.isBlocked = false,
   });
 
   final String peerId;
@@ -457,12 +842,14 @@ class _ChatThread {
   final String lastMessageSenderId;
   final int unreadCount;
   final DateTime? lastIncomingAt;
+  final bool isBlocked;
 
   _ChatThread copyWith({
     String? peerName,
     String? peerAvatarUrl,
     int? unreadCount,
     DateTime? lastIncomingAt,
+    bool? isBlocked,
   }) {
     return _ChatThread(
       peerId: peerId,
@@ -473,8 +860,33 @@ class _ChatThread {
       lastMessageSenderId: lastMessageSenderId,
       unreadCount: unreadCount ?? this.unreadCount,
       lastIncomingAt: lastIncomingAt ?? this.lastIncomingAt,
+      isBlocked: isBlocked ?? this.isBlocked,
     );
   }
+}
+
+class _ChatsPageData {
+  const _ChatsPageData({
+    required this.threads,
+    required this.visibleStoryGroups,
+    required this.newStoriesByUserId,
+  });
+
+  final List<_ChatThread> threads;
+  final List<StoryGroupEntity> visibleStoryGroups;
+  final Map<String, bool> newStoriesByUserId;
+}
+
+class _UserSuggestion {
+  const _UserSuggestion({
+    required this.userId,
+    required this.name,
+    required this.avatarUrl,
+  });
+
+  final String userId;
+  final String? name;
+  final String? avatarUrl;
 }
 
 String _timeAgo(DateTime dateTime) {

@@ -3,66 +3,59 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/theme/themed_content_surface.dart';
+
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
-import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../post/domain/entities/post_entity.dart';
+import '../../../post/domain/repositories/post_repository.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/product_repository.dart';
-import '../../../profile/domain/entities/seller_profile_entity.dart';
-import '../../../profile/domain/repositories/profile_repository.dart';
+import '../controllers/search_paging_controller.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({
     super.key,
+    required this.postRepository,
     required this.productRepository,
-    required this.profileRepository,
   });
 
+  final PostRepository postRepository;
   final ProductRepository productRepository;
-  final ProfileRepository profileRepository;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
 
 class _SearchPageState extends State<SearchPage> {
-  final _controller = TextEditingController();
+  final _queryController = TextEditingController();
+  final _scrollController = ScrollController();
+  late final SearchPagingController _pagingController;
   Timer? _debounce;
-  List<ProductEntity> _productResults = [];
-  List<SellerProfileEntity> _userResults = [];
-  List<ProductEntity> _trending = [];
-  List<SellerProfileEntity> _verifiedUsers = [];
-  bool _loading = false;
-  bool _trendingLoading = false;
-  bool _verifiedLoading = false;
 
   @override
   void initState() {
     super.initState();
+    _pagingController = SearchPagingController(
+      postRepository: widget.postRepository,
+      productRepository: widget.productRepository,
+      currentUserId: _currentUserId,
+    );
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _loadTrending();
-        _loadVerifiedUsers();
-      }
+      if (!mounted) return;
+      _pagingController.loadInitial('');
     });
-  }
-
-  Future<void> _loadVerifiedUsers() async {
-    setState(() => _verifiedLoading = true);
-    try {
-      final list = await widget.profileRepository.getVerifiedUsers();
-      if (mounted) setState(() => _verifiedUsers = list);
-    } finally {
-      if (mounted) setState(() => _verifiedLoading = false);
-    }
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
-    _controller.dispose();
+    _queryController.dispose();
+    _scrollController
+      ..removeListener(_onScroll)
+      ..dispose();
+    _pagingController.dispose();
     super.dispose();
   }
 
@@ -71,66 +64,24 @@ class _SearchPageState extends State<SearchPage> {
     return state is AuthAuthenticated ? state.user.id : null;
   }
 
-  Future<void> _loadTrending() async {
-    setState(() => _trendingLoading = true);
-    try {
-      final list = await widget.productRepository.getTrendingProducts(
-        limit: 30,
-        currentUserId: _currentUserId,
-      );
-      if (mounted) setState(() => _trending = list);
-    } finally {
-      if (mounted) setState(() => _trendingLoading = false);
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.maxScrollExtent - position.pixels <= 300) {
+      _pagingController.loadMore();
     }
   }
 
-  Future<void> _search(String query) async {
-    if (query.trim().isEmpty) {
-      setState(() {
-        _productResults = [];
-        _userResults = [];
-      });
-      return;
-    }
-    setState(() => _loading = true);
-    try {
-      final results = await Future.wait([
-        widget.productRepository.searchProducts(
-          query,
-          limit: 30,
-          currentUserId: _currentUserId,
-        ),
-        widget.profileRepository.searchUsers(query, limit: 50),
-      ]);
-      if (mounted) {
-        setState(() {
-          _productResults = results[0] as List<ProductEntity>;
-          _userResults = results[1] as List<SellerProfileEntity>;
-          _loading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() {
-        _productResults = [];
-        _userResults = [];
-        _loading = false;
-      });
-    }
+  Future<void> _onSearchChanged(String query) async {
+    await _pagingController.loadInitial(query);
   }
 
   void _cancelSearch() {
-    _controller.clear();
+    _queryController.clear();
     FocusScope.of(context).unfocus();
-    setState(() {
-      _productResults = [];
-      _userResults = [];
-    });
+    _pagingController.loadInitial('');
+    setState(() {});
   }
-
-  bool get _hasSearchResults =>
-      _productResults.isNotEmpty || _userResults.isNotEmpty;
-
-  bool get _hasSearchQuery => _controller.text.trim().isNotEmpty;
 
   @override
   Widget build(BuildContext context) {
@@ -148,233 +99,246 @@ class _SearchPageState extends State<SearchPage> {
         title: Align(
           alignment: Alignment.centerLeft,
           child: TextField(
-            controller: _controller,
+            controller: _queryController,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontSize: 17,
                 ),
             decoration: InputDecoration(
-              hintText: 'Поиск',
+              hintText: 'Поиск публикаций и товаров',
               hintStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 17,
                   ),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              isDense: false,
             ),
             textInputAction: TextInputAction.search,
-            onSubmitted: _search,
+            onSubmitted: _onSearchChanged,
             onChanged: (value) {
               setState(() {});
               _debounce?.cancel();
               _debounce = Timer(const Duration(milliseconds: 400), () {
                 if (!mounted) return;
-                _search(value);
+                _onSearchChanged(value);
               });
             },
           ),
         ),
         actions: [
-          if (_hasSearchQuery)
+          if (_queryController.text.trim().isNotEmpty)
             TextButton(
               onPressed: _cancelSearch,
               child: const Text('Отмена'),
             ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _hasSearchResults
-              ? _SearchResultsView(
-                  products: _productResults,
-                  users: _userResults,
-                )
-              : _controller.text.trim().isEmpty
-                  ? _TrendingSection(
-                      trending: _trending,
-                      loading: _trendingLoading,
-                      verifiedUsers: _verifiedUsers,
-                      verifiedLoading: _verifiedLoading,
-                    )
-                  : _SimilarAndEmpty(
-                      query: _controller.text.trim(),
-                      trending: _trending,
-                    ),
-    );
-  }
-}
+      body: AnimatedBuilder(
+        animation: _pagingController,
+        builder: (context, _) {
+          if (_pagingController.items.isEmpty && _pagingController.isLoading) {
+            return const _InitialLoading();
+          }
 
-/// Когда по запросу ничего не найдено — показываем похожие товары.
-class _SimilarAndEmpty extends StatelessWidget {
-  const _SimilarAndEmpty({
-    required this.query,
-    required this.trending,
-  });
-
-  final String query;
-  final List<ProductEntity> trending;
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: [
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
-            child: Center(
+          if (_pagingController.items.isEmpty) {
+            return Center(
               child: Text(
-                'По запросу «$query» ничего не найдено',
+                _queryController.text.trim().isEmpty
+                    ? 'Публикаций и товаров пока нет'
+                    : 'Ничего не найдено по запросу "${_queryController.text.trim()}"',
                 style: Theme.of(context).textTheme.bodyLarge,
                 textAlign: TextAlign.center,
               ),
-            ),
-          ),
-        ),
-        SliverToBoxAdapter(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Text(
-              'Похожие товары',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-            ),
-          ),
-        ),
-        if (trending.isEmpty)
-          const SliverFillRemaining(
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 4,
-                crossAxisSpacing: 4,
-                childAspectRatio: 1,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => _ProductGridTile(product: trending[index]),
-                childCount: trending.length,
-              ),
-            ),
-          ),
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
-      ],
+            );
+          }
+
+          final items = _pagingController.items;
+          final showBottomLoader =
+              _pagingController.isLoading && _pagingController.hasMore;
+
+          return ListView.builder(
+            controller: _scrollController,
+            itemCount: items.length + (showBottomLoader ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index >= items.length) return const _BottomSkeletonLoader();
+              final item = items[index];
+              if (item is SearchPostResultItem) {
+                return _PostSearchTile(post: item.post);
+              }
+              if (item is SearchProductResultItem) {
+                return _ProductSearchTile(product: item.product);
+              }
+              return const SizedBox.shrink();
+            },
+          );
+        },
+      ),
     );
   }
 }
 
-/// Результаты поиска: пользователи сверху, товары сеткой 3 колонки.
-class _SearchResultsView extends StatelessWidget {
-  const _SearchResultsView({
-    required this.products,
-    required this.users,
-  });
-
-  final List<ProductEntity> products;
-  final List<SellerProfileEntity> users;
+class _InitialLoading extends StatelessWidget {
+  const _InitialLoading();
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: [
-        if (users.isNotEmpty) ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Text(
-                'Пользователи',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _UserTile(profile: users[index]),
-              childCount: users.length,
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
-        ],
-        if (products.isNotEmpty) ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                'Товары',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 4,
-                crossAxisSpacing: 4,
-                childAspectRatio: 1,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  final p = products[index];
-                  return _ProductGridTile(product: p);
-                },
-                childCount: products.length,
-              ),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-        ],
-      ],
-    );
+    return const Center(child: CircularProgressIndicator());
   }
 }
 
-/// Строка пользователя в результатах поиска: круглая аватарка слева, имя справа (как в Instagram).
-class _UserTile extends StatelessWidget {
-  const _UserTile({required this.profile});
+class _PostSearchTile extends StatelessWidget {
+  const _PostSearchTile({required this.post});
 
-  final SellerProfileEntity profile;
+  final PostEntity post;
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => context.push('/profile/${profile.id}'),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: InkWell(
+        onTap: () => context.push('/post/${post.id}', extra: post),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CachedAvatar(
-              imageUrl: profile.avatarUrl,
-              radius: 32,
-              fallbackText: profile.name,
-            ),
-            const SizedBox(width: 16),
-            Expanded(
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
               child: Row(
                 children: [
-                  Flexible(
+                  CachedAvatar(
+                    imageUrl: post.userAvatarUrl,
+                    radius: 18,
+                    fallbackText: post.userName,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: Text(
-                      profile.name,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w500,
-                          ),
+                      post.userName ?? 'Пользователь',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
                     ),
                   ),
-                  if (profile.isVerified) ...[
-                    const SizedBox(width: 8),
-                    const VerifiedBadge(size: 18),
-                  ],
+                  Text(
+                    _formatDate(post.createdAt),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            if (post.videoUrl != null && post.videoUrl!.isNotEmpty)
+              Container(
+                height: 180,
+                width: double.infinity,
+                color: Colors.black12,
+                alignment: Alignment.center,
+                child: const Icon(Icons.play_circle_fill_rounded, size: 56),
+              )
+            else if (post.imageUrl.isNotEmpty)
+              SizedBox(
+                height: 180,
+                width: double.infinity,
+                child: CachedProductImage(imageUrl: post.imageUrl),
+              ),
+            if (post.caption.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                child: Text(
+                  post.caption,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$day.$month.${value.year}';
+  }
+}
+
+class _ProductSearchTile extends StatelessWidget {
+  const _ProductSearchTile({required this.product});
+
+  final ProductEntity product;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: InkWell(
+        onTap: () => context.push('/product/${product.id}', extra: product),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+              child: Row(
+                children: [
+                  CachedAvatar(
+                    imageUrl: product.sellerAvatarUrl,
+                    radius: 18,
+                    fallbackText: product.sellerName,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      product.sellerName ?? 'Продавец',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  if (product.createdAt != null)
+                    Text(
+                      _formatDate(product.createdAt!),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                ],
+              ),
+            ),
+            if (product.imageUrl.isNotEmpty)
+              SizedBox(
+                height: 180,
+                width: double.infinity,
+                child: CachedProductImage(imageUrl: product.imageUrl),
+              )
+            else
+              Container(
+                height: 180,
+                width: double.infinity,
+                color: Colors.black12,
+                alignment: Alignment.center,
+                child: const Icon(Icons.shopping_bag_outlined, size: 48),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    product.priceFormatted,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
                 ],
               ),
             ),
@@ -383,170 +347,38 @@ class _UserTile extends StatelessWidget {
       ),
     );
   }
-}
 
-/// Одна ячейка товара в сетке 3 колонки (квадрат, как в Instagram).
-class _ProductGridTile extends StatelessWidget {
-  const _ProductGridTile({required this.product});
-
-  final ProductEntity product;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => context.push('/product/${product.id}', extra: product),
-      child: AspectRatio(
-        aspectRatio: 1,
-        child: CachedProductImage(imageUrl: product.imageUrl),
-      ),
-    );
+  String _formatDate(DateTime value) {
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$day.$month.${value.year}';
   }
 }
 
-class _TrendingSection extends StatelessWidget {
-  const _TrendingSection({
-    required this.trending,
-    required this.loading,
-    required this.verifiedUsers,
-    required this.verifiedLoading,
-  });
-
-  final List<ProductEntity> trending;
-  final bool loading;
-  final List<SellerProfileEntity> verifiedUsers;
-  final bool verifiedLoading;
+class _BottomSkeletonLoader extends StatelessWidget {
+  const _BottomSkeletonLoader();
 
   @override
   Widget build(BuildContext context) {
-    return CustomScrollView(
-      slivers: [
-        if (verifiedLoading)
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(
-                child: SizedBox(
-                  height: 24,
-                  width: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
+    return Column(
+      children: List.generate(
+        3,
+        (_) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Container(
+            height: 220,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              color: Colors.grey.withValues(alpha: 0.22),
+            ),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: LinearProgressIndicator(
+                minHeight: 2,
+                color: Theme.of(context).colorScheme.primary,
+                backgroundColor: Colors.transparent,
               ),
             ),
-          )
-        else if (verifiedUsers.isNotEmpty) ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Text(
-                'Официальная страница',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) => _OfficialPageCard(profile: verifiedUsers[index]),
-              childCount: verifiedUsers.length,
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 16)),
-        ],
-        if (loading)
-          const SliverFillRemaining(
-            child: Center(child: CircularProgressIndicator()),
-          )
-        else if (trending.isEmpty && verifiedUsers.isEmpty)
-          SliverFillRemaining(
-            child: Center(
-              child: Text(
-                'Введите запрос для поиска товаров и пользователей',
-                style: Theme.of(context).textTheme.bodyLarge,
-                textAlign: TextAlign.center,
-              ),
-            ),
-          )
-        else ...[
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                'В тренде',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-              ),
-            ),
-          ),
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            sliver: SliverGrid(
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 3,
-                mainAxisSpacing: 4,
-                crossAxisSpacing: 4,
-                childAspectRatio: 1,
-              ),
-              delegate: SliverChildBuilderDelegate(
-                (context, index) => _ProductGridTile(product: trending[index]),
-                childCount: trending.length,
-              ),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 24)),
-        ],
-      ],
-    );
-  }
-}
-
-class _OfficialPageCard extends StatelessWidget {
-  const _OfficialPageCard({required this.profile});
-
-  final SellerProfileEntity profile;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        onTap: () => context.push('/profile/${profile.id}'),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              CachedAvatar(
-                imageUrl: profile.avatarUrl,
-                radius: 28,
-                fallbackText: profile.name,
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Row(
-                  children: [
-                    Flexible(
-                      child: Text(
-                        profile.name,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    const VerifiedBadge(size: 18),
-                  ],
-                ),
-              ),
-              Icon(
-                Icons.chevron_right,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ],
           ),
         ),
       ),

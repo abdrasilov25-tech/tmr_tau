@@ -27,7 +27,9 @@ import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
 
 class MyProfilePage extends StatefulWidget {
-  const MyProfilePage({super.key});
+  const MyProfilePage({super.key, this.initialTabIndex});
+
+  final int? initialTabIndex;
 
   @override
   State<MyProfilePage> createState() => _MyProfilePageState();
@@ -35,15 +37,17 @@ class MyProfilePage extends StatefulWidget {
 
 class _MyProfilePageState extends State<MyProfilePage> {
   SellerProfileEntity? _profile;
-  List<PostEntity> _posts = [];
+  List<PostEntity> _newsPosts = [];
+  List<PostEntity> _publicationPosts = [];
   bool _loading = true;
-  int _tabIndex = 0;
+  late int _tabIndex;
   bool _updatingAvatar = false;
   bool _isSwitchingAccount = false;
 
   @override
   void initState() {
     super.initState();
+    _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 2);
     _load();
   }
 
@@ -118,6 +122,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
       final profile = await repo.getSellerProfile(uid);
       final posts =
           await context.read<PostRepository>().getPostsByUser(uid, currentUserId: uid);
+      final newsPosts = posts
+          .where((p) => p.kind == 'news' || p.kind.isEmpty)
+          .toList(growable: false);
+      final publicationPosts = posts
+          .where((p) => p.kind == 'publication')
+          .toList(growable: false);
       // Подсчитываем актуальное количество подписок через followers.
       final followingUsers = await repo.getFollowingUsers(uid);
       final followingCount = followingUsers.length;
@@ -136,7 +146,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   products: profile.products,
                   isVerified: profile.isVerified,
                 );
-          _posts = posts;
+          _newsPosts = newsPosts;
+          _publicationPosts = publicationPosts;
           _loading = false;
         });
       }
@@ -183,6 +194,15 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   context.push('/add-news');
                 },
               ),
+              ListTile(
+                leading: const Icon(Icons.person_outline_rounded, size: 28),
+                title: const Text('Публикация'),
+                subtitle: const Text('Личный пост в публикации профиля'),
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push('/add-publication');
+                },
+              ),
             ],
           ),
         ),
@@ -204,7 +224,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
       builder: (sheetContext) => AddChoiceSheet(
         onProuvnut: () {
           Navigator.pop(sheetContext);
-          context.push('/add-news');
+          context.push('/add-publication');
         },
         onStory: () async {
           Navigator.pop(sheetContext);
@@ -212,7 +232,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         },
         onVideo: () async {
           Navigator.pop(sheetContext);
-          await context.push('/add-story?video=1');
+          await context.push('/add-publication?video=1');
         },
       ),
     );
@@ -307,7 +327,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
           return _ProfileContent(
             user: user,
             profile: _profile,
-            posts: _posts,
+            newsPosts: _newsPosts,
+            publicationPosts: _publicationPosts,
             tabIndex: _tabIndex,
             onTabChanged: (i) => setState(() => _tabIndex = i),
             onRefresh: _load,
@@ -598,6 +619,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 context.push('/edit-profile');
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('Настройки'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/profile/settings');
+              },
+            ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.logout),
@@ -634,7 +663,8 @@ class _ProfileContent extends StatelessWidget {
   const _ProfileContent({
     required this.user,
     required this.profile,
-    required this.posts,
+    required this.newsPosts,
+    required this.publicationPosts,
     required this.tabIndex,
     required this.onTabChanged,
     required this.onRefresh,
@@ -645,7 +675,8 @@ class _ProfileContent extends StatelessWidget {
 
   final AppUser user;
   final SellerProfileEntity? profile;
-  final List<PostEntity> posts;
+  final List<PostEntity> newsPosts;
+  final List<PostEntity> publicationPosts;
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final VoidCallback onRefresh;
@@ -654,7 +685,7 @@ class _ProfileContent extends StatelessWidget {
   final bool updatingAvatar;
 
   int get _publicationsCount =>
-      (profile?.products.length ?? 0) + posts.length;
+      (profile?.products.length ?? 0) + newsPosts.length + publicationPosts.length;
 
   @override
   Widget build(BuildContext context) {
@@ -924,7 +955,20 @@ class _ProfileContent extends StatelessWidget {
                               ? _ProductsGrid(
                                   products: profile?.products ?? [],
                                 )
-                              : _PostsGrid(posts: posts),
+                              : tabIndex == 1
+                                  ? _PostsGrid(
+                                      posts: newsPosts,
+                                      emptyTitle: 'Нет новостей',
+                                      emptyActionLabel: 'Опубликовать новость',
+                                      onEmptyAction: () => context.push('/add-news'),
+                                    )
+                                  : _PostsGrid(
+                                      posts: publicationPosts,
+                                      emptyTitle: 'Нет публикаций',
+                                      emptyActionLabel: 'Создать публикацию',
+                                      onEmptyAction: () =>
+                                          context.push('/add-publication'),
+                                    ),
                         ),
                       ),
                     ],
@@ -946,7 +990,7 @@ Widget _statDivider() => Container(
       color: const Color(0xFFE2E5EB),
     );
 
-/// Переключатель «Товары / Новости» в одной карточке профиля.
+/// Переключатель «Товары / Новости / Лента» в профиле.
 class _ProfileTabBar extends StatelessWidget {
   const _ProfileTabBar({
     required this.tabIndex,
@@ -969,10 +1013,10 @@ class _ProfileTabBar extends StatelessWidget {
         children: [
           Expanded(
             child: _ProfileTabChip(
-              selected: tabIndex == 0,
-              icon: Icons.grid_view_rounded,
-              label: 'Товары',
-              onTap: () => onChanged(0),
+              selected: tabIndex == 2,
+              icon: Icons.person_outline_rounded,
+              label: 'Лента',
+              onTap: () => onChanged(2),
             ),
           ),
           const SizedBox(width: 4),
@@ -982,6 +1026,15 @@ class _ProfileTabBar extends StatelessWidget {
               icon: Icons.article_rounded,
               label: 'Новости',
               onTap: () => onChanged(1),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _ProfileTabChip(
+              selected: tabIndex == 0,
+              icon: Icons.grid_view_rounded,
+              label: 'Товары',
+              onTap: () => onChanged(0),
             ),
           ),
         ],
@@ -1150,9 +1203,17 @@ class _ProductsGrid extends StatelessWidget {
 }
 
 class _PostsGrid extends StatelessWidget {
-  const _PostsGrid({required this.posts});
+  const _PostsGrid({
+    required this.posts,
+    required this.emptyTitle,
+    required this.emptyActionLabel,
+    required this.onEmptyAction,
+  });
 
   final List<PostEntity> posts;
+  final String emptyTitle;
+  final String emptyActionLabel;
+  final VoidCallback onEmptyAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1164,14 +1225,14 @@ class _PostsGrid extends StatelessWidget {
             Icon(Icons.article_outlined, size: 56, color: Colors.grey.shade400),
             const SizedBox(height: 12),
             Text(
-              'Нет новостей',
+              emptyTitle,
               style: TextStyle(color: Colors.grey.shade600),
             ),
             const SizedBox(height: 8),
             TextButton.icon(
-              onPressed: () => context.push('/add-news'),
+              onPressed: onEmptyAction,
               icon: const Icon(Icons.add),
-              label: const Text('Опубликовать новость'),
+              label: Text(emptyActionLabel),
             ),
           ],
         ),

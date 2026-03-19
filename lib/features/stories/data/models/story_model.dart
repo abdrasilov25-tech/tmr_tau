@@ -20,10 +20,16 @@ class StoryModel extends StoryEntity {
       imageUrl: json['image_url'] as String? ?? '',
       videoUrl: json['video_url'] as String?,
       caption: json['caption'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      expiresAt: DateTime.parse(json['expires_at'] as String),
+      createdAt: _parseDateTime(json['created_at']),
+      expiresAt: _parseDateTime(json['expires_at']),
       userName: json['user_name'] as String?,
       userAvatarUrl: json['user_avatar'] as String?,
     );
+  }
+
+  static DateTime _parseDateTime(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is String && value.isNotEmpty) return DateTime.parse(value);
+    throw FormatException('Invalid datetime value: $value');
   }
 }

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/accounts/account_repository.dart';
 import 'core/storage/chat_list_storage.dart';
+import 'core/storage/chat_story_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -38,6 +39,7 @@ Future<void> main() async {
   final prefs = await SharedPreferences.getInstance();
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
+  final chatStoryListStorage = ChatStoryListStorage(prefs);
   const secureStorage = FlutterSecureStorage();
   final multiAccountStorage = MultiAccountStorage(prefs, secureStorage);
   final accountRepository = AccountRepositoryImpl(prefs);
@@ -48,6 +50,7 @@ Future<void> main() async {
     supabaseInitialized: _supabaseInitialized,
     localReactionsStorage: localReactions,
     chatListStorage: chatListStorage,
+    chatStoryListStorage: chatStoryListStorage,
     multiAccountStorage: multiAccountStorage,
     accountRepository: accountRepository,
   ));

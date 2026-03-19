@@ -165,6 +165,7 @@ create table if not exists public.story_replies (
 create table if not exists public.posts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references public.users(id) on delete cascade,
+  kind text not null default 'news',
   image_url text default '',
   video_url text default '',
   video_duration_seconds int default 0,
@@ -176,6 +177,7 @@ create table if not exists public.posts (
   created_at timestamptz default now()
 );
 -- Если таблица posts уже была без comments_count / dislikes_count / reposts_count
+alter table public.posts add column if not exists kind text not null default 'news';
 alter table public.posts add column if not exists comments_count int default 0;
 alter table public.posts add column if not exists dislikes_count int default 0;
 alter table public.posts add column if not exists reposts_count int default 0;
@@ -470,3 +472,131 @@ create policy "Allow public read stories" on storage.objects for select to publi
 
 -- ============== Delete expired stories (run via cron or Edge Function) ==============
 -- delete from public.stories where expires_at < now();
+
+-- ============== SETTINGS (privacy, notifications, security) ==============
+
+-- User settings (single row per user)
+create table if not exists public.user_settings (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  push_notifications_enabled boolean not null default true,
+  email_notifications_enabled boolean not null default true,
+  in_app_notifications_enabled boolean not null default true,
+  activity_status_enabled boolean not null default true,
+  story_visibility text not null default 'followers',
+  post_visibility text not null default 'followers',
+  two_factor_enabled boolean not null default false,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table public.user_settings enable row level security;
+drop policy if exists "User settings select own" on public.user_settings;
+drop policy if exists "User settings insert own" on public.user_settings;
+drop policy if exists "User settings update own" on public.user_settings;
+
+create policy "User settings select own"
+  on public.user_settings for select
+  using (auth.uid() = user_id);
+
+create policy "User settings insert own"
+  on public.user_settings for insert
+  with check (auth.uid() = user_id);
+
+create policy "User settings update own"
+  on public.user_settings for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+
+-- Blocked users list
+create table if not exists public.blocked_users (
+  blocker_id uuid not null references public.users(id) on delete cascade,
+  blocked_user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (blocker_id, blocked_user_id)
+);
+
+alter table public.blocked_users enable row level security;
+drop policy if exists "Blocked users select own" on public.blocked_users;
+drop policy if exists "Blocked users insert own" on public.blocked_users;
+drop policy if exists "Blocked users delete own" on public.blocked_users;
+
+create policy "Blocked users select own"
+  on public.blocked_users for select
+  using (auth.uid() = blocker_id);
+
+create policy "Blocked users insert own"
+  on public.blocked_users for insert
+  with check (auth.uid() = blocker_id);
+
+create policy "Blocked users delete own"
+  on public.blocked_users for delete
+  using (auth.uid() = blocker_id);
+
+
+-- Support tickets ("Report a problem")
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  title text not null,
+  description text not null,
+  created_at timestamptz default now()
+);
+
+alter table public.support_tickets enable row level security;
+drop policy if exists "Support tickets select own" on public.support_tickets;
+drop policy if exists "Support tickets insert own" on public.support_tickets;
+
+create policy "Support tickets select own"
+  on public.support_tickets for select
+  using (auth.uid() = user_id);
+
+create policy "Support tickets insert own"
+  on public.support_tickets for insert
+  with check (auth.uid() = user_id);
+
+
+-- Login history (optional, used by UI in this feature)
+create table if not exists public.login_history (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  logged_in_at timestamptz default now(),
+  ip_address text,
+  user_agent text
+);
+
+alter table public.login_history enable row level security;
+drop policy if exists "Login history select own" on public.login_history;
+drop policy if exists "Login history delete own" on public.login_history;
+
+create policy "Login history select own"
+  on public.login_history for select
+  using (auth.uid() = user_id);
+
+create policy "Login history delete own"
+  on public.login_history for delete
+  using (auth.uid() = user_id);
+
+
+-- Stored session records (optional, used for "session management" screen)
+create table if not exists public.user_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  last_seen_at timestamptz default now(),
+  device text,
+  ip_address text
+);
+
+alter table public.user_sessions enable row level security;
+drop policy if exists "User sessions select own" on public.user_sessions;
+drop policy if exists "User sessions delete own" on public.user_sessions;
+
+create policy "User sessions select own"
+  on public.user_sessions for select
+  using (auth.uid() = user_id);
+
+create policy "User sessions delete own"
+  on public.user_sessions for delete
+  using (auth.uid() = user_id);
+

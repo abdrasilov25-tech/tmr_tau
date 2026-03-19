@@ -21,7 +21,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
   Future<void> _onLoaded(NewsLoaded event, Emitter<NewsState> emit) async {
     emit(NewsLoading());
     try {
-      final list = await _repository.getFeedPosts(
+      final list = await _repository.getNewsPosts(
         limit: _pageSize,
         offset: 0,
         currentUserId: event.currentUserId,
@@ -42,7 +42,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     emit(current.copyWith(isLoadingMore: true));
     try {
       final offset = current.posts.length;
-      final list = await _repository.getFeedPosts(
+      final list = await _repository.getNewsPosts(
         limit: _pageSize,
         offset: offset,
         currentUserId: null,

@@ -13,6 +13,12 @@ abstract class ProductRepository {
   });
   Future<List<ProductEntity>> searchProducts(String query,
       {int limit = 20, String? currentUserId});
+  Future<List<ProductEntity>> searchProductsWithOffset(
+    String query, {
+    int limit = 20,
+    int offset = 0,
+    String? currentUserId,
+  });
   Future<List<ProductEntity>> getTrendingProducts({
     int limit = 10,
     String? currentUserId,

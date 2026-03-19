@@ -5,12 +5,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tmr_tau/app.dart';
 import 'package:tmr_tau/core/accounts/account_repository.dart';
 import 'package:tmr_tau/core/storage/chat_list_storage.dart';
+import 'package:tmr_tau/core/storage/chat_story_list_storage.dart';
 import 'package:tmr_tau/core/storage/local_reactions_storage.dart';
 import 'package:tmr_tau/core/storage/multi_account_storage.dart';
 
 void main() {
   late LocalReactionsStorage localReactionsStorage;
   late ChatListStorage chatListStorage;
+  late ChatStoryListStorage chatStoryListStorage;
   late MultiAccountStorage multiAccountStorage;
   late AccountRepository accountRepository;
 
@@ -19,6 +21,7 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     localReactionsStorage = LocalReactionsStorage(prefs);
     chatListStorage = ChatListStorage(prefs);
+    chatStoryListStorage = ChatStoryListStorage(prefs);
     multiAccountStorage = MultiAccountStorage(prefs, const FlutterSecureStorage());
     accountRepository = AccountRepositoryImpl(prefs);
   });
@@ -34,6 +37,7 @@ void main() {
           supabaseInitialized: false,
           localReactionsStorage: localReactionsStorage,
           chatListStorage: chatListStorage,
+          chatStoryListStorage: chatStoryListStorage,
           multiAccountStorage: multiAccountStorage,
           accountRepository: accountRepository,
         ),

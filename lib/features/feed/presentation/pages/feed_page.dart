@@ -252,18 +252,38 @@ class _StoriesStripState extends State<_StoriesStrip> {
       final list = await repo.getStoriesGroupedByUser();
       if (mounted) {
         setState(() {
-        _groups = list;
-        _loading = false;
-      });
+          _groups = list;
+          _loading = false;
+        });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось загрузить истории: $e')),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isLoggedIn = context.read<AuthBloc>().state is AuthAuthenticated;
+    final authState = context.read<AuthBloc>().state;
+    final isLoggedIn = authState is AuthAuthenticated;
+    final currentUserId = authState is AuthAuthenticated ? authState.user.id : null;
+    final ownGroup = currentUserId == null
+        ? null
+        : _groups.cast<StoryGroupEntity?>().firstWhere(
+              (g) => g?.userId == currentUserId,
+              orElse: () => null,
+            );
+    final otherGroups = currentUserId == null
+        ? _groups
+        : _groups.where((g) => g.userId != currentUserId).toList(growable: false);
+    final visibleGroups = [
+      if (ownGroup != null) ownGroup,
+      ...otherGroups,
+    ];
 
     return SizedBox(
       height: 100,
@@ -282,7 +302,7 @@ class _StoriesStripState extends State<_StoriesStrip> {
                   builder: (sheetContext) => AddChoiceSheet(
                     onProuvnut: () {
                       Navigator.pop(sheetContext);
-                      context.push('/add-news');
+                      context.push('/add-publication');
                     },
                     onStory: () async {
                       Navigator.pop(sheetContext);
@@ -291,8 +311,7 @@ class _StoriesStripState extends State<_StoriesStrip> {
                     },
                     onVideo: () async {
                       Navigator.pop(sheetContext);
-                      await context.push('/add-story?video=1');
-                      if (context.mounted) _load();
+                      await context.push('/add-publication?video=1');
                     },
                   ),
                 );
@@ -313,15 +332,15 @@ class _StoriesStripState extends State<_StoriesStrip> {
               ),
             )
           else
-            ..._groups.map((g) => _StoryCircle(
+            ...visibleGroups.map((g) => _StoryCircle(
                   label: g.userName ?? 'История',
                   avatarUrl: g.userAvatarUrl,
                   onTap: () {
                     context.push(
                       '/stories',
                       extra: StoryViewerArgs(
-                        groups: _groups,
-                        initialGroupIndex: _groups.indexOf(g),
+                        groups: visibleGroups,
+                        initialGroupIndex: visibleGroups.indexOf(g),
                       ),
                     );
                   },

@@ -13,7 +13,14 @@ import '../../domain/repositories/post_repository.dart';
 enum _MediaType { photo, video }
 
 class AddPostPage extends StatefulWidget {
-  const AddPostPage({super.key});
+  const AddPostPage({
+    super.key,
+    this.kind = 'news',
+    this.initialVideoMode = false,
+  });
+
+  final String kind;
+  final bool initialVideoMode;
 
   @override
   State<AddPostPage> createState() => _AddPostPageState();
@@ -25,6 +32,24 @@ class _AddPostPageState extends State<AddPostPage> {
   final _captionController = TextEditingController();
   bool _loading = false;
   static const int _maxVideoSeconds = 120; // 2 минуты
+
+  bool get _isPublication => widget.kind == 'publication';
+  String get _pageTitle => _isPublication ? 'Новая публикация' : 'Новая новость';
+  String get _successMessage =>
+      _isPublication ? 'Публикация опубликована' : 'Новость опубликована';
+  String get _captionHint =>
+      _isPublication ? 'Поделитесь моментом из жизни...' : 'Что происходит в Темиртау?';
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialVideoMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _pickVideo();
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -178,7 +203,7 @@ class _AddPostPageState extends State<AddPostPage> {
           title: const Text('Видео слишком длинное'),
           content: Text(
             'Ваше видео — ${durationSeconds ~/ 60} мин ${durationSeconds % 60} сек. '
-            'Для новостей допускается не более 2 минут.\n\n'
+            'Допускается не более 2 минут.\n\n'
             'Рекомендуем обрезать видео в приложении «Фото» (iPhone) или «Галерея» (Android), '
             'затем снова выберите его здесь.',
             style: const TextStyle(height: 1.4),
@@ -265,12 +290,17 @@ class _AddPostPageState extends State<AddPostPage> {
         caption: caption,
         videoUrl: videoUrl,
         videoDurationSeconds: videoDurationSeconds,
+        kind: widget.kind,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Новость опубликована')),
+        SnackBar(content: Text(_successMessage)),
       );
-      context.go('/home/news');
+      if (_isPublication) {
+        context.go('/home/profile?tab=2');
+      } else {
+        context.go('/home/profile?tab=1');
+      }
     } catch (e, st) {
       if (!mounted) return;
       String message = 'Ошибка при публикации';
@@ -295,129 +325,214 @@ class _AddPostPageState extends State<AddPostPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor: Colors.transparent,
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => context.pop(),
         ),
-        title: const Text(
-          'Новая новость',
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
+        title: Text(
+          _pageTitle,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
             fontSize: 18,
+            color: Colors.white,
           ),
         ),
         centerTitle: true,
         actions: [
-          TextButton(
-            onPressed: _loading || !_hasMedia ? null : _publish,
-            child: _loading
-                ? const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text(
-                    'Опубликовать',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: ElevatedButton(
+              onPressed: _loading || !_hasMedia ? null : _publish,
+              style: ElevatedButton.styleFrom(
+                elevation: 0,
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: _loading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text(
+                      'Опубликовать',
+                      style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                  ),
+            ),
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          GestureDetector(
-            onTap: _loading ? null : _showPickMediaSheet,
-            child: Container(
-              height: 320,
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: _image != null
-                  ? ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.file(
-                        _image!,
-                        width: double.infinity,
-                        height: double.infinity,
-                        fit: BoxFit.cover,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFF06121D),
+              Color(0xFF000000),
+            ],
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
+          children: [
+            GestureDetector(
+              onTap: _loading ? null : _showPickMediaSheet,
+              child: Container(
+                height: 340,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  gradient: LinearGradient(
+                    colors: _hasMedia
+                        ? const [
+                            Color(0xFF00E5FF),
+                            Color(0xFFE91E8C),
+                          ]
+                        : const [
+                            Color(0xFFFFFFFF),
+                            Color(0xFFBDBDBD),
+                          ].map((c) => c.withValues(alpha: 0.08)).toList(),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(2),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      color: Colors.black.withValues(alpha: 0.55),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.12),
                       ),
-                    )
-                  : _video != null
-                      ? Stack(
-                          alignment: Alignment.center,
-                          fit: StackFit.expand,
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: _VideoPreview(file: _video!),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.videocam, color: Colors.white, size: 20),
-                                  SizedBox(width: 6),
-                                  Text('Видео до 2 мин', style: TextStyle(color: Colors.white, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ],
-                        )
-                      : Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.add_photo_alternate_outlined,
-                              size: 64,
-                              color: Colors.grey.shade500,
-                            ),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Фото или видео до 2 мин',
-                              style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 16,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Нажмите, чтобы выбрать',
-                              style: TextStyle(
-                                color: Colors.grey.shade500,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: _image != null
+                          ? Image.file(
+                              _image!,
+                              width: double.infinity,
+                              height: double.infinity,
+                              fit: BoxFit.cover,
+                            )
+                          : _video != null
+                              ? Stack(
+                                  alignment: Alignment.center,
+                                  fit: StackFit.expand,
+                                  children: [
+                                    _VideoPreview(file: _video!),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 12, vertical: 7),
+                                      decoration: BoxDecoration(
+                                        color: Colors.black54,
+                                        borderRadius: BorderRadius.circular(999),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(
+                                            Icons.videocam,
+                                            color: Colors.white,
+                                            size: 18,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          const Text(
+                                            'Видео до 2 мин',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              : Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.add_photo_alternate_outlined,
+                                      size: 66,
+                                      color: Colors.white.withValues(alpha: 0.5),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    Text(
+                                      'Фото или видео до 2 мин',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.7),
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      _loading
+                                          ? 'Подождите...'
+                                          : 'Нажмите, чтобы выбрать',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.45),
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                    ),
+                  ),
+                ),
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          TextField(
-            controller: _captionController,
-            decoration: InputDecoration(
-              hintText: 'Что происходит в Темиртау?',
-              hintStyle: TextStyle(color: Colors.grey.shade500),
-              border: InputBorder.none,
-              filled: false,
+            const SizedBox(height: 18),
+            _CaptionField(
+              controller: _captionController,
+              hintText: _captionHint,
             ),
-            maxLines: 4,
-            style: const TextStyle(fontSize: 16),
-          ),
-        ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CaptionField extends StatelessWidget {
+  const _CaptionField({
+    required this.controller,
+    required this.hintText,
+  });
+
+  final TextEditingController controller;
+  final String hintText;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.12),
+        ),
+        color: Colors.white.withValues(alpha: 0.06),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: TextField(
+        controller: controller,
+        maxLines: 4,
+        style: const TextStyle(color: Colors.white, fontSize: 16),
+        decoration: InputDecoration(
+          hintText: hintText,
+          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.45)),
+          border: InputBorder.none,
+          isDense: true,
+        ),
       ),
     );
   }

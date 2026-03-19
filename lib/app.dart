@@ -6,6 +6,7 @@ import 'core/accounts/account_model.dart';
 import 'core/accounts/account_repository.dart';
 import 'core/accounts/session_restorer.dart';
 import 'core/storage/chat_list_storage.dart';
+import 'core/storage/chat_story_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
 import 'core/theme/app_theme.dart';
@@ -43,6 +44,7 @@ class TmrTauApp extends StatefulWidget {
     this.supabaseInitialized = true,
     required this.localReactionsStorage,
     required this.chatListStorage,
+    required this.chatStoryListStorage,
     required this.multiAccountStorage,
     required this.accountRepository,
   });
@@ -52,6 +54,7 @@ class TmrTauApp extends StatefulWidget {
   final bool supabaseInitialized;
   final LocalReactionsStorage localReactionsStorage;
   final ChatListStorage chatListStorage;
+  final ChatStoryListStorage chatStoryListStorage;
   final MultiAccountStorage multiAccountStorage;
   final AccountRepository accountRepository;
 
@@ -145,6 +148,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<LocalReactionsStorage>.value(
             value: widget.localReactionsStorage),
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
+        RepositoryProvider<ChatStoryListStorage>.value(
+          value: widget.chatStoryListStorage,
+        ),
         RepositoryProvider<MultiAccountStorage>.value(
             value: widget.multiAccountStorage),
         RepositoryProvider<AccountRepository>.value(
@@ -176,6 +182,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
               // чтобы прошлый аккаунт не «перетекал» в новый.
               await widget.localReactionsStorage.clearReactions();
               await widget.chatListStorage.clearAll();
+              await widget.chatStoryListStorage.clearAll();
               final session =
                   supa.Supabase.instance.client.auth.currentSession;
               final refreshToken = session?.refreshToken;
