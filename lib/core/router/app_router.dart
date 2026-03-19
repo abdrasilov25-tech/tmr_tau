@@ -34,6 +34,7 @@ import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/chat/presentation/pages/chats_page.dart';
 import '../../features/orders/presentation/pages/orders_page.dart';
+import '../../features/home/presentation/pages/main_home_page.dart';
 import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
 import '../../features/stories/presentation/pages/add_story_page.dart';
@@ -296,6 +297,10 @@ class AppRouter {
         builder: (context, state) => const OrdersPage(),
       ),
       GoRoute(
+        path: '/home-main',
+        builder: (context, state) => const MainHomePage(),
+      ),
+      GoRoute(
         path: '/chat/:peerId',
         builder: (context, state) {
           final peerId = state.pathParameters['peerId']!;
@@ -343,7 +348,7 @@ class AppRouter {
                 routes: [
                   GoRoute(
                     path: 'feed',
-                    builder: (context, state) => const FeedPage(),
+                    builder: (context, state) => const MainHomePage(),
                   ),
                 ],
               ),
