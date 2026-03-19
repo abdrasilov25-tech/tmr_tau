@@ -8,6 +8,8 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../post/domain/entities/post_entity.dart';
+import '../../../post/domain/repositories/post_repository.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../domain/entities/seller_profile_entity.dart';
@@ -51,13 +53,51 @@ class SellerProfilePage extends StatelessWidget {
   }
 }
 
-class _SellerProfileView extends StatelessWidget {
+class _SellerProfileView extends StatefulWidget {
   const _SellerProfileView({required this.profile});
 
   final SellerProfileEntity profile;
 
   @override
+  State<_SellerProfileView> createState() => _SellerProfileViewState();
+}
+
+class _SellerProfileViewState extends State<_SellerProfileView> {
+  int _tabIndex = 0;
+  List<PostEntity> _publicationPosts = const [];
+  bool _loadingPublications = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPublications();
+  }
+
+  Future<void> _loadPublications() async {
+    final authState = context.read<AuthBloc>().state;
+    final currentUserId =
+        authState is AuthAuthenticated ? authState.user.id : null;
+    try {
+      final posts = await context.read<PostRepository>().getPostsByUser(
+            widget.profile.id,
+            currentUserId: currentUserId,
+          );
+      if (!mounted) return;
+      setState(() {
+        _publicationPosts = posts
+            .where((p) => p.kind == 'publication')
+            .toList(growable: false);
+        _loadingPublications = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loadingPublications = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final profile = widget.profile;
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
@@ -209,37 +249,59 @@ class _SellerProfileView extends StatelessWidget {
             child: DecoratedBox(
               decoration: ThemedContentSurface.profileCardDecoration(radius: 16),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Text(
-                  'Товары',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: ThemedContentSurface.profileTextPrimary,
-                        fontWeight: FontWeight.w600,
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _ProfileTabChip(
+                        selected: _tabIndex == 0,
+                        icon: Icons.shopping_bag_outlined,
+                        label: 'Товары',
+                        onTap: () => setState(() => _tabIndex = 0),
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _ProfileTabChip(
+                        selected: _tabIndex == 1,
+                        icon: Icons.person_outline_rounded,
+                        label: 'Лента',
+                        onTap: () => setState(() => _tabIndex = 1),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ),
         ),
-        SliverGrid(
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 0.7,
-            crossAxisSpacing: 8,
-            mainAxisSpacing: 8,
+        if (_tabIndex == 0)
+          SliverGrid(
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              childAspectRatio: 0.7,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            delegate: SliverChildBuilderDelegate(
+              (context, index) {
+                final product = profile.products[index];
+                return _ProductGridTile(
+                  product: product,
+                  onTap: () =>
+                      context.push('/product/${product.id}', extra: product),
+                );
+              },
+              childCount: profile.products.length,
+            ),
+          )
+        else
+          SliverToBoxAdapter(
+            child: _ProfilePublicationsGrid(
+              posts: _publicationPosts,
+              loading: _loadingPublications,
+            ),
           ),
-          delegate: SliverChildBuilderDelegate(
-            (context, index) {
-              final product = profile.products[index];
-              return _ProductGridTile(
-                product: product,
-                onTap: () =>
-                    context.push('/product/${product.id}', extra: product),
-              );
-            },
-            childCount: profile.products.length,
-          ),
-        ),
       ],
     );
   }
@@ -291,6 +353,131 @@ class _ProductGridTile extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ProfileTabChip extends StatelessWidget {
+  const _ProfileTabChip({
+    required this.selected,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? Colors.white : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 18, color: selected ? Colors.black87 : Colors.grey),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? Colors.black87 : Colors.grey,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfilePublicationsGrid extends StatelessWidget {
+  const _ProfilePublicationsGrid({
+    required this.posts,
+    required this.loading,
+  });
+
+  final List<PostEntity> posts;
+  final bool loading;
+
+  @override
+  Widget build(BuildContext context) {
+    if (loading) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (posts.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Text(
+            'Нет публикаций',
+            style: TextStyle(color: Colors.grey.shade600),
+          ),
+        ),
+      );
+    }
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        childAspectRatio: 0.85,
+        crossAxisSpacing: 4,
+        mainAxisSpacing: 4,
+      ),
+      itemCount: posts.length,
+      itemBuilder: (context, index) {
+        final p = posts[index];
+        final hasVideo = p.videoUrl != null && p.videoUrl!.isNotEmpty;
+        if (p.imageUrl.isEmpty && !hasVideo) {
+          return Container(
+            color: Colors.grey.shade200,
+            child: const Center(child: Icon(Icons.person_outline_rounded)),
+          );
+        }
+        if (hasVideo && p.imageUrl.isEmpty) {
+          return Container(
+            color: Colors.grey.shade300,
+            child: const Center(
+              child: Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
+            ),
+          );
+        }
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.network(
+              p.imageUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.broken_image_outlined),
+              ),
+            ),
+            if (hasVideo)
+              const Center(
+                child: Icon(Icons.play_circle_fill, size: 34, color: Colors.white70),
+              ),
+          ],
+        );
+      },
     );
   }
 }

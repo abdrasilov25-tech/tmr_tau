@@ -4,6 +4,7 @@ class PostModel extends PostEntity {
   const PostModel({
     required super.id,
     required super.userId,
+    super.kind = 'news',
     super.imageUrl = '',
     super.caption = '',
     super.videoUrl,
@@ -24,6 +25,7 @@ class PostModel extends PostEntity {
     return PostModel(
       id: json['id'] as String,
       userId: json['user_id'] as String,
+      kind: (json['kind'] as String?) ?? 'news',
       imageUrl: (json['image_url'] as String?) ?? '',
       caption: (json['caption'] as String?) ?? '',
       videoUrl: json['video_url'] as String?,

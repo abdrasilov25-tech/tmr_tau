@@ -30,10 +30,8 @@ class CachedAvatar extends StatelessWidget {
       );
     }
     // Для разных аккаунтов мы используем уникальный URL (uid в query),
-    // а также сбрасываем кэш по этому URL, чтобы cached_network_image
-    // не подсовывал старую картинку другого пользователя.
+    // поэтому принудительная очистка кэша на каждом build не требуется.
     final url = rawUrl;
-    CachedNetworkImage.evictFromCache(url);
     return GestureDetector(
       onTap: () {
         final url = imageUrl;
@@ -58,6 +56,7 @@ class CachedAvatar extends StatelessWidget {
       child: CircleAvatar(
         radius: radius,
         backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+        // ClipOval гарантирует ровную круговую обрезку изображения без “квадратных” краёв.
         child: ClipOval(
           child: CachedNetworkImage(
             imageUrl: url,

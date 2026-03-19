@@ -20,6 +20,8 @@ import '../../features/product/domain/entities/product_entity.dart';
 import '../../features/post/presentation/pages/add_post_page.dart';
 import '../../features/post/presentation/pages/edit_post_page.dart';
 import '../../features/post/presentation/pages/post_detail_page.dart';
+import '../../features/post_reports/presentation/screens/my_reports_page.dart';
+import '../../features/post_reports/presentation/screens/report_post_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/edit_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
@@ -37,6 +39,19 @@ import '../../features/profile/domain/repositories/profile_repository.dart';
 import '../../features/stories/presentation/pages/add_story_page.dart';
 import '../../features/stories/presentation/pages/story_viewer_page.dart';
 import '../../features/stories/presentation/pages/story_viewer_args.dart';
+import '../../features/settings/presentation/screens/settings_page.dart';
+import '../../features/settings/presentation/screens/blocked_users_page.dart';
+import '../../features/settings/presentation/screens/activity_status_page.dart';
+import '../../features/settings/presentation/screens/story_controls_page.dart';
+import '../../features/settings/presentation/screens/post_visibility_page.dart';
+import '../../features/settings/presentation/screens/notifications_page.dart';
+import '../../features/settings/presentation/screens/security_page.dart';
+import '../../features/settings/presentation/screens/change_password_page.dart';
+import '../../features/settings/presentation/screens/connected_accounts_page.dart';
+import '../../features/settings/presentation/screens/report_problem_page.dart';
+import '../../features/settings/presentation/screens/faq_page.dart';
+import '../../features/settings/presentation/screens/terms_page.dart';
+import '../../features/settings/presentation/screens/privacy_policy_page.dart';
 
 class AppRouter {
   AppRouter({
@@ -122,7 +137,9 @@ class AppRouter {
         ],
       ),
       GoRoute(
-        path: '/profile/:id',
+        // Prevent conflict with `/profile/settings`.
+        // We allow only UUID-like values for the `:id` parameter.
+        path: '/profile/:id([0-9a-fA-F\\-]{36})',
         builder: (context, state) {
           final id = state.pathParameters['id']!;
           return SellerProfilePage(sellerId: id);
@@ -191,8 +208,84 @@ class AppRouter {
         ],
       ),
       GoRoute(
+        path: '/report-post/:postId',
+        builder: (context, state) {
+          final postId = state.pathParameters['postId']!;
+          return ReportPostPage(postId: postId);
+        },
+      ),
+      GoRoute(
+        path: '/my-reports',
+        builder: (context, state) => const MyReportsPage(),
+      ),
+      GoRoute(
+        path: '/profile/settings',
+        builder: (context, state) => const SettingsPage(),
+        routes: [
+          GoRoute(
+            path: 'change-password',
+            builder: (context, state) => const ChangePasswordPage(),
+          ),
+          GoRoute(
+            path: 'connected-accounts',
+            builder: (context, state) => const ConnectedAccountsPage(),
+          ),
+          GoRoute(
+            path: 'blocked-users',
+            builder: (context, state) => const BlockedUsersPage(),
+          ),
+          GoRoute(
+            path: 'activity-status',
+            builder: (context, state) => const ActivityStatusPage(),
+          ),
+          GoRoute(
+            path: 'story-controls',
+            builder: (context, state) =>
+                const StoryControlsPage(),
+          ),
+          GoRoute(
+            path: 'post-visibility',
+            builder: (context, state) => const PostVisibilityPage(),
+          ),
+          GoRoute(
+            path: 'notifications',
+            builder: (context, state) => const NotificationsPage(),
+          ),
+          GoRoute(
+            path: 'security',
+            builder: (context, state) => const SecurityPage(),
+          ),
+          GoRoute(
+            path: 'report-problem',
+            builder: (context, state) => const ReportProblemPage(),
+          ),
+          GoRoute(
+            path: 'faq',
+            builder: (context, state) => const FaqPage(),
+          ),
+          GoRoute(
+            path: 'terms',
+            builder: (context, state) => const TermsPage(),
+          ),
+          GoRoute(
+            path: 'privacy-policy',
+            builder: (context, state) => const PrivacyPolicyPage(),
+          ),
+        ],
+      ),
+      GoRoute(
         path: '/add-news',
-        builder: (context, state) => const AddPostPage(),
+        builder: (context, state) => const AddPostPage(kind: 'news'),
+      ),
+      GoRoute(
+        path: '/add-publication',
+        builder: (context, state) {
+          final initialVideo = state.uri.queryParameters['video'] == '1';
+          return AddPostPage(
+            kind: 'publication',
+            initialVideoMode: initialVideo,
+          );
+        },
       ),
       GoRoute(
         path: '/cart',
@@ -259,8 +352,8 @@ class AppRouter {
                   GoRoute(
                     path: 'search',
                     builder: (context, state) => SearchPage(
+                      postRepository: postRepository,
                       productRepository: productRepository,
-                      profileRepository: profileRepository,
                     ),
                   ),
                 ],
@@ -285,7 +378,11 @@ class AppRouter {
                 routes: [
                   GoRoute(
                     path: 'profile',
-                    builder: (context, state) => const MyProfilePage(),
+                    builder: (context, state) {
+                      final tabParam = state.uri.queryParameters['tab'];
+                      final parsed = tabParam == null ? null : int.tryParse(tabParam);
+                      return MyProfilePage(initialTabIndex: parsed);
+                    },
                   ),
                 ],
               ),
@@ -388,7 +485,7 @@ class _MainShell extends StatelessWidget {
             NavigationDestination(
               icon: Icon(Icons.home_outlined, size: 26),
               selectedIcon: Icon(Icons.home_rounded, size: 26),
-              label: 'Главная',
+              label: 'Лента',
             ),
             NavigationDestination(
               icon: Icon(Icons.search_outlined, size: 26),

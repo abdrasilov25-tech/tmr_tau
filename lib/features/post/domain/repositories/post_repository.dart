@@ -8,6 +8,11 @@ abstract class PostRepository {
     String? currentUserId,
   });
   Future<List<PostEntity>> getPopularPosts({String? userId});
+  Future<List<PostEntity>> getNewsPosts({
+    int limit = 20,
+    int offset = 0,
+    String? currentUserId,
+  });
   Future<List<PostEntity>> getPostsByUser(String userId, {String? currentUserId});
   Future<PostEntity> createPost({
     required String userId,
@@ -15,6 +20,7 @@ abstract class PostRepository {
     String caption = '',
     String? videoUrl,
     int videoDurationSeconds = 0,
+    String kind = 'news',
   });
   Future<void> toggleLike(String postId, String userId);
   Future<void> toggleDislike(String postId, String userId);
@@ -25,6 +31,18 @@ abstract class PostRepository {
     required String userId,
     required String text,
     String? parentCommentId,
+  });
+  Future<List<PostEntity>> searchPostsByCursor({
+    required String query,
+    int limit = 10,
+    DateTime? lastCreatedAt,
+    String? currentUserId,
+  });
+  Future<List<PostEntity>> searchPublicationsByCursor({
+    required String query,
+    int limit = 10,
+    DateTime? lastCreatedAt,
+    String? currentUserId,
   });
   Future<PostEntity?> getPostById(String postId, {String? currentUserId});
   Future<void> updatePost({

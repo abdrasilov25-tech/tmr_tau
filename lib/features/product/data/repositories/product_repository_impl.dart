@@ -75,6 +75,49 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   @override
+  Future<List<ProductEntity>> searchProductsWithOffset(
+    String query, {
+    int limit = 20,
+    int offset = 0,
+    String? currentUserId,
+  }) async {
+    final q = query.trim();
+    if (q.isEmpty) {
+      return getFeedProducts(
+        limit: limit,
+        offset: offset,
+        currentUserId: currentUserId,
+      );
+    }
+
+    final safeLimit = limit.clamp(1, 100);
+    final safeOffset = offset < 0 ? 0 : offset;
+
+    // Экранируем одинарную кавычку, чтобы не сломать фильтр Postgrest.
+    final safe = q.replaceAll(r"'", r"''");
+    try {
+      final res = await _client
+          .from(SupabaseConstants.productsTable)
+          .select(
+            'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
+          )
+          .or('title.ilike.%$safe%,description.ilike.%$safe%')
+          .order('created_at', ascending: false)
+          .range(safeOffset, safeOffset + safeLimit - 1);
+
+      final list = _mapProducts(res as List);
+      return await _enrichWithUserState(list, currentUserId);
+    } catch (_) {
+      // При ошибке возвращаем ленту как "похожие".
+      return getFeedProducts(
+        limit: safeLimit,
+        offset: safeOffset,
+        currentUserId: currentUserId,
+      );
+    }
+  }
+
+  @override
   Future<List<ProductEntity>> getTrendingProducts({
     int limit = 10,
     String? currentUserId,

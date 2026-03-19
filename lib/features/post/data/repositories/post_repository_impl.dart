@@ -67,6 +67,65 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
+  Future<List<PostEntity>> getNewsPosts({
+    int limit = 20,
+    int offset = 0,
+    String? currentUserId,
+  }) async {
+    final res = await _client
+        .from(SupabaseConstants.postsTable)
+        .select('*, users!user_id(name, avatar)')
+        .eq('kind', 'news')
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
+
+    final list = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+    if (currentUserId == null || list.isEmpty) return list;
+
+    final ids = list.map((e) => e.id).toList(growable: false);
+    final likes = await _client
+        .from(SupabaseConstants.postLikesTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+    final reposts = await _client
+        .from(SupabaseConstants.repostsTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+    final likedIds =
+        (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
+    final repostedIds = (reposts as List)
+        .map((e) => (e as Map)['post_id'] as String)
+        .toSet();
+
+    return list
+        .map(
+          (p) => PostModel(
+            id: p.id,
+            userId: p.userId,
+            imageUrl: p.imageUrl,
+            caption: p.caption,
+            videoUrl: p.videoUrl,
+            videoDurationSeconds: p.videoDurationSeconds,
+            createdAt: p.createdAt,
+            likesCount: p.likesCount,
+            dislikesCount: p.dislikesCount,
+            commentsCount: p.commentsCount,
+            repostsCount: p.repostsCount,
+            userName: p.userName,
+            userAvatarUrl: p.userAvatarUrl,
+            isLikedByMe: likedIds.contains(p.id),
+            isDislikedByMe: p.isDislikedByMe,
+            isRepostedByMe: repostedIds.contains(p.id),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
   Future<List<PostEntity>> getPostsByUser(String userId, {String? currentUserId}) async {
     final res = await _client
         .from(SupabaseConstants.postsTable)
@@ -126,11 +185,13 @@ class PostRepositoryImpl implements PostRepository {
     String caption = '',
     String? videoUrl,
     int videoDurationSeconds = 0,
+    String kind = 'news',
   }) async {
     final data = <String, dynamic>{
       'user_id': userId,
       'image_url': imageUrl,
       'caption': caption,
+      'kind': kind,
     };
     if (videoUrl != null && videoUrl.isNotEmpty) {
       data['video_url'] = videoUrl;
@@ -141,7 +202,30 @@ class PostRepositoryImpl implements PostRepository {
         .insert(data)
         .select('*, users!user_id(name, avatar)')
         .single();
-    return _mapPost(Map<String, dynamic>.from(res as Map));
+    final created = _mapPost(Map<String, dynamic>.from(res as Map));
+
+    if (created.kind == kind) return created;
+
+    // "Железная" защита от смешивания kind в БД:
+    // если запись вернулась с неверным kind — принудительно обновляем и подтверждаем чтением.
+    await _client
+        .from(SupabaseConstants.postsTable)
+        .update({'kind': kind})
+        .eq('id', created.id);
+
+    final verify = await _client
+        .from(SupabaseConstants.postsTable)
+        .select('*, users!user_id(name, avatar)')
+        .eq('id', created.id)
+        .single();
+
+    final verified = _mapPost(Map<String, dynamic>.from(verify as Map));
+    if (verified.kind != kind) {
+      throw Exception(
+        'Post kind mismatch after update: expected=$kind, got=${verified.kind}',
+      );
+    }
+    return verified;
   }
 
   @override
@@ -263,6 +347,178 @@ class PostRepositoryImpl implements PostRepository {
       } else {
         rethrow;
       }
+    }
+  }
+
+  @override
+  Future<List<PostEntity>> searchPostsByCursor({
+    required String query,
+    int limit = 10,
+    DateTime? lastCreatedAt,
+    String? currentUserId,
+  }) async {
+    final normalizedQuery = query.trim();
+    final hasQuery = normalizedQuery.isNotEmpty;
+    final res = await (lastCreatedAt == null
+        ? (hasQuery
+            ? _client
+                .from(SupabaseConstants.postsTable)
+                .select('*, users!user_id(name, avatar)')
+                .ilike('caption', '%$normalizedQuery%')
+                .order('created_at', ascending: false)
+                .limit(limit)
+            : _client
+                .from(SupabaseConstants.postsTable)
+                .select('*, users!user_id(name, avatar)')
+                .order('created_at', ascending: false)
+                .limit(limit))
+        : (hasQuery
+            ? _client
+                .from(SupabaseConstants.postsTable)
+                .select('*, users!user_id(name, avatar)')
+                .ilike('caption', '%$normalizedQuery%')
+                .lt('created_at', lastCreatedAt.toIso8601String())
+                .order('created_at', ascending: false)
+                .limit(limit)
+            : _client
+                .from(SupabaseConstants.postsTable)
+                .select('*, users!user_id(name, avatar)')
+                .lt('created_at', lastCreatedAt.toIso8601String())
+                .order('created_at', ascending: false)
+                .limit(limit)));
+    final list = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+
+    if (currentUserId == null || list.isEmpty) return list;
+
+    final ids = list.map((e) => e.id).toList(growable: false);
+    final likes = await _client
+        .from(SupabaseConstants.postLikesTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+    final reposts = await _client
+        .from(SupabaseConstants.repostsTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+
+    final likedIds =
+        (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
+    final repostedIds =
+        (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
+
+    return list
+        .map(
+          (p) => PostModel(
+            id: p.id,
+            userId: p.userId,
+            imageUrl: p.imageUrl,
+            caption: p.caption,
+            videoUrl: p.videoUrl,
+            videoDurationSeconds: p.videoDurationSeconds,
+            createdAt: p.createdAt,
+            likesCount: p.likesCount,
+            dislikesCount: p.dislikesCount,
+            commentsCount: p.commentsCount,
+            repostsCount: p.repostsCount,
+            userName: p.userName,
+            userAvatarUrl: p.userAvatarUrl,
+            isLikedByMe: likedIds.contains(p.id),
+            isDislikedByMe: p.isDislikedByMe,
+            isRepostedByMe: repostedIds.contains(p.id),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<PostEntity>> searchPublicationsByCursor({
+    required String query,
+    int limit = 10,
+    DateTime? lastCreatedAt,
+    String? currentUserId,
+  }) async {
+    final normalizedQuery = query.trim();
+    final hasQuery = normalizedQuery.isNotEmpty;
+    try {
+      final res = await (lastCreatedAt == null
+          ? (hasQuery
+              ? _client
+                  .from(SupabaseConstants.postsTable)
+                  .select('*, users!user_id(name, avatar)')
+                  .eq('kind', 'publication')
+                  .ilike('caption', '%$normalizedQuery%')
+                  .order('created_at', ascending: false)
+                  .limit(limit)
+              : _client
+                  .from(SupabaseConstants.postsTable)
+                  .select('*, users!user_id(name, avatar)')
+                  .eq('kind', 'publication')
+                  .order('created_at', ascending: false)
+                  .limit(limit))
+          : (hasQuery
+              ? _client
+                  .from(SupabaseConstants.postsTable)
+                  .select('*, users!user_id(name, avatar)')
+                  .eq('kind', 'publication')
+                  .ilike('caption', '%$normalizedQuery%')
+                  .lt('created_at', lastCreatedAt.toIso8601String())
+                  .order('created_at', ascending: false)
+                  .limit(limit)
+              : _client
+                  .from(SupabaseConstants.postsTable)
+                  .select('*, users!user_id(name, avatar)')
+                  .eq('kind', 'publication')
+                  .lt('created_at', lastCreatedAt.toIso8601String())
+                  .order('created_at', ascending: false)
+                  .limit(limit)));
+
+      final list = (res as List)
+          .map((e) => _mapPost(e as Map<String, dynamic>))
+          .toList(growable: false);
+      if (currentUserId == null || list.isEmpty) return list;
+      final ids = list.map((e) => e.id).toList(growable: false);
+      final likes = await _client
+          .from(SupabaseConstants.postLikesTable)
+          .select('post_id')
+          .eq('user_id', currentUserId)
+          .inFilter('post_id', ids);
+      final reposts = await _client
+          .from(SupabaseConstants.repostsTable)
+          .select('post_id')
+          .eq('user_id', currentUserId)
+          .inFilter('post_id', ids);
+      final likedIds =
+          (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
+      final repostedIds = (reposts as List)
+          .map((e) => (e as Map)['post_id'] as String)
+          .toSet();
+      return list
+          .map(
+            (p) => PostModel(
+              id: p.id,
+              userId: p.userId,
+              imageUrl: p.imageUrl,
+              caption: p.caption,
+              videoUrl: p.videoUrl,
+              videoDurationSeconds: p.videoDurationSeconds,
+              createdAt: p.createdAt,
+              likesCount: p.likesCount,
+              dislikesCount: p.dislikesCount,
+              commentsCount: p.commentsCount,
+              repostsCount: p.repostsCount,
+              userName: p.userName,
+              userAvatarUrl: p.userAvatarUrl,
+              isLikedByMe: likedIds.contains(p.id),
+              isDislikedByMe: p.isDislikedByMe,
+              isRepostedByMe: repostedIds.contains(p.id),
+            ),
+          )
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
     }
   }
 

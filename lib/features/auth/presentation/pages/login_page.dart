@@ -8,9 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/accounts/account_manager.dart';
 import '../../../../core/accounts/account_model.dart';
-import '../../../../core/storage/local_reactions_storage.dart';
 import '../../../../core/storage/multi_account_storage.dart';
-import '../../../../core/theme/login_theme_presets.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
@@ -21,10 +19,8 @@ import 'login_result.dart';
 
 /// Цвета неоновой палитры
 class _NeonColors {
-  static const purple = Color(0xFF6B2D9E);
   static const pink = Color(0xFFE91E8C);
   static const orange = Color(0xFFFF6B35);
-  static const yellow = Color(0xFFFFD23F);
   static const teal = Color(0xFF00D9D9);
   static const cyan = Color(0xFF00E5FF);
   static const white = Color(0xFFFFFFFF);
@@ -60,8 +56,6 @@ class _LoginPageState extends State<LoginPage>
   late Animation<double> _themeButtonScaleAnimation;
   late AnimationController _themeButtonGlowController;
   late Animation<double> _themeButtonGlowAnimation;
-  bool _isPhoneLogin = false;
-  bool _otpDialogOpen = false;
 
   @override
   void initState() {
@@ -126,64 +120,10 @@ class _LoginPageState extends State<LoginPage>
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    final contact = _emailController.text.trim();
-    if (_isPhoneLogin) {
-      context.read<AuthBloc>().add(AuthSignInWithSmsOtpRequested(phone: contact));
-      return;
-    }
-    context.read<AuthBloc>().add(
-      AuthSignInRequested(
-        email: contact,
-        password: _passwordController.text,
-      ),
-    );
-  }
-
-  void _showForgotPasswordDialog() {
-    final initial = _emailController.text.trim();
-    final dialogController = TextEditingController(
-      text: initial.contains('@') ? initial : '',
-    );
-
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Восстановить пароль'),
-        content: TextField(
-          controller: dialogController,
-          keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            hintText: 'Email',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final email = dialogController.text.trim();
-              if (email.isEmpty || !email.contains('@')) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Введите корректный email для восстановления.'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
-                return;
-              }
-              context
-                  .read<AuthBloc>()
-                  .add(AuthResetPasswordRequested(email: email));
-              Navigator.pop(ctx);
-            },
-            child: const Text('Восстановить'),
-          ),
-        ],
-      ),
-    );
+    context.read<AuthBloc>().add(AuthSignInRequested(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        ));
   }
 
   @override
@@ -232,19 +172,8 @@ class _LoginPageState extends State<LoginPage>
       listener: (context, state) {
         if (state is AuthAuthenticated) {
           if (_authHandled) return;
-          if (_otpDialogOpen) {
-            // Если мы сейчас в режиме ввода SMS-кода, сначала закрываем диалог,
-            // чтобы навигация не конфликтовала с dispose диалога.
-            if (Navigator.of(context).canPop()) {
-              _otpDialogOpen = false;
-              Navigator.of(context).pop();
-            } else {
-              _otpDialogOpen = false;
-            }
-          }
           _authHandled = true;
-          final password = _passwordController.text.trim();
-          final passwordOrNull = password.isEmpty ? null : password;
+          final password = _passwordController.text;
           final storage = context.read<MultiAccountStorage>();
           final doNavigate = () {
             if (!context.mounted) return;
@@ -254,17 +183,17 @@ class _LoginPageState extends State<LoginPage>
                 email: state.user.email,
                 name: state.user.name,
                 avatarUrl: state.user.avatarUrl,
-                password: passwordOrNull,
+                password: password,
               ));
             } else {
               context.go('/home/feed');
             }
           };
-          if (passwordOrNull == null) {
+          if (password.isEmpty) {
             doNavigate();
             return;
           }
-          storage.savePasswordImmediate(state.user.id, state.user.email, passwordOrNull);
+          storage.savePasswordImmediate(state.user.id, state.user.email, password);
           if (widget.addAccountMode) {
             doNavigate();
             return;
@@ -277,80 +206,17 @@ class _LoginPageState extends State<LoginPage>
                   name: state.user.name,
                   avatarUrl: state.user.avatarUrl,
                 ),
-                password: passwordOrNull,
+                password: password,
               )
               .then((_) => doNavigate())
               .catchError((_) => doNavigate());
           return;
-        }
-        if (state is AuthSmsOtpSent) {
-          if (_otpDialogOpen) return;
-          _otpDialogOpen = true;
-
-          final phone = state.phone;
-          showDialog<void>(
-            context: context,
-            barrierDismissible: false,
-            builder: (dialogContext) {
-              final otpController = TextEditingController();
-              return AlertDialog(
-                title: const Text('Код из SMS'),
-                content: TextField(
-                  controller: otpController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    hintText: 'Введите код',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogContext),
-                    child: const Text('Отмена'),
-                  ),
-                  FilledButton(
-                    onPressed: () {
-                      final token = otpController.text.trim();
-                      if (token.isEmpty || token.length < 4) {
-                        ScaffoldMessenger.of(dialogContext).showSnackBar(
-                          const SnackBar(
-                            content: Text('Введите код из SMS.'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                        return;
-                      }
-                      dialogContext.read<AuthBloc>().add(
-                            AuthVerifySmsOtpRequested(
-                              phone: phone,
-                              token: token,
-                            ),
-                          );
-                    },
-                    child: const Text('Проверить'),
-                  ),
-                ],
-              );
-            },
-          ).whenComplete(() {
-            if (mounted) {
-              _otpDialogOpen = false;
-            }
-          });
         }
         if (state is AuthError) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(state.message),
               backgroundColor: Colors.black87,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        if (state is AuthPasswordResetSent) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Ссылка для восстановления отправлена на email.'),
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -412,139 +278,42 @@ class _LoginPageState extends State<LoginPage>
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 26),
-                _OAuthButton(
-                  icon: Icons.apple_rounded,
-                  label: 'Продолжить через Apple',
-                  onPressed: loading
-                      ? null
-                      : () => context
-                          .read<AuthBloc>()
-                          .add(const AuthSignInWithAppleRequested()),
-                ),
-                const SizedBox(height: 18),
-                Row(
-                  children: [
-                    const Expanded(
-                      child: Divider(
-                        color: Color(0xFFE6E7EC),
-                        height: 1,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(
-                        'или',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: subtitleColor,
-                        ),
-                      ),
-                    ),
-                    const Expanded(
-                      child: Divider(
-                        color: Color(0xFFE6E7EC),
-                        height: 1,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () => setState(() => _isPhoneLogin = false),
-                        child: Text(
-                          'Email',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: _isPhoneLogin ? FontWeight.w500 : FontWeight.w700,
-                            color: _isPhoneLogin ? subtitleColor : const Color(0xFF1A1A1E),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: TextButton(
-                        onPressed: () => setState(() => _isPhoneLogin = true),
-                        child: Text(
-                          'Телефон',
-                          style: GoogleFonts.poppins(
-                            fontSize: 14,
-                            fontWeight: _isPhoneLogin ? FontWeight.w700 : FontWeight.w500,
-                            color: _isPhoneLogin ? const Color(0xFF1A1A1E) : subtitleColor,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 36),
                 _NeonTextField(
                   controller: _emailController,
                   focusNode: _emailFocus,
                   isFocused: _emailFocus.hasFocus,
-                  hint: _isPhoneLogin ? 'Телефон' : 'Email',
-                  keyboardType:
-                      _isPhoneLogin ? TextInputType.phone : TextInputType.emailAddress,
-                  borderColor: _isPhoneLogin ? _NeonColors.teal : _NeonColors.cyan,
+                  hint: 'Email',
+                  keyboardType: TextInputType.emailAddress,
+                  borderColor: _NeonColors.cyan,
                   lightSurface: true,
                   validator: (v) {
-                    if (v == null || v.trim().isEmpty) {
-                      return _isPhoneLogin ? 'Введите телефон' : 'Введите email';
-                    }
-                    final value = v.trim();
-                    if (_isPhoneLogin) {
-                      final phoneRe = RegExp(r'^\+?[0-9]{7,15}$');
-                      if (!phoneRe.hasMatch(value)) {
-                        return 'Формат: +79990001122';
-                      }
-                      return null;
-                    }
-                    if (!value.contains('@')) return 'Некорректный email';
+                    if (v == null || v.trim().isEmpty) return 'Введите email';
+                    if (!v.contains('@')) return 'Некорректный email';
                     return null;
                   },
                 ),
-                const SizedBox(height: 16),
-                if (!_isPhoneLogin) ...[
-                  _NeonTextField(
-                    controller: _passwordController,
-                    focusNode: _passwordFocus,
-                    isFocused: _passwordFocus.hasFocus,
-                    hint: 'Пароль',
-                    obscureText: _obscurePassword,
-                    borderColor: _NeonColors.pink,
-                    lightSurface: true,
-                    toggleObscure: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
-                    validator: (v) =>
-                        (v == null || v.isEmpty) ? 'Введите пароль' : null,
-                  ),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: loading ? null : _showForgotPasswordDialog,
-                      child: Text(
-                        'Забыли пароль?',
-                        style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: const Color(0xFF4B4BFF),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 28),
+                const SizedBox(height: 20),
+                _NeonTextField(
+                  controller: _passwordController,
+                  focusNode: _passwordFocus,
+                  isFocused: _passwordFocus.hasFocus,
+                  hint: 'Пароль',
+                  obscureText: _obscurePassword,
+                  borderColor: _NeonColors.pink,
+                  lightSurface: true,
+                  toggleObscure: () =>
+                      setState(() => _obscurePassword = !_obscurePassword),
+                  validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Введите пароль' : null,
+                ),
+                const SizedBox(height: 40),
                 _NeonLoginButton(
                   scaleAnimation: _scaleAnimation,
                   onTapDown: () => _scaleController.forward(),
                   onTapUp: () => _scaleController.reverse(),
                   onTapCancel: () => _scaleController.reverse(),
                   onPressed: loading ? null : _submit,
-                  label: _isPhoneLogin ? 'Получить код' : 'Войти',
                   loading: loading,
                 ),
                 const SizedBox(height: 24),
@@ -760,138 +529,6 @@ class _LoginPageState extends State<LoginPage>
     return Positioned.fill(
       child: CustomPaint(
         painter: _NeonWavesPainter(),
-      ),
-    );
-  }
-}
-
-/// Bottom sheet: непрозрачная панель выбора темы — всё чётко видно
-class _ThemeBottomSheet extends StatelessWidget {
-  const _ThemeBottomSheet({
-    required this.currentIndex,
-    required this.onSelect,
-  });
-
-  final int currentIndex;
-  final ValueChanged<int> onSelect;
-
-  static final List<(String label, List<Color> colors)> _options = [
-    ('Neon', LoginThemePresets.neon),
-    ('Обычный', LoginThemePresets.ordinary),
-    ('Синий градиент', LoginThemePresets.blue),
-    ('Pink', LoginThemePresets.pink),
-    ('Purple', LoginThemePresets.purple),
-    ('Dark', LoginThemePresets.dark),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF252530),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: const Color(0xFF6B6B80),
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'Тема',
-            style: GoogleFonts.poppins(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Выберите фон экрана входа',
-            style: GoogleFonts.poppins(
-              fontSize: 15,
-              color: Color(0xFFB0B0C0),
-            ),
-          ),
-          const SizedBox(height: 24),
-          ...List.generate(_options.length, (index) {
-            final selected = index == currentIndex;
-            final option = _options[index];
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Material(
-                color: selected ? const Color(0xFF3A3A4A) : const Color(0xFF2E2E3A),
-                borderRadius: BorderRadius.circular(14),
-                child: InkWell(
-                  onTap: () => onSelect(index),
-                  borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 18,
-                    ),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFF6C9EFF)
-                            : const Color(0xFF404055),
-                        width: selected ? 2 : 1,
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(12),
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: option.$2,
-                            ),
-                            border: Border.all(
-                              color: const Color(0xFF505065),
-                              width: 1,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 18),
-                        Expanded(
-                          child: Text(
-                            option.$1,
-                            style: GoogleFonts.poppins(
-                              fontSize: 17,
-                              fontWeight: selected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                        if (selected)
-                          const Icon(
-                            Icons.check_circle_rounded,
-                            color: Color(0xFF6C9EFF),
-                            size: 26,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ],
       ),
     );
   }
@@ -1121,7 +758,6 @@ class _NeonLoginButton extends StatelessWidget {
     required this.onTapUp,
     required this.onTapCancel,
     required this.onPressed,
-    this.label = 'Войти',
     required this.loading,
   });
 
@@ -1130,7 +766,6 @@ class _NeonLoginButton extends StatelessWidget {
   final VoidCallback onTapUp;
   final VoidCallback onTapCancel;
   final VoidCallback? onPressed;
-  final String label;
   final bool loading;
 
   static const _radius = 32.0;
@@ -1149,7 +784,6 @@ class _NeonLoginButton extends StatelessWidget {
         onTapDown: (_) => onTapDown(),
         onTapUp: (_) => onTapUp(),
         onTapCancel: onTapCancel,
-        onTap: onPressed == null ? null : () => onPressed!(),
         child: Container(
           height: 58,
           decoration: BoxDecoration(
@@ -1196,7 +830,7 @@ class _NeonLoginButton extends StatelessWidget {
                         ),
                       )
                     : Text(
-                        label,
+                        'Войти',
                         style: GoogleFonts.poppins(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
@@ -1206,47 +840,6 @@ class _NeonLoginButton extends StatelessWidget {
                       ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Кнопка OAuth (Apple/Google) в стиле “современных” приложений.
-class _OAuthButton extends StatelessWidget {
-  const _OAuthButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 54,
-      child: OutlinedButton.icon(
-        style: OutlinedButton.styleFrom(
-          backgroundColor: Colors.white.withValues(alpha: 0.9),
-          foregroundColor: Colors.black87,
-          side: BorderSide(color: const Color(0xFFE6E7EC), width: 1),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-        ),
-        onPressed: onPressed,
-        icon: Icon(icon, size: 20),
-        label: Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
           ),
         ),
       ),

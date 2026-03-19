@@ -265,18 +265,26 @@ class _AddStoryPageState extends State<AddStoryPage> {
         alsoToProfile = choice == true;
       }
 
-      await context.read<StoriesRepository>().addStory(
+      final storiesRepository = context.read<StoriesRepository>();
+      await storiesRepository.addStory(
             userId: authState.user.id,
             imageUrl: imageUrl,
             videoUrl: videoUrl,
             caption: _captionController.text.trim().isEmpty ? null : _captionController.text.trim(),
           );
+      final ownStories = await storiesRepository.getStoriesByUser(authState.user.id);
+      if (ownStories.isEmpty) {
+        throw Exception(
+          'История не найдена после сохранения. Проверьте таблицу stories и политики select.',
+        );
+      }
 
       if (alsoToProfile && videoUrl != null && mounted) {
         await context.read<PostRepository>().createPost(
               userId: authState.user.id,
               videoUrl: videoUrl,
               videoDurationSeconds: _videoDurationSeconds,
+              kind: 'publication',
             );
       }
       if (!mounted) return;
@@ -399,7 +407,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
                           border: Border.all(color: Colors.grey.shade400),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
+                              color: Colors.black.withValues(alpha: 0.2),
                               blurRadius: 8,
                               offset: const Offset(0, 2),
                             ),

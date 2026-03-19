@@ -137,23 +137,40 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         color: ThemedContentSurface.profileTextPrimary,
                       ),
                 ),
-                RadioListTile<String?>(
-                  value: 'male',
+                RadioGroup<String?>(
                   groupValue: _gender,
-                  title: const Text('Мужской'),
                   onChanged: (v) => setState(() => _gender = v),
-                ),
-                RadioListTile<String?>(
-                  value: 'female',
-                  groupValue: _gender,
-                  title: const Text('Женский'),
-                  onChanged: (v) => setState(() => _gender = v),
-                ),
-                RadioListTile<String?>(
-                  value: null,
-                  groupValue: _gender,
-                  title: const Text('Не указывать'),
-                  onChanged: (v) => setState(() => _gender = null),
+                  child: Column(
+                    children: [
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        minLeadingWidth: 0,
+                        horizontalTitleGap: 0,
+                        leading: const Radio<String?>(value: 'male'),
+                        title: const Text('Мужской'),
+                        onTap: () => setState(() => _gender = 'male'),
+                      ),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        minLeadingWidth: 0,
+                        horizontalTitleGap: 0,
+                        leading: const Radio<String?>(value: 'female'),
+                        title: const Text('Женский'),
+                        onTap: () => setState(() => _gender = 'female'),
+                      ),
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        minLeadingWidth: 0,
+                        horizontalTitleGap: 0,
+                        leading: const Radio<String?>(value: null),
+                        title: const Text('Не указывать'),
+                        onTap: () => setState(() => _gender = null),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 24),
                 FilledButton(

@@ -4,6 +4,7 @@ class PostEntity extends Equatable {
   const PostEntity({
     required this.id,
     required this.userId,
+    this.kind = 'news',
     this.imageUrl = '',
     this.caption = '',
     this.videoUrl,
@@ -22,6 +23,7 @@ class PostEntity extends Equatable {
 
   final String id;
   final String userId;
+  final String kind;
   final String imageUrl;
   final String caption;
   final String? videoUrl;
@@ -40,6 +42,7 @@ class PostEntity extends Equatable {
   PostEntity copyWith({
     String? id,
     String? userId,
+    String? kind,
     String? imageUrl,
     String? caption,
     String? videoUrl,
@@ -60,6 +63,7 @@ class PostEntity extends Equatable {
     return PostEntity(
       id: id ?? this.id,
       userId: userId ?? this.userId,
+      kind: kind ?? this.kind,
       imageUrl: clearImage ? '' : (imageUrl ?? this.imageUrl),
       caption: caption ?? this.caption,
       videoUrl: clearVideo ? null : (videoUrl ?? this.videoUrl),
@@ -81,6 +85,7 @@ class PostEntity extends Equatable {
   List<Object?> get props => [
         id,
         userId,
+        kind,
         imageUrl,
         caption,
         videoUrl,
