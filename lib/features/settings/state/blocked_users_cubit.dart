@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../domain/entities/blocked_user_entity.dart';
@@ -99,7 +100,7 @@ class BlockedUsersCubit extends Cubit<BlockedUsersState> {
       );
     } catch (e) {
       if (localVersion != _requestVersion) return;
-      emit(BlockedUsersFailure(e.toString()));
+      emit(BlockedUsersFailure(_humanizeBlockedUsersError(e)));
     }
   }
 
@@ -131,9 +132,12 @@ class BlockedUsersCubit extends Cubit<BlockedUsersState> {
           isLoadingMore: false,
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (localVersion != _requestVersion) return;
+      // Не ломаем список полностью при ошибке подкачки.
       emit(current.copyWith(isLoadingMore: false));
+      // Можно добавить лог/телеметрию при необходимости.
+      debugPrint('Blocked users loadMore error: $e');
     }
   }
 
@@ -151,8 +155,18 @@ class BlockedUsersCubit extends Cubit<BlockedUsersState> {
       await loadInitial();
     } catch (e) {
       emit(current.copyWith(unblockingUserId: null));
-      emit(BlockedUsersFailure(e.toString()));
+      emit(BlockedUsersFailure(_humanizeBlockedUsersError(e)));
     }
   }
+}
+
+String _humanizeBlockedUsersError(Object e) {
+  final msg = e.toString();
+  // Supabase/PostgREST error when table does not exist.
+  if (msg.contains('PGRST205') || msg.contains("blocked_users") && msg.contains('Not Found')) {
+    return 'В базе не найдена таблица `blocked_users`. Выполни миграцию из `supabase/schema.sql` '
+        '(блок “Blocked users list”), затем обнови приложение.';
+  }
+  return msg;
 }
 
