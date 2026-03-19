@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../core/theme/themed_content_surface.dart';
 import '../widgets/settings_expandable_section.dart';
@@ -10,25 +11,41 @@ import '../widgets/settings_item_tile.dart';
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
-  static const String _privacyPolicyUrl =
-      'https://abdrasilov25tech.github.io/tmr_tau/site/';
-  static const String _termsUrl = 'https://example.com/terms';
   static const String _supportEmail = 'beksultanbekmurzaev75@gmail.com';
 
-  Future<void> _openUrlInAppOrExternal(BuildContext context, String url) async {
-    final uri = Uri.tryParse(url);
-    if (uri == null) return;
-
-    // Основной сценарий: открываем в приложении.
-    final ok = await launchUrl(
-      uri,
-      mode: LaunchMode.inAppWebView,
+  Future<void> _showContactsDialog(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        title: const Text('Контакты'),
+        content: Text(_supportEmail),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(),
+            child: const Text('Закрыть'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: _supportEmail));
+              if (!context.mounted) return;
+              Navigator.of(dCtx).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Email скопирован')),
+              );
+            },
+            child: const Text('Скопировать'),
+          ),
+          FilledButton.tonal(
+            onPressed: () async {
+              final uri = Uri.parse('mailto:$_supportEmail');
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+              if (context.mounted) Navigator.of(dCtx).pop();
+            },
+            child: const Text('Написать'),
+          ),
+        ],
+      ),
     );
-
-    // Если in-app webview недоступен — открываем в браузере.
-    if (!ok && context.mounted) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
   }
 
   @override
@@ -164,22 +181,19 @@ class SettingsPage extends StatelessWidget {
                 title: 'Политика конфиденциальности',
                 icon: Icons.privacy_tip,
                 subtitle: 'Открыть документ',
-                onTap: () => _openUrlInAppOrExternal(context, _privacyPolicyUrl),
+                onTap: () => context.push('/profile/settings/privacy-policy'),
               ),
               SettingsItemTile(
                 title: 'Пользовательское соглашение',
                 icon: Icons.article_outlined,
                 subtitle: 'Открыть условия',
-                onTap: () => _openUrlInAppOrExternal(context, _termsUrl),
+                onTap: () => context.push('/profile/settings/terms'),
               ),
               SettingsItemTile(
                 title: 'Контакты',
                 icon: Icons.mail_outline_rounded,
                 subtitle: _supportEmail,
-                onTap: () => launchUrl(
-                  Uri.parse('mailto:$_supportEmail'),
-                  mode: LaunchMode.externalApplication,
-                ),
+                onTap: () => _showContactsDialog(context),
               ),
             ],
           ),

@@ -7,6 +7,7 @@ import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
@@ -15,6 +16,7 @@ import '../../../product/domain/entities/product_entity.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
 import '../bloc/profile_bloc.dart';
+import '../../../settings/data/repositories/settings_repository_impl.dart';
 
 class SellerProfilePage extends StatelessWidget {
   const SellerProfilePage({super.key, required this.sellerId});
@@ -66,21 +68,26 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   int _tabIndex = 0;
   List<PostEntity> _publicationPosts = const [];
   bool _loadingPublications = true;
+  String? _currentUserId;
+  bool _checkingBlocked = false;
+  bool _isBlocked = false;
 
   @override
   void initState() {
     super.initState();
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) {
+      _currentUserId = authState.user.id;
+    }
     _loadPublications();
+    _checkBlockedState();
   }
 
   Future<void> _loadPublications() async {
-    final authState = context.read<AuthBloc>().state;
-    final currentUserId =
-        authState is AuthAuthenticated ? authState.user.id : null;
     try {
       final posts = await context.read<PostRepository>().getPostsByUser(
             widget.profile.id,
-            currentUserId: currentUserId,
+            currentUserId: _currentUserId,
           );
       if (!mounted) return;
       setState(() {
@@ -92,6 +99,66 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loadingPublications = false);
+    }
+  }
+
+  Future<void> _checkBlockedState() async {
+    if (_currentUserId == null || _currentUserId == widget.profile.id) return;
+    setState(() => _checkingBlocked = true);
+    try {
+      final res = await Supabase.instance.client
+          .from('blocked_users')
+          .select('blocked_user_id')
+          .eq('blocker_id', _currentUserId!)
+          .eq('blocked_user_id', widget.profile.id)
+          .maybeSingle();
+
+      if (!mounted) return;
+      setState(() => _isBlocked = res != null);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isBlocked = false);
+    } finally {
+      if (!mounted) return;
+      setState(() => _checkingBlocked = false);
+    }
+  }
+
+  Future<void> _toggleBlock() async {
+    if (_currentUserId == null || _currentUserId == widget.profile.id) return;
+    if (_checkingBlocked) return;
+    setState(() => _checkingBlocked = true);
+
+    final repo = SettingsRepositoryImpl(Supabase.instance.client);
+    try {
+      if (_isBlocked) {
+        await repo.unblockUser(
+          blockerId: _currentUserId!,
+          blockedUserId: widget.profile.id,
+        );
+      } else {
+        await repo.blockUser(
+          blockerId: _currentUserId!,
+          blockedUserId: widget.profile.id,
+        );
+      }
+
+      await _checkBlockedState();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_isBlocked ? 'Пользователь разблокирован' : 'Пользователь заблокирован'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось изменить блокировку: $e')),
+      );
+      await _checkBlockedState();
+    } finally {
+      if (!mounted) return;
+      setState(() => _checkingBlocked = false);
     }
   }
 
@@ -206,8 +273,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                     ),
                   ],
                 ),
-                if (context.read<AuthBloc>().state is AuthAuthenticated &&
-                    (context.read<AuthBloc>().state as AuthAuthenticated).user.id != profile.id) ...[
+                if (_currentUserId != null && _currentUserId != profile.id) ...[
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -235,6 +301,26 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _checkingBlocked ? null : _toggleBlock,
+                    icon: Icon(
+                      _isBlocked ? Icons.block : Icons.block_outlined,
+                      color: _isBlocked ? Colors.redAccent : null,
+                    ),
+                    label: Text(_isBlocked ? 'Разблокировать' : 'Заблокировать'),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                        color: _isBlocked ? Colors.redAccent : Colors.grey.shade400,
+                      ),
+                      foregroundColor:
+                          _isBlocked ? Colors.redAccent : null,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
                   ),
                 ],
                   ],
