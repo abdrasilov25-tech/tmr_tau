@@ -22,10 +22,14 @@ class PostModel extends PostEntity {
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
+    final rawKind = (json['kind'] as String?)?.trim().toLowerCase() ?? '';
+    final safeKind = rawKind == 'news'
+        ? 'news'
+        : 'publication';
     return PostModel(
       id: json['id'] as String,
       userId: json['user_id'] as String,
-      kind: (json['kind'] as String?) ?? 'news',
+      kind: safeKind,
       imageUrl: (json['image_url'] as String?) ?? '',
       caption: (json['caption'] as String?) ?? '',
       videoUrl: json['video_url'] as String?,

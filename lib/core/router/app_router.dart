@@ -12,6 +12,7 @@ import '../../features/feed/presentation/pages/favorites_screen.dart';
 import '../../features/feed/presentation/pages/feed_page.dart';
 import '../../features/feed/presentation/pages/search_page.dart';
 import '../../features/news/presentation/pages/news_feed_page.dart';
+import '../../features/notifications/presentation/pages/notifications_activity_page.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
 import '../../features/post/domain/entities/post_entity.dart';
 import '../../features/comments/domain/repositories/comments_repository.dart';
@@ -182,14 +183,32 @@ class AppRouter {
         path: '/post/:id',
         builder: (context, state) {
           final post = state.extra as PostEntity?;
-          if (post == null) {
-            return const Scaffold(
-              body: Center(child: Text('Новость не найдена')),
+          if (post != null) {
+            return PostDetailPage(
+              post: post,
+              postRepository: postRepository,
             );
           }
-          return PostDetailPage(
-            post: post,
-            postRepository: postRepository,
+          final id = state.pathParameters['id']!;
+          return FutureBuilder<PostEntity?>(
+            future: postRepository.getPostById(id),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Scaffold(
+                  body: Center(child: CircularProgressIndicator()),
+                );
+              }
+              final fetched = snapshot.data;
+              if (fetched == null) {
+                return const Scaffold(
+                  body: Center(child: Text('Новость не найдена')),
+                );
+              }
+              return PostDetailPage(
+                post: fetched,
+                postRepository: postRepository,
+              );
+            },
           );
         },
         routes: [
@@ -218,6 +237,10 @@ class AppRouter {
       GoRoute(
         path: '/my-reports',
         builder: (context, state) => const MyReportsPage(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        builder: (context, state) => const NotificationsActivityPage(),
       ),
       GoRoute(
         path: '/profile/settings',
@@ -357,7 +380,6 @@ class AppRouter {
                   GoRoute(
                     path: 'search',
                     builder: (context, state) => SearchPage(
-                      postRepository: postRepository,
                       productRepository: productRepository,
                     ),
                   ),
@@ -490,7 +512,7 @@ class _MainShell extends StatelessWidget {
             NavigationDestination(
               icon: Icon(Icons.home_outlined, size: 26),
               selectedIcon: Icon(Icons.home_rounded, size: 26),
-              label: 'Лента',
+              label: 'Публикации',
             ),
             NavigationDestination(
               icon: Icon(Icons.search_outlined, size: 26),

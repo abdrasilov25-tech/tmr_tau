@@ -8,9 +8,9 @@ import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import '../../../../core/accounts/account_manager.dart';
 import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/multi_account_storage.dart';
+import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
-import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
@@ -20,6 +20,9 @@ import '../widgets/account_switcher_token_sheet.dart';
 import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/pages/login_result.dart';
+import '../../../stories/domain/entities/story_group_entity.dart';
+import '../../../stories/domain/repositories/stories_repository.dart';
+import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../product/domain/entities/product_entity.dart';
@@ -43,6 +46,10 @@ class _MyProfilePageState extends State<MyProfilePage> {
   late int _tabIndex;
   bool _updatingAvatar = false;
   bool _isSwitchingAccount = false;
+  bool _autoReloadTriggeredForPublications = false;
+  bool _storiesLoading = true;
+  List<StoryGroupEntity> _storyGroups = const [];
+  Map<String, bool> _newStoriesByUserId = const {};
 
   @override
   void initState() {
@@ -123,14 +130,25 @@ class _MyProfilePageState extends State<MyProfilePage> {
       final posts =
           await context.read<PostRepository>().getPostsByUser(uid, currentUserId: uid);
       final newsPosts = posts
-          .where((p) => p.kind == 'news' || p.kind.isEmpty)
+          .where((p) => p.kind.trim().toLowerCase() == 'news')
           .toList(growable: false);
-      final publicationPosts = posts
-          .where((p) => p.kind == 'publication')
+      var publicationPosts = posts
+          .where((p) => p.kind.trim().toLowerCase() == 'publication')
           .toList(growable: false);
+      if (publicationPosts.isEmpty) {
+        final publicationFeed = await context.read<PostRepository>().searchPublicationsByCursor(
+              query: '',
+              limit: 100,
+              currentUserId: uid,
+            );
+        publicationPosts = publicationFeed
+            .where((p) => p.userId == uid)
+            .toList(growable: false);
+      }
       // Подсчитываем актуальное количество подписок через followers.
       final followingUsers = await repo.getFollowingUsers(uid);
       final followingCount = followingUsers.length;
+      await _loadProfileStories(uid);
       if (mounted) {
         setState(() {
           _profile = profile == null
@@ -149,10 +167,82 @@ class _MyProfilePageState extends State<MyProfilePage> {
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
           _loading = false;
+          if (publicationPosts.isNotEmpty) {
+            _autoReloadTriggeredForPublications = false;
+          }
         });
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _loadProfileStories(String uid) async {
+    setState(() => _storiesLoading = true);
+    try {
+      final allGroups = await context.read<StoriesRepository>().getStoriesGroupedByUser();
+      final ownStories = await context.read<StoriesRepository>().getStoriesByUser(uid);
+      final peerIds = <String>{};
+      try {
+        final rows = await supa.Supabase.instance.client
+            .from(SupabaseConstants.messagesTable)
+            .select('sender_id, receiver_id')
+            .or('sender_id.eq.$uid,receiver_id.eq.$uid');
+        for (final row in (rows as List<dynamic>)) {
+          final map = row as Map<String, dynamic>;
+          final senderId = map['sender_id'] as String?;
+          final receiverId = map['receiver_id'] as String?;
+          if (senderId == null || receiverId == null) continue;
+          if (senderId == uid) {
+            peerIds.add(receiverId);
+          } else if (receiverId == uid) {
+            peerIds.add(senderId);
+          }
+        }
+      } catch (_) {
+        // Даже если чат-список недоступен, собственные сторис все равно покажем.
+      }
+      var groups = allGroups
+          .where((g) => g.stories.isNotEmpty)
+          .where((g) => g.userId == uid || peerIds.contains(g.userId))
+          .toList(growable: false);
+      final aliveOwnStories = ownStories
+          .where((s) => s.expiresAt.isAfter(DateTime.now()))
+          .toList(growable: false);
+      if (aliveOwnStories.isNotEmpty &&
+          groups.every((g) => g.userId != uid)) {
+        groups = [
+          StoryGroupEntity(
+            userId: uid,
+            stories: aliveOwnStories,
+            userName: context.read<AuthBloc>().state is AuthAuthenticated
+                ? (context.read<AuthBloc>().state as AuthAuthenticated).user.username ??
+                    (context.read<AuthBloc>().state as AuthAuthenticated).user.name ??
+                    (context.read<AuthBloc>().state as AuthAuthenticated).user.email
+                : 'Вы',
+            userAvatarUrl: context.read<AuthBloc>().state is AuthAuthenticated
+                ? (context.read<AuthBloc>().state as AuthAuthenticated).user.avatarUrl
+                : null,
+          ),
+          ...groups,
+        ];
+      }
+      final seenStorage = context.read<ChatStoryListStorage>();
+      final nextMap = <String, bool>{};
+      for (final g in groups) {
+        final latestStoryAt = g.firstStory.createdAt;
+        final lastSeenAt = seenStorage.getLastSeenAt(g.userId);
+        nextMap[g.userId] = lastSeenAt == null || latestStoryAt.isAfter(lastSeenAt);
+      }
+      if (!mounted) return;
+      setState(() {
+        _storyGroups = groups;
+        _newStoriesByUserId = nextMap;
+        _storiesLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _storiesLoading = false);
     }
   }
 
@@ -210,42 +300,87 @@ class _MyProfilePageState extends State<MyProfilePage> {
     );
   }
 
-  void _showStoryChoice() {
+  void _showQuickCreateMenu() {
     final state = context.read<AuthBloc>().state;
     if (state is! AuthAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы добавить историю')),
+        const SnackBar(content: Text('Войдите, чтобы создавать публикации')),
       );
       return;
     }
-    showModalBottomSheet<void>(
+    showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) => AddChoiceSheet(
-        onProuvnut: () {
-          Navigator.pop(sheetContext);
-          context.push('/add-publication');
-        },
-        onStory: () async {
-          Navigator.pop(sheetContext);
-          await context.push('/add-story');
-        },
-        onVideo: () async {
-          Navigator.pop(sheetContext);
-          await context.push('/add-publication?video=1');
-        },
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            const Text(
+              'Создать',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.person_outline_rounded),
+              title: const Text('Прувнуть в ленту'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push('/add-publication');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.history_rounded),
+              title: const Text('Сторис'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push('/add-story');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Видео'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push('/add-publication?video=1');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: const Text('Новость'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push('/add-news');
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_loading &&
+        _tabIndex == 2 &&
+        _publicationPosts.isEmpty &&
+        !_autoReloadTriggeredForPublications) {
+      _autoReloadTriggeredForPublications = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _load();
+      });
+    }
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.add_circle_outline),
-          onPressed: _showStoryChoice,
+          onPressed: _showQuickCreateMenu,
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -259,34 +394,34 @@ class _MyProfilePageState extends State<MyProfilePage> {
             builder: (context) {
               final state = context.read<AuthBloc>().state;
               if (state is! AuthAuthenticated) {
-                return Text(
+                return const Text(
                   'Профиль',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: Colors.black87,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w700),
                 );
               }
               final user = state.user;
-              final primary = (user.username != null &&
-                      user.username!.isNotEmpty)
+              final title = (user.username != null && user.username!.isNotEmpty)
                   ? user.username!
                   : user.email;
-              return Text(
-                primary,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+              return Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
                       color: Colors.black87,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
+                  ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.keyboard_arrow_down_rounded, size: 20),
+                ],
               );
             },
           ),
         ),
+        centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_box_outlined, size: 28),
-            onPressed: () => _showAddChoice(),
-          ),
           IconButton(
             icon: const Icon(Icons.menu_rounded, size: 26),
             onPressed: () {
@@ -324,6 +459,10 @@ class _MyProfilePageState extends State<MyProfilePage> {
           if (_loading) {
             return const Center(child: CircularProgressIndicator());
           }
+          final ownGroup = _storyGroups.cast<StoryGroupEntity?>().firstWhere(
+                (g) => g?.userId == user.id,
+                orElse: () => null,
+              );
           return _ProfileContent(
             user: user,
             profile: _profile,
@@ -335,6 +474,31 @@ class _MyProfilePageState extends State<MyProfilePage> {
             onAddTap: _showAddChoice,
             onAvatarTap: _changeAvatar,
             updatingAvatar: _updatingAvatar,
+            ownStoryGroup: ownGroup,
+            onOpenOwnStory: ownGroup == null
+                ? null
+                : () async {
+                    await context.push(
+                      '/stories',
+                      extra: StoryViewerArgs(groups: [ownGroup], initialGroupIndex: 0),
+                    );
+                    if (!mounted) return;
+                    try {
+                      final latestStoryAt = ownGroup.firstStory.createdAt;
+                      await context
+                          .read<ChatStoryListStorage>()
+                          .setLastSeenAt(ownGroup.userId, latestStoryAt);
+                      if (!mounted) return;
+                      setState(() {
+                        _newStoriesByUserId = {
+                          ..._newStoriesByUserId,
+                          ownGroup.userId: false,
+                        };
+                      });
+                    } catch (_) {}
+                    if (!mounted) return;
+                    await _loadProfileStories(user.id);
+                  },
           );
         },
         ),
@@ -671,6 +835,8 @@ class _ProfileContent extends StatelessWidget {
     required this.onAddTap,
     required this.onAvatarTap,
     required this.updatingAvatar,
+    required this.ownStoryGroup,
+    required this.onOpenOwnStory,
   });
 
   final AppUser user;
@@ -683,6 +849,8 @@ class _ProfileContent extends StatelessWidget {
   final VoidCallback onAddTap;
   final VoidCallback onAvatarTap;
   final bool updatingAvatar;
+  final StoryGroupEntity? ownStoryGroup;
+  final Future<void> Function()? onOpenOwnStory;
 
   int get _publicationsCount =>
       (profile?.products.length ?? 0) + newsPosts.length + publicationPosts.length;
@@ -744,12 +912,31 @@ class _ProfileContent extends StatelessWidget {
                                     ),
                                     child: Container(
                                       padding: const EdgeInsets.all(3),
-                                      decoration: const BoxDecoration(
-                                        color: Colors.white,
+                                      decoration: BoxDecoration(
                                         shape: BoxShape.circle,
+                                        gradient: ownStoryGroup != null
+                                            ? const LinearGradient(
+                                                begin: Alignment.topLeft,
+                                                end: Alignment.bottomRight,
+                                                colors: [
+                                                  Color(0xFFFEDA75),
+                                                  Color(0xFFFA7E1E),
+                                                  Color(0xFFD62976),
+                                                  Color(0xFF962FBF),
+                                                  Color(0xFF4F5BD5),
+                                                ],
+                                              )
+                                            : null,
+                                        color: ownStoryGroup == null
+                                            ? Colors.white
+                                            : null,
                                       ),
                                       child: GestureDetector(
-                                        onTap: () {
+                                        onTap: () async {
+                                          if (onOpenOwnStory != null) {
+                                            await onOpenOwnStory!.call();
+                                            return;
+                                          }
                                           final imageUrl =
                                               user.avatarUrl ?? profile?.avatarUrl;
                                           if (imageUrl == null ||

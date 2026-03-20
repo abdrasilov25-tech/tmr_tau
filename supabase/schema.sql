@@ -15,6 +15,12 @@ create table if not exists public.users (
 );
 
 -- If table already exists, add column: alter table public.users add column if not exists is_verified boolean default false;
+-- Backfill missing rows in public.users from auth.users (safe on repeated runs).
+insert into public.users (id, name)
+select au.id, coalesce(nullif(au.email, ''), 'Пользователь')
+from auth.users au
+left join public.users u on u.id = au.id
+where u.id is null;
 
 -- ============== CATEGORIES (категории и подкатегории товаров) ==============
 create table if not exists public.categories (
@@ -181,6 +187,54 @@ alter table public.posts add column if not exists kind text not null default 'ne
 alter table public.posts add column if not exists comments_count int default 0;
 alter table public.posts add column if not exists dislikes_count int default 0;
 alter table public.posts add column if not exists reposts_count int default 0;
+
+-- Нормализация старых данных:
+-- всё, что не `news` и не `publication`, считаем публикацией
+-- (чтобы не смешивать с разделом новостей).
+update public.posts
+set kind = 'publication'
+where kind is null
+   or btrim(kind) = ''
+   or lower(kind) not in ('news', 'publication');
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'posts_kind_allowed_values'
+  ) then
+    alter table public.posts
+      add constraint posts_kind_allowed_values
+      check (kind in ('news', 'publication'));
+  end if;
+end $$;
+
+-- Автонормализация kind при insert/update постов.
+create or replace function public.normalize_post_kind()
+returns trigger
+language plpgsql
+as $$
+begin
+  if lower(trim(coalesce(new.kind, ''))) = 'news' then
+    new.kind := 'news';
+  else
+    new.kind := 'publication';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_normalize_post_kind on public.posts;
+create trigger trg_normalize_post_kind
+before insert or update on public.posts
+for each row execute procedure public.normalize_post_kind();
+
+-- Индексы для быстрых выборок публикаций/новостей и профиля.
+create index if not exists idx_posts_kind_created_at
+  on public.posts (kind, created_at desc);
+create index if not exists idx_posts_user_created_at
+  on public.posts (user_id, created_at desc);
 
 create table if not exists public.post_likes (
   post_id uuid not null references public.posts(id) on delete cascade,

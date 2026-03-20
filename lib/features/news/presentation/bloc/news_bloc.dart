@@ -26,8 +26,11 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
         offset: 0,
         currentUserId: event.currentUserId,
       );
+      final newsOnly = list
+          .where((p) => p.kind.trim().toLowerCase() == 'news')
+          .toList(growable: false);
       if (!isClosed) {
-        emit(NewsSuccess(list, hasMore: list.length >= _pageSize));
+        emit(NewsSuccess(newsOnly, hasMore: list.length >= _pageSize));
       }
     } catch (e) {
       if (!isClosed) emit(NewsFailure(e.toString()));
@@ -47,7 +50,10 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
         offset: offset,
         currentUserId: null,
       );
-      final newList = [...current.posts, ...list];
+      final newsOnly = list
+          .where((p) => p.kind.trim().toLowerCase() == 'news')
+          .toList(growable: false);
+      final newList = [...current.posts, ...newsOnly];
       if (!isClosed) {
         emit(NewsSuccess(
           newList,

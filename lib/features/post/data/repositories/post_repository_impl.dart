@@ -17,12 +17,23 @@ class PostRepositoryImpl implements PostRepository {
     int offset = 0,
     String? currentUserId,
   }) async {
-    final res = await _client
+    var res = await _client
         .from(SupabaseConstants.postsTable)
         .select('*, users!user_id(name, avatar)')
         .order('created_at', ascending: false)
         .range(offset, offset + limit - 1);
-    final list = (res as List).map((e) => _mapPost(e as Map<String, dynamic>)).toList();
+    var list =
+        (res as List).map((e) => _mapPost(e as Map<String, dynamic>)).toList();
+    if (list.isEmpty) {
+      final plainRes = await _client
+          .from(SupabaseConstants.postsTable)
+          .select()
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+      list = (plainRes as List)
+          .map((e) => _mapPost(e as Map<String, dynamic>))
+          .toList();
+    }
     if (currentUserId != null && list.isNotEmpty) {
       final ids = list.map((e) => e.id).toList();
       final likes = await _client
@@ -72,16 +83,26 @@ class PostRepositoryImpl implements PostRepository {
     int offset = 0,
     String? currentUserId,
   }) async {
-    final res = await _client
+    var res = await _client
         .from(SupabaseConstants.postsTable)
         .select('*, users!user_id(name, avatar)')
         .eq('kind', 'news')
         .order('created_at', ascending: false)
         .range(offset, offset + limit - 1);
-
-    final list = (res as List)
+    var list = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
         .toList(growable: false);
+    if (list.isEmpty) {
+      final plainRes = await _client
+          .from(SupabaseConstants.postsTable)
+          .select()
+          .eq('kind', 'news')
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+      list = (plainRes as List)
+          .map((e) => _mapPost(e as Map<String, dynamic>))
+          .toList(growable: false);
+    }
     if (currentUserId == null || list.isEmpty) return list;
 
     final ids = list.map((e) => e.id).toList(growable: false);
@@ -127,12 +148,23 @@ class PostRepositoryImpl implements PostRepository {
 
   @override
   Future<List<PostEntity>> getPostsByUser(String userId, {String? currentUserId}) async {
-    final res = await _client
+    var res = await _client
         .from(SupabaseConstants.postsTable)
         .select('*, users!user_id(name, avatar)')
         .eq('user_id', userId)
         .order('created_at', ascending: false);
-    final list = (res as List).map((e) => _mapPost(e as Map<String, dynamic>)).toList();
+    var list =
+        (res as List).map((e) => _mapPost(e as Map<String, dynamic>)).toList();
+    if (list.isEmpty) {
+      final plainRes = await _client
+          .from(SupabaseConstants.postsTable)
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false);
+      list = (plainRes as List)
+          .map((e) => _mapPost(e as Map<String, dynamic>))
+          .toList();
+    }
     if (currentUserId != null && list.isNotEmpty) {
       final ids = list.map((e) => e.id).toList();
       final likes = await _client
@@ -187,11 +219,14 @@ class PostRepositoryImpl implements PostRepository {
     int videoDurationSeconds = 0,
     String kind = 'news',
   }) async {
+    final normalizedKind = kind.trim().toLowerCase() == 'news'
+        ? 'news'
+        : 'publication';
     final data = <String, dynamic>{
       'user_id': userId,
       'image_url': imageUrl,
       'caption': caption,
-      'kind': kind,
+      'kind': normalizedKind,
     };
     if (videoUrl != null && videoUrl.isNotEmpty) {
       data['video_url'] = videoUrl;
@@ -204,13 +239,13 @@ class PostRepositoryImpl implements PostRepository {
         .single();
     final created = _mapPost(Map<String, dynamic>.from(res as Map));
 
-    if (created.kind == kind) return created;
+    if (created.kind == normalizedKind) return created;
 
     // "Железная" защита от смешивания kind в БД:
     // если запись вернулась с неверным kind — принудительно обновляем и подтверждаем чтением.
     await _client
         .from(SupabaseConstants.postsTable)
-        .update({'kind': kind})
+        .update({'kind': normalizedKind})
         .eq('id', created.id);
 
     final verify = await _client
@@ -220,9 +255,9 @@ class PostRepositoryImpl implements PostRepository {
         .single();
 
     final verified = _mapPost(Map<String, dynamic>.from(verify as Map));
-    if (verified.kind != kind) {
+    if (verified.kind != normalizedKind) {
       throw Exception(
-        'Post kind mismatch after update: expected=$kind, got=${verified.kind}',
+        'Post kind mismatch after update: expected=$normalizedKind, got=${verified.kind}',
       );
     }
     return verified;
@@ -247,6 +282,7 @@ class PostRepositoryImpl implements PostRepository {
         'post_id': postId,
         'user_id': userId,
       });
+      await _createPostLikeNotification(postId: postId, actorId: userId);
     }
   }
 
@@ -338,11 +374,21 @@ class PostRepositoryImpl implements PostRepository {
     }
     try {
       await _client.from(SupabaseConstants.postCommentsTable).insert(data);
+      await _createPostCommentNotification(
+        postId: postId,
+        actorId: userId,
+        text: text,
+      );
     } catch (e) {
       final msg = e.toString().toLowerCase();
       if (data.containsKey('parent_id') && (msg.contains('parent_id') || (msg.contains('column') && msg.contains('exist')))) {
         data.remove('parent_id');
         await _client.from(SupabaseConstants.postCommentsTable).insert(data);
+        await _createPostCommentNotification(
+          postId: postId,
+          actorId: userId,
+          text: text,
+        );
         throw const PostCommentReplyFallbackException();
       } else {
         rethrow;
@@ -606,5 +652,49 @@ class PostRepositoryImpl implements PostRepository {
         .delete()
         .eq('id', commentId)
         .eq('user_id', userId);
+  }
+
+  Future<void> _createPostLikeNotification({
+    required String postId,
+    required String actorId,
+  }) async {
+    final postOwnerId = await _findPostOwnerId(postId);
+    if (postOwnerId == null || postOwnerId == actorId) return;
+    await _client.from(SupabaseConstants.notificationsTable).insert({
+      'user_id': postOwnerId,
+      'actor_id': actorId,
+      'type': 'post_like',
+      'title': 'Новый лайк',
+      'body': 'Вашу публикацию лайкнули [post:$postId]',
+    });
+  }
+
+  Future<void> _createPostCommentNotification({
+    required String postId,
+    required String actorId,
+    required String text,
+  }) async {
+    final postOwnerId = await _findPostOwnerId(postId);
+    if (postOwnerId == null || postOwnerId == actorId) return;
+    final body = text.trim().isEmpty
+        ? 'Новый комментарий к вашей публикации [post:$postId]'
+        : 'Комментарий: ${text.trim()} [post:$postId]';
+    await _client.from(SupabaseConstants.notificationsTable).insert({
+      'user_id': postOwnerId,
+      'actor_id': actorId,
+      'type': 'post_comment',
+      'title': 'Новый комментарий',
+      'body': body,
+    });
+  }
+
+  Future<String?> _findPostOwnerId(String postId) async {
+    final post = await _client
+        .from(SupabaseConstants.postsTable)
+        .select('user_id')
+        .eq('id', postId)
+        .maybeSingle();
+    if (post == null) return null;
+    return (post as Map<String, dynamic>)['user_id'] as String?;
   }
 }
