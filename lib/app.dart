@@ -212,14 +212,11 @@ class _TmrTauAppState extends State<TmrTauApp> {
                   context.read<FeedBloc>().add(FeedLoaded(currentUserId: state.user.id));
                 }
               },
-              child: Container(
-                color: Colors.black,
-                child: MaterialApp.router(
-                  title: 'tmr_tau',
-                  debugShowCheckedModeBanner: false,
-                  theme: AppTheme.light,
-                  routerConfig: _appRouter.router,
-                ),
+              child: MaterialApp.router(
+                title: 'tmr_tau',
+                debugShowCheckedModeBanner: false,
+                theme: AppTheme.light,
+                routerConfig: _appRouter.router,
               ),
             ),
           ),

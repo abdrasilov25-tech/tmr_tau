@@ -92,7 +92,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
       if (!mounted) return;
       setState(() {
         _publicationPosts = posts
-            .where((p) => p.kind == 'publication')
+            .where((p) => p.kind.trim().toLowerCase() == 'publication')
             .toList(growable: false);
         _loadingPublications = false;
       });

@@ -7,8 +7,6 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
-import '../../../post/domain/entities/post_entity.dart';
-import '../../../post/domain/repositories/post_repository.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/product_repository.dart';
 import '../controllers/search_paging_controller.dart';
@@ -16,11 +14,9 @@ import '../controllers/search_paging_controller.dart';
 class SearchPage extends StatefulWidget {
   const SearchPage({
     super.key,
-    required this.postRepository,
     required this.productRepository,
   });
 
-  final PostRepository postRepository;
   final ProductRepository productRepository;
 
   @override
@@ -37,7 +33,6 @@ class _SearchPageState extends State<SearchPage> {
   void initState() {
     super.initState();
     _pagingController = SearchPagingController(
-      postRepository: widget.postRepository,
       productRepository: widget.productRepository,
       currentUserId: _currentUserId,
     );
@@ -104,7 +99,7 @@ class _SearchPageState extends State<SearchPage> {
                   fontSize: 17,
                 ),
             decoration: InputDecoration(
-              hintText: 'Поиск публикаций и товаров',
+              hintText: 'Поиск товаров',
               hintStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontSize: 17,
@@ -143,7 +138,7 @@ class _SearchPageState extends State<SearchPage> {
             return Center(
               child: Text(
                 _queryController.text.trim().isEmpty
-                    ? 'Публикаций и товаров пока нет'
+                    ? 'Товаров пока нет'
                     : 'Ничего не найдено по запросу "${_queryController.text.trim()}"',
                 style: Theme.of(context).textTheme.bodyLarge,
                 textAlign: TextAlign.center,
@@ -161,9 +156,6 @@ class _SearchPageState extends State<SearchPage> {
             itemBuilder: (context, index) {
               if (index >= items.length) return const _BottomSkeletonLoader();
               final item = items[index];
-              if (item is SearchPostResultItem) {
-                return _PostSearchTile(post: item.post);
-              }
               if (item is SearchProductResultItem) {
                 return _ProductSearchTile(product: item.product);
               }
@@ -182,83 +174,6 @@ class _InitialLoading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Center(child: CircularProgressIndicator());
-  }
-}
-
-class _PostSearchTile extends StatelessWidget {
-  const _PostSearchTile({required this.post});
-
-  final PostEntity post;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      child: InkWell(
-        onTap: () => context.push('/post/${post.id}', extra: post),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-              child: Row(
-                children: [
-                  CachedAvatar(
-                    imageUrl: post.userAvatarUrl,
-                    radius: 18,
-                    fallbackText: post.userName,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      post.userName ?? 'Пользователь',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                  ),
-                  Text(
-                    _formatDate(post.createdAt),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-            ),
-            if (post.videoUrl != null && post.videoUrl!.isNotEmpty)
-              Container(
-                height: 180,
-                width: double.infinity,
-                color: Colors.black12,
-                alignment: Alignment.center,
-                child: const Icon(Icons.play_circle_fill_rounded, size: 56),
-              )
-            else if (post.imageUrl.isNotEmpty)
-              SizedBox(
-                height: 180,
-                width: double.infinity,
-                child: CachedProductImage(imageUrl: post.imageUrl),
-              ),
-            if (post.caption.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-                child: Text(
-                  post.caption,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatDate(DateTime value) {
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-    return '$day.$month.${value.year}';
   }
 }
 

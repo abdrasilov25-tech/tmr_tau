@@ -39,13 +39,21 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
   @override
   void initState() {
     super.initState();
-    _currentGroupIndex = widget.initialGroupIndex.clamp(0, widget.groups.length - 1);
+    _currentGroupIndex = _safeInitialGroupIndex();
     _groupPageController = PageController(initialPage: _currentGroupIndex);
     _storyPageControllers = List.generate(
       widget.groups.length,
       (i) => PageController(initialPage: 0),
     );
-    _startTimer();
+    if (widget.groups.isNotEmpty) {
+      _startTimer();
+    }
+  }
+
+  int _safeInitialGroupIndex() {
+    if (widget.groups.isEmpty) return 0;
+    final maxIndex = widget.groups.length - 1;
+    return widget.initialGroupIndex.clamp(0, maxIndex);
   }
 
   @override
@@ -67,6 +75,10 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
   }
 
   void _goNext() {
+    if (widget.groups.isEmpty) {
+      context.pop();
+      return;
+    }
     final group = widget.groups[_currentGroupIndex];
     final storyController = _storyPageControllers[_currentGroupIndex];
     final currentStoryPage = storyController.page?.round() ?? 0;
@@ -98,6 +110,10 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
   }
 
   void _goPrev() {
+    if (widget.groups.isEmpty) {
+      context.pop();
+      return;
+    }
     final storyController = _storyPageControllers[_currentGroupIndex];
     final currentStoryPage = storyController.page?.round() ?? 0;
 
@@ -323,6 +339,24 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
 
   @override
   Widget build(BuildContext context) {
+    if (widget.group.stories.isEmpty) {
+      return const ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Text(
+            'Нет историй',
+            style: TextStyle(color: Colors.white70),
+          ),
+        ),
+      );
+    }
+    final safeIndex = _currentIndex.clamp(0, widget.group.stories.length - 1);
+    if (safeIndex != _currentIndex) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() => _currentIndex = safeIndex);
+      });
+    }
     return Stack(
       fit: StackFit.expand,
       children: [

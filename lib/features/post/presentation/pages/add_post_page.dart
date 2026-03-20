@@ -284,7 +284,7 @@ class _AddPostPageState extends State<AddPostPage> {
         await controller.dispose();
       }
 
-      await postRepository.createPost(
+      final createdPost = await postRepository.createPost(
         userId: userId,
         imageUrl: imageUrl,
         caption: caption,
@@ -297,9 +297,13 @@ class _AddPostPageState extends State<AddPostPage> {
         SnackBar(content: Text(_successMessage)),
       );
       if (_isPublication) {
-        context.go('/home/profile?tab=2');
+        if (Navigator.of(context).canPop()) {
+          Navigator.of(context).pop(createdPost);
+          return;
+        }
+        context.go('/home/feed');
       } else {
-        context.go('/home/profile?tab=1');
+        context.go('/home/news');
       }
     } catch (e, st) {
       if (!mounted) return;

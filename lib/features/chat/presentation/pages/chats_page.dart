@@ -74,6 +74,7 @@ class _ChatsPageState extends State<ChatsPage> {
     final allStoriesGroups = await _storiesRepository.getStoriesGroupedByUser();
     final visibleStoryGroups = allStoriesGroups
         .where((g) => peerIds.contains(g.userId))
+        .where((g) => g.stories.isNotEmpty)
         .toList(growable: false);
 
     final newStoriesByUserId = <String, bool>{};
@@ -369,7 +370,9 @@ class _ChatsPageState extends State<ChatsPage> {
                 Navigator.pop(ctx);
                 await _chatStorage.setArchived(t.peerId, !isArchived);
                 if (!mounted) return;
-                setState(() => _pageFuture = _loadPageData());
+                setState(() {
+                  _pageFuture = _loadPageData();
+                });
               },
             ),
             ListTile(
@@ -391,7 +394,9 @@ class _ChatsPageState extends State<ChatsPage> {
                   await _blockPeer(t.peerId);
                 }
                 if (!mounted) return;
-                setState(() => _pageFuture = _loadPageData());
+                setState(() {
+                  _pageFuture = _loadPageData();
+                });
               },
             ),
             ListTile(
@@ -547,13 +552,16 @@ class _ChatsPageState extends State<ChatsPage> {
                   groups: data.visibleStoryGroups,
                   newStoriesByUserId: data.newStoriesByUserId,
                   onStoryTap: (group) async {
+                    if (group.stories.isEmpty) return;
                     final latestStoryAt = group.firstStory.createdAt;
                     await _storySeenStorage.setLastSeenAt(group.userId, latestStoryAt);
                     if (!mounted) return;
-                    setState(() => _pageFuture = _loadPageData());
+                    setState(() {
+                      _pageFuture = _loadPageData();
+                    });
                     await context.push(
                       '/stories',
-                      extra: StoryViewerArgs(groups: [group]),
+                      extra: StoryViewerArgs(groups: [group], initialGroupIndex: 0),
                     );
                   },
                 ),
@@ -658,13 +666,17 @@ class _ChatsPageState extends State<ChatsPage> {
     final readAt = (t.lastIncomingAt ?? t.lastMessageAt).add(const Duration(milliseconds: 1));
     await _chatStorage.setLastReadAt(t.peerId, readAt);
     if (!mounted) return;
-    setState(() => _pageFuture = _loadPageData());
+    setState(() {
+      _pageFuture = _loadPageData();
+    });
   }
 
   Future<void> _setThreadArchived(_ChatThread t, bool archived) async {
     await _chatStorage.setArchived(t.peerId, archived);
     if (!mounted) return;
-    setState(() => _pageFuture = _loadPageData());
+    setState(() {
+      _pageFuture = _loadPageData();
+    });
   }
 
   Widget _buildThreadList(BuildContext context, List<_ChatThread> threads) {

@@ -5,13 +5,19 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:video_player/video_player.dart';
 
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/storage/chat_story_list_storage.dart';
+import '../../../chat/presentation/widgets/chat_stories_friends_strip.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../stories/domain/entities/story_group_entity.dart';
+import '../../../stories/domain/repositories/stories_repository.dart';
+import '../../../stories/presentation/pages/story_viewer_args.dart';
+import '../../../notifications/domain/repositories/notifications_repository.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 
@@ -39,11 +45,16 @@ class _MainHomePageState extends State<MainHomePage> {
   bool _initialLoading = true;
   bool _isLoadingMore = false;
   bool _hasMore = true;
+  bool _storiesLoading = true;
+  bool _storyRetryScheduled = false;
   int _offset = 0;
 
   final List<PostEntity> _posts = [];
+  List<StoryGroupEntity> _storyGroups = const [];
+  Map<String, bool> _newStoriesByUserId = const {};
 
   String? _currentUserId;
+  String? _loadedUserId;
 
   @override
   void initState() {
@@ -56,6 +67,7 @@ class _MainHomePageState extends State<MainHomePage> {
 
     debugPrint('[MainHomePage] opened (currentUserId=${_currentUserId ?? 'null'})');
     _loadInitial();
+    _loadStories();
   }
 
   @override
@@ -79,26 +91,89 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   Future<void> _loadInitial() async {
+    final authState = context.read<AuthBloc>().state;
+    final activeUserId =
+        authState is AuthAuthenticated ? authState.user.id : null;
+    _currentUserId = activeUserId;
+    _loadedUserId = _currentUserId;
     setState(() => _initialLoading = true);
     _offset = 0;
     _hasMore = true;
     _posts.clear();
     try {
       final repo = context.read<PostRepository>();
-      final list = await repo.getFeedPosts(
+      if (_currentUserId != null) {
+        final myPosts = await repo.getPostsByUser(
+          _currentUserId!,
+          currentUserId: _currentUserId,
+        );
+        if (!mounted) return;
+        var myPublications = myPosts
+            .where((p) => p.kind.trim().toLowerCase() != 'news')
+            .toList(growable: false)
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        if (myPublications.isEmpty && myPosts.isNotEmpty) {
+          myPublications = myPosts.toList(growable: false)
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        }
+        setState(() {
+          _posts.addAll(myPublications);
+          _hasMore = false;
+          _initialLoading = false;
+        });
+        debugPrint('[MainHomePage] loaded my publications=${myPublications.length}');
+        return;
+      }
+      var list = await repo.getFeedPosts(
         limit: _pageSize,
         offset: _offset,
         currentUserId: _currentUserId,
       );
+      var publicationOnly = list
+          .where((p) => p.kind.trim().toLowerCase() != 'news')
+          .toList(growable: false);
+      var scanOffset = _offset;
+      var scanHasMore = list.length >= _pageSize;
+
+      while (publicationOnly.isEmpty && scanHasMore) {
+        scanOffset += list.length;
+        list = await repo.getFeedPosts(
+          limit: _pageSize,
+          offset: scanOffset,
+          currentUserId: _currentUserId,
+        );
+        if (!mounted) return;
+        publicationOnly = list
+            .where((p) => p.kind.trim().toLowerCase() != 'news')
+            .toList(growable: false);
+        scanHasMore = list.length >= _pageSize;
+      }
+      if (_currentUserId != null) {
+        final myPosts = await repo.getPostsByUser(
+          _currentUserId!,
+          currentUserId: _currentUserId,
+        );
+        final myPublications = myPosts
+            .where((p) => p.kind.trim().toLowerCase() != 'news')
+            .toList(growable: false);
+        if (myPublications.isNotEmpty) {
+          final byId = <String, PostEntity>{
+            for (final p in myPublications) p.id: p,
+            for (final p in publicationOnly) p.id: p,
+          };
+          publicationOnly = byId.values.toList(growable: false)
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        }
+      }
       if (!mounted) return;
-      final publications = list.where((p) => p.kind == 'publication').toList(growable: false);
+
       setState(() {
-        _posts.addAll(publications);
-        _offset += list.length; // offset считаем по "сырым" постам из репозитория
-        _hasMore = list.length >= _pageSize; // "есть ли ещё" определяем по источнику
+        _posts.addAll(publicationOnly);
+        _offset = scanOffset + list.length;
+        _hasMore = scanHasMore;
         _initialLoading = false;
       });
-      debugPrint('[MainHomePage] loaded publications=${publications.length}, raw=${list.length}');
+      debugPrint('[MainHomePage] loaded publications=${publicationOnly.length}');
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -110,27 +185,119 @@ class _MainHomePageState extends State<MainHomePage> {
 
   Future<void> _loadMore() async {
     if (!_hasMore) return;
+    if (_currentUserId != null) return;
     setState(() => _isLoadingMore = true);
     try {
       final repo = context.read<PostRepository>();
-      final list = await repo.getFeedPosts(
+      var list = await repo.getFeedPosts(
         limit: _pageSize,
         offset: _offset,
         currentUserId: _currentUserId,
       );
+      var publicationOnly = list
+          .where((p) => p.kind.trim().toLowerCase() != 'news')
+          .toList(growable: false);
+      var scanOffset = _offset;
+      var scanHasMore = list.length >= _pageSize;
+
+      while (publicationOnly.isEmpty && scanHasMore) {
+        scanOffset += list.length;
+        list = await repo.getFeedPosts(
+          limit: _pageSize,
+          offset: scanOffset,
+          currentUserId: _currentUserId,
+        );
+        if (!mounted) return;
+        publicationOnly = list
+            .where((p) => p.kind.trim().toLowerCase() != 'news')
+            .toList(growable: false);
+        scanHasMore = list.length >= _pageSize;
+      }
       if (!mounted) return;
-      final publications = list.where((p) => p.kind == 'publication').toList(growable: false);
 
       setState(() {
-        _posts.addAll(publications);
-        _offset += list.length; // offset считаем по "сырым" постам из репозитория
-        _hasMore = list.length >= _pageSize; // "есть ли ещё" определяем по источнику
+        _posts.addAll(publicationOnly);
+        _offset = scanOffset + list.length;
+        _hasMore = scanHasMore;
         _isLoadingMore = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoadingMore = false);
     }
+  }
+
+  Future<void> _loadStories() async {
+    setState(() => _storiesLoading = true);
+    try {
+      final allGroups = (await context.read<StoriesRepository>().getStoriesGroupedByUser())
+          .where((g) => g.stories.isNotEmpty)
+          .toList(growable: false);
+      final groups = await _filterStoriesByChatPeers(allGroups);
+      final nextMap = <String, bool>{};
+      for (final g in groups) {
+        final latestStoryAt = g.firstStory.createdAt;
+        try {
+          final seenStorage = context.read<ChatStoryListStorage>();
+          final lastSeenAt = seenStorage.getLastSeenAt(g.userId);
+          nextMap[g.userId] = lastSeenAt == null || latestStoryAt.isAfter(lastSeenAt);
+        } catch (_) {
+          // Даже если локальное хранилище "видел/не видел" не сработало,
+          // сами сторис должны отображаться в ленте.
+          nextMap[g.userId] = true;
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _storyGroups = groups;
+        _newStoriesByUserId = nextMap;
+        _storiesLoading = false;
+        _storyRetryScheduled = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        // Не очищаем уже загруженные сторис при временной ошибке,
+        // чтобы блок сторис в ленте не становился пустым.
+        _storiesLoading = false;
+      });
+    }
+  }
+
+  Future<List<StoryGroupEntity>> _filterStoriesByChatPeers(
+    List<StoryGroupEntity> groups,
+  ) async {
+    final uid = _currentUserId;
+    if (uid == null || groups.isEmpty) return groups;
+    try {
+      final rows = await supa.Supabase.instance.client
+          .from(SupabaseConstants.messagesTable)
+          .select('sender_id, receiver_id')
+          .or('sender_id.eq.$uid,receiver_id.eq.$uid');
+      final peerIds = <String>{};
+      for (final row in (rows as List<dynamic>)) {
+        final map = row as Map<String, dynamic>;
+        final senderId = map['sender_id'] as String?;
+        final receiverId = map['receiver_id'] as String?;
+        if (senderId == null || receiverId == null) continue;
+        if (senderId == uid) {
+          peerIds.add(receiverId);
+        } else if (receiverId == uid) {
+          peerIds.add(senderId);
+        }
+      }
+      return groups
+          .where((g) => g.userId == uid || peerIds.contains(g.userId))
+          .toList(growable: false);
+    } catch (_) {
+      return groups;
+    }
+  }
+
+  Future<void> _openAddStoryAndRefresh() async {
+    await context.push('/add-story');
+    if (!mounted) return;
+    await _loadStories();
   }
 
   Future<void> _refreshPost(String postId) async {
@@ -235,7 +402,9 @@ class _MainHomePageState extends State<MainHomePage> {
         ? 'Публикация: ${post.id}\n$caption'
         : 'Публикация: ${post.id}';
     try {
-      await Supabase.instance.client.from(SupabaseConstants.messagesTable).insert({
+      await supa.Supabase.instance.client
+          .from(SupabaseConstants.messagesTable)
+          .insert({
         'sender_id': senderId,
         'receiver_id': receiverId,
         'text': shareText,
@@ -297,71 +466,449 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
+  void _showQuickCreateMenu() {
+    final state = context.read<AuthBloc>().state;
+    if (state is! AuthAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы создавать публикации')),
+      );
+      return;
+    }
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            const Text(
+              'Создать',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.person_outline_rounded),
+              title: const Text('Прувнуть в ленту'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final created =
+                    await context.push<PostEntity>('/add-publication');
+                if (created == null || !mounted) return;
+                final isPublication =
+                    created.kind.trim().toLowerCase() != 'news';
+                if (!isPublication) return;
+                setState(() {
+                  _posts.removeWhere((p) => p.id == created.id);
+                  _posts.insert(0, created);
+                });
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.history_rounded),
+              title: const Text('Сторис'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                await _openAddStoryAndRefresh();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined),
+              title: const Text('Видео'),
+              onTap: () async {
+                Navigator.pop(sheetContext);
+                final created = await context.push<PostEntity>(
+                  '/add-publication?video=1',
+                );
+                if (created == null || !mounted) return;
+                final isPublication =
+                    created.kind.trim().toLowerCase() != 'news';
+                if (!isPublication) return;
+                setState(() {
+                  _posts.removeWhere((p) => p.id == created.id);
+                  _posts.insert(0, created);
+                });
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: const Text('Новость'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                context.push('/add-news');
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
+    final authState = context.read<AuthBloc>().state;
+    final activeUserId =
+        authState is AuthAuthenticated ? authState.user.id : null;
+    if (activeUserId != _loadedUserId && !_initialLoading) {
+      _currentUserId = activeUserId;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _loadInitial();
+        _loadStories();
+      });
+    }
+    if (!_storiesLoading && _storyGroups.isEmpty && !_storyRetryScheduled) {
+      _storyRetryScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _loadStories();
+      });
+    }
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Colors.black,
         elevation: 0,
-        title: const Text('Главное', style: TextStyle(fontWeight: FontWeight.w800)),
+        leading: IconButton(
+          icon: const Icon(Icons.add_circle_outline_rounded),
+          onPressed: _showQuickCreateMenu,
+        ),
+        title: const Text('tmr_tau', style: TextStyle(fontWeight: FontWeight.w800)),
         centerTitle: true,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded),
-            onPressed: _createPostWithPlaceholderMedia,
-          ),
+          _FeedNotificationsButton(),
           const SizedBox(width: 6),
         ],
       ),
-      backgroundColor: Colors.black,
-      body: _initialLoading
-          ? const Center(child: AppLoading())
-          : LayoutBuilder(
-              builder: (context, constraints) {
-                final itemHeight = constraints.maxHeight.isFinite &&
-                        constraints.maxHeight > 0
-                    ? constraints.maxHeight
-                    : h;
-
-                return ListView.builder(
-                  key: _feedKey,
-                  controller: _scrollController,
-                  padding: EdgeInsets.zero,
-                  itemExtent: itemHeight,
-                  itemCount: _posts.length + (_isLoadingMore ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= _posts.length) {
-                      return SizedBox(
-                        height: itemHeight,
-                        child: const Center(
-                          child: SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(),
+      body: BlocListener<AuthBloc, AuthState>(
+        listenWhen: (prev, curr) =>
+            curr is AuthAuthenticated &&
+            (prev is! AuthAuthenticated ||
+                (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+        listener: (context, state) {
+          if (state is AuthAuthenticated) {
+            _currentUserId = state.user.id;
+            _loadInitial();
+            _loadStories();
+          }
+        },
+        child: _initialLoading
+            ? const Center(child: AppLoading())
+            : Column(
+                children: [
+                  _storiesLoading
+                      ? const SizedBox(
+                          height: 102,
+                          child: Center(
+                            child: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
                           ),
+                        )
+                      : ChatStoriesFriendsStrip(
+                          groups: _storyGroups,
+                          newStoriesByUserId: _newStoriesByUserId,
+                          onStoryTap: (group) async {
+                            if (group.stories.isEmpty) return;
+                            final latestStoryAt = group.firstStory.createdAt;
+                            await context
+                                .read<ChatStoryListStorage>()
+                                .setLastSeenAt(group.userId, latestStoryAt);
+                            if (!mounted) return;
+                            setState(() {
+                              _newStoriesByUserId = {
+                                ..._newStoriesByUserId,
+                                group.userId: false,
+                              };
+                            });
+                            await context.push(
+                              '/stories',
+                              extra: StoryViewerArgs(
+                                groups: [group],
+                                initialGroupIndex: 0,
+                              ),
+                            );
+                            if (!mounted) return;
+                            await _loadStories();
+                          },
                         ),
-                      );
-                    }
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final itemHeight = constraints.maxHeight.isFinite &&
+                                constraints.maxHeight > 0
+                            ? constraints.maxHeight
+                            : h;
 
-                    final post = _posts[index];
-                    return _InstagramPostItem(
-                      height: itemHeight,
-                      post: post,
-                      currentUserId: _currentUserId,
-                      onLike: () => _toggleLike(post),
-                      onRepost: () => _toggleRepost(post),
-                      onComment: () async {
-                        await context.push('/post/${post.id}', extra: post);
-                        await _refreshPost(post.id);
+                        return ListView.builder(
+                          key: _feedKey,
+                          controller: _scrollController,
+                          padding: EdgeInsets.zero,
+                          itemExtent: itemHeight,
+                          itemCount: _posts.length + (_isLoadingMore ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            if (index >= _posts.length) {
+                              return SizedBox(
+                                height: itemHeight,
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                ),
+                              );
+                            }
+
+                            final post = _posts[index];
+                            return _InstagramPostItem(
+                              height: itemHeight,
+                              post: post,
+                              currentUserId: _currentUserId,
+                              onLike: () => _toggleLike(post),
+                              onRepost: () => _toggleRepost(post),
+                              onComment: () async {
+                                await context.push('/post/${post.id}', extra: post);
+                                await _refreshPost(post.id);
+                              },
+                              onShare: () => _shareToUser(post),
+                            );
+                          },
+                        );
                       },
-                      onShare: () => _shareToUser(post),
-                    );
-                  },
-                );
-              },
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _MainStoriesStrip extends StatelessWidget {
+  const _MainStoriesStrip({
+    required this.groups,
+    required this.currentUserId,
+    required this.newStoriesByUserId,
+    required this.loading,
+    required this.onAddStory,
+    required this.onOpenStoryGroup,
+  });
+
+  final List<StoryGroupEntity> groups;
+  final String? currentUserId;
+  final Map<String, bool> newStoriesByUserId;
+  final bool loading;
+  final VoidCallback onAddStory;
+  final Future<void> Function(
+    StoryGroupEntity group,
+    List<StoryGroupEntity> groups,
+    int initialIndex,
+  )
+      onOpenStoryGroup;
+
+  @override
+  Widget build(BuildContext context) {
+    final ownGroup = currentUserId == null
+        ? null
+        : groups.cast<StoryGroupEntity?>().firstWhere(
+              (g) => g?.userId == currentUserId,
+              orElse: () => null,
+            );
+    final otherGroups = currentUserId == null
+        ? groups
+        : groups.where((g) => g.userId != currentUserId).toList(growable: false);
+    final visibleGroups = [
+      if (ownGroup != null) ownGroup,
+      ...otherGroups,
+    ];
+
+    return SizedBox(
+      height: 112,
+      child: loading
+          ? const Center(child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)))
+          : ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              children: [
+                _StoryCircleWithLabel(
+                  label: 'Ваша история',
+                  avatarUrl: ownGroup?.userAvatarUrl,
+                  isAdd: true,
+                  onAddTap: onAddStory,
+                  onTap: ownGroup == null
+                      ? onAddStory
+                      : () => onOpenStoryGroup(
+                            ownGroup,
+                            visibleGroups,
+                            visibleGroups.indexOf(ownGroup),
+                          ),
+                ),
+                ...otherGroups.map(
+                  (g) => _StoryCircleWithLabel(
+                    label: g.userName ?? 'Пользователь',
+                    avatarUrl: g.userAvatarUrl,
+                    isNew: newStoriesByUserId[g.userId] == true,
+                    onTap: () =>
+                        onOpenStoryGroup(g, visibleGroups, visibleGroups.indexOf(g)),
+                  ),
+                ),
+              ],
             ),
+    );
+  }
+}
+
+class _StoryCircleWithLabel extends StatelessWidget {
+  const _StoryCircleWithLabel({
+    required this.label,
+    this.avatarUrl,
+    this.isAdd = false,
+    this.isNew = false,
+    this.onTap,
+    this.onAddTap,
+  });
+
+  final String label;
+  final String? avatarUrl;
+  final bool isAdd;
+  final bool isNew;
+  final VoidCallback? onTap;
+  final VoidCallback? onAddTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 14),
+      child: GestureDetector(
+        onTap: onTap,
+        child: SizedBox(
+          width: 74,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 60,
+                    height: 60,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: isNew
+                          ? const LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFFFEDA75),
+                                Color(0xFFFA7E1E),
+                                Color(0xFFD62976),
+                                Color(0xFF962FBF),
+                                Color(0xFF4F5BD5),
+                              ],
+                            )
+                          : null,
+                      border: isNew
+                          ? null
+                          : Border.all(color: Colors.grey.shade300, width: 2),
+                    ),
+                    child: Padding(
+                      padding: EdgeInsets.all(isNew ? 2 : 1),
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        child: CachedAvatar(
+                          imageUrl: avatarUrl,
+                          radius: 28,
+                          fallbackText: label,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (isAdd)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onAddTap,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: const Icon(Icons.add, size: 12, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FeedNotificationsButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final authState = context.read<AuthBloc>().state;
+    final userId = authState is AuthAuthenticated ? authState.user.id : null;
+    if (userId == null) {
+      return IconButton(
+        icon: const Icon(Icons.favorite_border_rounded),
+        onPressed: () => context.push('/notifications'),
+      );
+    }
+
+    return FutureBuilder<int>(
+      future: context.read<NotificationsRepository>().getUnreadCount(userId),
+      builder: (context, snapshot) {
+        final unread = snapshot.data ?? 0;
+        return IconButton(
+          onPressed: () => context.push('/notifications'),
+          icon: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              const Icon(Icons.favorite_border_rounded),
+              if (unread > 0)
+                Positioned(
+                  right: -1,
+                  top: -1,
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -952,7 +1499,7 @@ class _ShareToUserSheetState extends State<_ShareToUserSheet> {
       _error = null;
     });
     try {
-      final client = Supabase.instance.client;
+      final client = supa.Supabase.instance.client;
       final trimmed = q.trim();
       final res = trimmed.isNotEmpty
           ? await client

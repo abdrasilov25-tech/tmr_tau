@@ -26,10 +26,10 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
     }
 
     return SizedBox(
-      height: 92,
+      height: 102,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         itemCount: groups.length,
         itemBuilder: (context, index) {
           final g = groups[index];
@@ -101,6 +101,7 @@ class _FriendStoryCircle extends StatelessWidget {
                 group.userName ?? 'Пользователь',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                       fontSize: 10,
                       color: Colors.grey.shade600,
