@@ -20,6 +20,12 @@ class ProductEntity extends Equatable {
     this.isFollowingSeller = false,
     this.sellerIsVerified = false,
     this.isRepostedByMe = false,
+    this.city,
+    this.condition = 'any',
+    this.isUrgent = false,
+    this.isTop = false,
+    this.latitude,
+    this.longitude,
   });
 
   final String id;
@@ -40,28 +46,40 @@ class ProductEntity extends Equatable {
   final bool isFollowingSeller;
   final bool sellerIsVerified;
   final bool isRepostedByMe;
+  final String? city;
+  final String condition;
+  final bool isUrgent;
+  final bool isTop;
+  final double? latitude;
+  final double? longitude;
 
   String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
 
   @override
   List<Object?> get props => [
-        id,
-        title,
-        description,
-        price,
-        imageUrl,
-        sellerId,
-        category,
-        categoryId,
-        likesCount,
-        commentsCount,
-        repostsCount,
-        sellerName,
-        sellerAvatarUrl,
-        createdAt,
-        isLikedByMe,
-        isFollowingSeller,
-        sellerIsVerified,
-        isRepostedByMe,
-      ];
+    id,
+    title,
+    description,
+    price,
+    imageUrl,
+    sellerId,
+    category,
+    categoryId,
+    likesCount,
+    commentsCount,
+    repostsCount,
+    sellerName,
+    sellerAvatarUrl,
+    createdAt,
+    isLikedByMe,
+    isFollowingSeller,
+    sellerIsVerified,
+    isRepostedByMe,
+    city,
+    condition,
+    isUrgent,
+    isTop,
+    latitude,
+    longitude,
+  ];
 }

@@ -362,9 +362,8 @@ class _ProductSearchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTop = product.likesCount >= 10;
-    final isUrgent =
-        _containsUrgent(product.title) || _containsUrgent(product.description);
+    final isTop = product.isTop;
+    final isUrgent = product.isUrgent;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       clipBehavior: Clip.antiAlias,
@@ -459,7 +458,7 @@ class _ProductSearchTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${_cityHint(product)}  •  ${product.createdAt != null ? _formatDate(product.createdAt!) : ''}',
+                    '${product.city?.trim().isNotEmpty == true ? product.city : 'Город не указан'}  •  ${product.createdAt != null ? _formatDate(product.createdAt!) : ''}',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -476,16 +475,6 @@ class _ProductSearchTile extends StatelessWidget {
     final day = value.day.toString().padLeft(2, '0');
     return '$day.$month.${value.year}';
   }
-
-  String _cityHint(ProductEntity p) {
-    final text = '${p.title} ${p.description}'.toLowerCase();
-    if (text.contains('алматы')) return 'Алматы';
-    if (text.contains('астана')) return 'Астана';
-    if (text.contains('шымкент')) return 'Шымкент';
-    return 'Город не указан';
-  }
-
-  bool _containsUrgent(String text) => text.toLowerCase().contains('срочно');
 }
 
 class _Badge extends StatelessWidget {

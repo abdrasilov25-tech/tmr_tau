@@ -58,5 +58,7 @@
 	<string>Нам нужен доступ к фото, чтобы выбрать аватар и кастомную тему из галереи.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Нам нужен доступ к фото, чтобы сохранять выбранные изображения в приложение (если требуется).</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Геолокация нужна, чтобы указывать местоположение объявления и показывать товары рядом.</string>
 </dict>
 </plist>

@@ -113,6 +113,26 @@ create table if not exists public.products (
 alter table public.products add column if not exists category text default 'general';
 alter table public.products add column if not exists category_id uuid references public.categories(id) on delete set null;
 alter table public.products add column if not exists comments_count int default 0;
+alter table public.products add column if not exists city text;
+alter table public.products add column if not exists condition text default 'any';
+alter table public.products add column if not exists is_urgent boolean default false;
+alter table public.products add column if not exists is_top boolean default false;
+alter table public.products add column if not exists latitude double precision;
+alter table public.products add column if not exists longitude double precision;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'products_condition_allowed'
+      and conrelid = 'public.products'::regclass
+  ) then
+    alter table public.products
+      add constraint products_condition_allowed
+      check (condition in ('any', 'new', 'used'));
+  end if;
+end $$;
 
 -- ============== PRODUCT LIKES ==============
 create table if not exists public.product_likes (
@@ -235,6 +255,18 @@ create index if not exists idx_posts_kind_created_at
   on public.posts (kind, created_at desc);
 create index if not exists idx_posts_user_created_at
   on public.posts (user_id, created_at desc);
+create index if not exists idx_products_created_at
+  on public.products (created_at desc);
+create index if not exists idx_products_city
+  on public.products (city);
+create index if not exists idx_products_condition
+  on public.products (condition);
+create index if not exists idx_products_price
+  on public.products (price);
+create index if not exists idx_products_is_urgent
+  on public.products (is_urgent);
+create index if not exists idx_products_is_top
+  on public.products (is_top);
 
 create table if not exists public.post_likes (
   post_id uuid not null references public.posts(id) on delete cascade,

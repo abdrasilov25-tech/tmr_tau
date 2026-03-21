@@ -29,6 +29,12 @@ class ProductModel extends ProductEntity {
     super.isFollowingSeller = false,
     super.sellerIsVerified = false,
     super.isRepostedByMe = false,
+    super.city,
+    super.condition = 'any',
+    super.isUrgent = false,
+    super.isTop = false,
+    super.latitude,
+    super.longitude,
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -52,6 +58,12 @@ class ProductModel extends ProductEntity {
       isLikedByMe: json['is_liked_by_me'] as bool? ?? false,
       isFollowingSeller: json['is_following_seller'] as bool? ?? false,
       sellerIsVerified: json['seller_is_verified'] as bool? ?? false,
+      city: json['city'] as String?,
+      condition: json['condition'] as String? ?? 'any',
+      isUrgent: json['is_urgent'] as bool? ?? false,
+      isTop: json['is_top'] as bool? ?? false,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
     );
   }
 }
