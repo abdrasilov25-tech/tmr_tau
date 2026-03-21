@@ -12,6 +12,9 @@ import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../stories/domain/entities/story_group_entity.dart';
+import '../../../stories/domain/repositories/stories_repository.dart';
+import '../../../stories/presentation/pages/story_viewer_args.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -247,6 +250,9 @@ class _ChatPageState extends State<ChatPage> {
                                   : _StoryLinkedChatBubble(
                                       message: structured,
                                       isMe: isMe,
+                                      onOpenStory: () => _openStoryFromMessage(
+                                        structured.storyId,
+                                      ),
                                     ),
                             ),
                           );
@@ -345,6 +351,39 @@ class _ChatPageState extends State<ChatPage> {
       payload: payload,
     );
   }
+
+  Future<void> _openStoryFromMessage(String storyId) async {
+    if (storyId.isEmpty) return;
+    try {
+      final groups = await context.read<StoriesRepository>().getStoriesGroupedByUser();
+      StoryGroupEntity? peerGroup;
+      for (final g in groups) {
+        if (g.userId == widget.peerId) {
+          peerGroup = g;
+          break;
+        }
+      }
+      if (peerGroup == null || peerGroup.stories.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Сторис недоступна')),
+        );
+        return;
+      }
+      await context.push(
+        '/stories',
+        extra: StoryViewerArgs(
+          groups: [peerGroup],
+          initialGroupIndex: 0,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть сторис')),
+      );
+    }
+  }
 }
 
 class _StoryDirectMessage {
@@ -362,10 +401,15 @@ class _StoryDirectMessage {
 }
 
 class _StoryLinkedChatBubble extends StatelessWidget {
-  const _StoryLinkedChatBubble({required this.message, required this.isMe});
+  const _StoryLinkedChatBubble({
+    required this.message,
+    required this.isMe,
+    required this.onOpenStory,
+  });
 
   final _StoryDirectMessage message;
   final bool isMe;
+  final VoidCallback onOpenStory;
 
   @override
   Widget build(BuildContext context) {
@@ -378,20 +422,23 @@ class _StoryLinkedChatBubble extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (message.previewUrl.isNotEmpty)
-          Container(
-            width: 140,
-            height: 180,
-            margin: const EdgeInsets.only(bottom: 6),
-            clipBehavior: Clip.antiAlias,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(10),
-              color: Colors.black12,
-            ),
-            child: CachedNetworkImage(
-              imageUrl: message.previewUrl,
-              fit: BoxFit.cover,
-              errorWidget: (_, url, error) => const Center(
-                child: Icon(Icons.broken_image_outlined),
+          GestureDetector(
+            onTap: onOpenStory,
+            child: Container(
+              width: 140,
+              height: 180,
+              margin: const EdgeInsets.only(bottom: 6),
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                color: Colors.black12,
+              ),
+              child: CachedNetworkImage(
+                imageUrl: message.previewUrl,
+                fit: BoxFit.cover,
+                errorWidget: (_, url, error) => const Center(
+                  child: Icon(Icons.broken_image_outlined),
+                ),
               ),
             ),
           ),
