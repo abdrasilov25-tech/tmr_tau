@@ -214,11 +214,14 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   final _replyController = TextEditingController();
   bool _sendingReply = false;
   final Set<String> _markedViewedIds = <String>{};
+  int _viewsCount = 0;
+  bool _viewsLoading = false;
 
   @override
   void initState() {
     super.initState();
     _markCurrentStoryViewed();
+    _loadViewsCount();
   }
 
   @override
@@ -227,6 +230,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     if (oldWidget.group.userId != widget.group.userId) {
       _currentIndex = 0;
       _markCurrentStoryViewed();
+      _loadViewsCount();
     }
   }
 
@@ -238,6 +242,67 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
 
   StoryEntity get _currentStory => widget.group.stories[_currentIndex];
   bool get _isOwnStory => widget.currentUserId != null && widget.group.userId == widget.currentUserId;
+
+  Future<void> _loadViewsCount() async {
+    if (!_isOwnStory || widget.group.stories.isEmpty) return;
+    setState(() => _viewsLoading = true);
+    try {
+      final count = await widget.storiesRepository.getStoryViewsCount(
+        _currentStory.id,
+      );
+      if (!mounted) return;
+      setState(() => _viewsCount = count);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _viewsCount = 0);
+    } finally {
+      if (mounted) setState(() => _viewsLoading = false);
+    }
+  }
+
+  Future<void> _showViewersSheet() async {
+    if (!_isOwnStory) return;
+    try {
+      final viewers = await widget.storiesRepository.getStoryViews(
+        _currentStory.id,
+      );
+      if (!mounted) return;
+      showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (ctx) => SafeArea(
+          child: SizedBox(
+            height: 360,
+            child: viewers.isEmpty
+                ? const Center(child: Text('Пока никто не посмотрел'))
+                : ListView.separated(
+                    itemCount: viewers.length,
+                    separatorBuilder: (_, index) => const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final v = viewers[index];
+                      final time =
+                          '${v.viewedAt.hour.toString().padLeft(2, '0')}:${v.viewedAt.minute.toString().padLeft(2, '0')}';
+                      return ListTile(
+                        leading: CachedAvatar(
+                          imageUrl: v.viewerAvatarUrl,
+                          radius: 18,
+                          fallbackText: v.viewerName,
+                        ),
+                        title: Text(v.viewerName ?? 'Пользователь'),
+                        subtitle: Text('Просмотрено в $time'),
+                      );
+                    },
+                  ),
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось загрузить просмотры')),
+      );
+    }
+  }
 
   Future<void> _markCurrentStoryViewed() async {
     final viewerId = widget.currentUserId;
@@ -388,6 +453,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         if (!mounted) return;
         setState(() => _currentIndex = safeIndex);
         _markCurrentStoryViewed();
+        _loadViewsCount();
       });
     }
     return Stack(
@@ -400,6 +466,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           onPageChanged: (i) {
             setState(() => _currentIndex = i);
             _markCurrentStoryViewed();
+            _loadViewsCount();
           },
           itemBuilder: (context, index) {
             return _StoryContent(
@@ -437,6 +504,31 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                         ),
                       ),
                     ),
+                    if (_isOwnStory)
+                      InkWell(
+                        onTap: _showViewersSheet,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.remove_red_eye_outlined,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                _viewsLoading ? '...' : '$_viewsCount',
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     if (_isOwnStory)
                       PopupMenuButton<String>(
                         icon: const Icon(Icons.more_vert, color: Colors.white),

@@ -3,6 +3,7 @@ import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/story_entity.dart';
 import '../../domain/entities/story_group_entity.dart';
 import '../../domain/entities/story_reply_entity.dart';
+import '../../domain/entities/story_view_entity.dart';
 import '../../domain/repositories/stories_repository.dart';
 import '../models/story_model.dart';
 import '../models/story_reply_model.dart';
@@ -70,6 +71,36 @@ class StoriesRepositoryImpl implements StoriesRepository {
       'viewer_id': viewerId,
       'viewed_at': DateTime.now().toIso8601String(),
     });
+  }
+
+  @override
+  Future<List<StoryViewEntity>> getStoryViews(String storyId) async {
+    final res = await _client
+        .from(SupabaseConstants.storyViewsTable)
+        .select('story_id, viewer_id, viewed_at, users!viewer_id(name, avatar)')
+        .eq('story_id', storyId)
+        .order('viewed_at', ascending: false);
+    return (res as List).map((row) {
+      final map = Map<String, dynamic>.from(row as Map);
+      final users = map['users'];
+      final userMap = users is Map ? Map<String, dynamic>.from(users) : null;
+      return StoryViewEntity(
+        storyId: map['story_id'] as String,
+        viewerId: map['viewer_id'] as String,
+        viewedAt: DateTime.parse(map['viewed_at'] as String),
+        viewerName: userMap?['name'] as String?,
+        viewerAvatarUrl: userMap?['avatar'] as String?,
+      );
+    }).toList(growable: false);
+  }
+
+  @override
+  Future<int> getStoryViewsCount(String storyId) async {
+    final res = await _client
+        .from(SupabaseConstants.storyViewsTable)
+        .select('story_id')
+        .eq('story_id', storyId);
+    return (res as List).length;
   }
 
   @override

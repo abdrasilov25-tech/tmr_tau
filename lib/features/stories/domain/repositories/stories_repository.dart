@@ -2,6 +2,7 @@ import '../entities/story_entity.dart';
 import '../entities/story_group_entity.dart';
 
 import '../entities/story_reply_entity.dart';
+import '../entities/story_view_entity.dart';
 
 abstract class StoriesRepository {
   Future<List<StoryEntity>> getActiveStories();
@@ -11,6 +12,8 @@ abstract class StoriesRepository {
     required String storyId,
     required String viewerId,
   });
+  Future<List<StoryViewEntity>> getStoryViews(String storyId);
+  Future<int> getStoryViewsCount(String storyId);
   Future<List<StoryEntity>> getStoriesByUser(String userId);
   Future<void> addStory({
     required String userId,
