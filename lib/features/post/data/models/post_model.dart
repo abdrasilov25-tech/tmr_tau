@@ -19,6 +19,7 @@ class PostModel extends PostEntity {
     super.isLikedByMe = false,
     super.isDislikedByMe = false,
     super.isRepostedByMe = false,
+    super.isSavedByMe = false,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
@@ -44,6 +45,7 @@ class PostModel extends PostEntity {
       isLikedByMe: (json['is_liked_by_me'] as bool?) ?? false,
       isDislikedByMe: (json['is_disliked_by_me'] as bool?) ?? false,
       isRepostedByMe: (json['is_reposted_by_me'] as bool?) ?? false,
+      isSavedByMe: (json['is_saved_by_me'] as bool?) ?? false,
     );
   }
 }

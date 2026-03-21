@@ -20,6 +20,7 @@ import '../../features/product/domain/entities/product_entity.dart';
 import '../../features/post/presentation/pages/add_post_page.dart';
 import '../../features/post/presentation/pages/edit_post_page.dart';
 import '../../features/post/presentation/pages/post_detail_page.dart';
+import '../../features/post/presentation/pages/saved_publications_page.dart';
 import '../../features/post_reports/presentation/screens/my_reports_page.dart';
 import '../../features/post_reports/presentation/screens/report_post_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
@@ -33,6 +34,9 @@ import '../../features/profile/presentation/pages/edit_profile_page.dart';
 import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/chat/presentation/pages/chats_page.dart';
+import '../../features/chat/presentation/pages/group_chat_page.dart';
+import '../../features/chat/presentation/pages/channel_page.dart';
+import '../../features/chat/presentation/pages/group_chat_info_page.dart';
 import '../../features/orders/presentation/pages/orders_page.dart';
 import '../../features/home/presentation/pages/main_home_page.dart';
 import '../../features/feed/domain/repositories/feed_repository.dart';
@@ -75,18 +79,16 @@ class AppRouter {
     initialLocation: '/',
     debugLogDiagnostics: false,
     routes: [
-      GoRoute(
-        path: '/',
-        builder: (context, state) => const SplashPage(),
-      ),
+      GoRoute(path: '/', builder: (context, state) => const SplashPage()),
       GoRoute(
         path: '/login',
         builder: (context, state) {
           final extra = state.extra;
           final map = extra is Map<String, dynamic> ? extra : null;
           final addAccountMode = map != null && map['addAccount'] == true;
-          final initialEmail =
-              map != null && map['email'] is String ? map['email'] as String : null;
+          final initialEmail = map != null && map['email'] is String
+              ? map['email'] as String
+              : null;
           return LoginPage(
             addAccountMode: addAccountMode,
             initialEmail: initialEmail,
@@ -100,7 +102,8 @@ class AppRouter {
       GoRoute(
         path: '/auth/callback',
         builder: (context, state) {
-          final code = state.uri.queryParameters['code'] ??
+          final code =
+              state.uri.queryParameters['code'] ??
               state.uri.queryParameters['auth_code'];
           return _AuthCallbackPage(authCode: code);
         },
@@ -110,9 +113,7 @@ class AppRouter {
         builder: (context, state) {
           final product = state.extra as ProductEntity?;
           if (product == null) {
-            return const Scaffold(
-              body: Center(child: Text('Товар не найден')),
-            );
+            return const Scaffold(body: Center(child: Text('Товар не найден')));
           }
           return ProductDetailPage(
             product: product,
@@ -183,10 +184,7 @@ class AppRouter {
         builder: (context, state) {
           final post = state.extra as PostEntity?;
           if (post != null) {
-            return PostDetailPage(
-              post: post,
-              postRepository: postRepository,
-            );
+            return PostDetailPage(post: post, postRepository: postRepository);
           }
           final id = state.pathParameters['id']!;
           return FutureBuilder<PostEntity?>(
@@ -263,8 +261,7 @@ class AppRouter {
           ),
           GoRoute(
             path: 'story-controls',
-            builder: (context, state) =>
-                const StoryControlsPage(),
+            builder: (context, state) => const StoryControlsPage(),
           ),
           GoRoute(
             path: 'post-visibility',
@@ -282,10 +279,7 @@ class AppRouter {
             path: 'report-problem',
             builder: (context, state) => const ReportProblemPage(),
           ),
-          GoRoute(
-            path: 'faq',
-            builder: (context, state) => const FaqPage(),
-          ),
+          GoRoute(path: 'faq', builder: (context, state) => const FaqPage()),
           GoRoute(
             path: 'terms',
             builder: (context, state) => const TermsPage(),
@@ -310,14 +304,8 @@ class AppRouter {
           );
         },
       ),
-      GoRoute(
-        path: '/cart',
-        builder: (context, state) => const CartPage(),
-      ),
-      GoRoute(
-        path: '/orders',
-        builder: (context, state) => const OrdersPage(),
-      ),
+      GoRoute(path: '/cart', builder: (context, state) => const CartPage()),
+      GoRoute(path: '/orders', builder: (context, state) => const OrdersPage()),
       GoRoute(
         path: '/home-main',
         builder: (context, state) => const MainHomePage(),
@@ -328,18 +316,46 @@ class AppRouter {
           final peerId = state.pathParameters['peerId']!;
           final peerName = state.uri.queryParameters['name'] ?? 'Продавец';
           final markRead = state.uri.queryParameters['markRead'] != '0';
-          return ChatPage(peerId: peerId, peerName: peerName, markReadOnOpen: markRead);
+          return ChatPage(
+            peerId: peerId,
+            peerName: peerName,
+            markReadOnOpen: markRead,
+          );
+        },
+      ),
+      GoRoute(path: '/chats', builder: (context, state) => const ChatsPage()),
+      GoRoute(
+        path: '/chat-group/:groupId',
+        builder: (context, state) {
+          final groupId = state.pathParameters['groupId']!;
+          final groupName =
+              state.uri.queryParameters['name'] ?? 'Групповой чат';
+          return GroupChatPage(groupId: groupId, groupName: groupName);
         },
       ),
       GoRoute(
-        path: '/chats',
-        builder: (context, state) => const ChatsPage(),
+        path: '/chat-group/:groupId/info',
+        builder: (context, state) {
+          final groupId = state.pathParameters['groupId']!;
+          return GroupChatInfoPage(groupId: groupId);
+        },
+      ),
+      GoRoute(
+        path: '/channel/:channelId',
+        builder: (context, state) {
+          final channelId = state.pathParameters['channelId']!;
+          final title = state.uri.queryParameters['title'] ?? 'Мой канал';
+          return ChannelPage(channelId: channelId, title: title);
+        },
       ),
       GoRoute(
         path: '/favorites',
-        builder: (context, state) => FavoritesScreen(
-          productRepository: productRepository,
-        ),
+        builder: (context, state) =>
+            FavoritesScreen(productRepository: productRepository),
+      ),
+      GoRoute(
+        path: '/saved-publications',
+        builder: (context, state) => const SavedPublicationsPage(),
       ),
       GoRoute(
         path: '/following',
@@ -362,9 +378,8 @@ class AppRouter {
         },
         routes: [
           StatefulShellRoute.indexedStack(
-            builder: (context, state, navigationShell) => _MainShell(
-              navigationShell: navigationShell,
-            ),
+            builder: (context, state, navigationShell) =>
+                _MainShell(navigationShell: navigationShell),
             branches: [
               StatefulShellBranch(
                 routes: [
@@ -378,9 +393,8 @@ class AppRouter {
                 routes: [
                   GoRoute(
                     path: 'search',
-                    builder: (context, state) => SearchPage(
-                      productRepository: productRepository,
-                    ),
+                    builder: (context, state) =>
+                        SearchPage(productRepository: productRepository),
                   ),
                 ],
               ),
@@ -406,7 +420,9 @@ class AppRouter {
                     path: 'profile',
                     builder: (context, state) {
                       final tabParam = state.uri.queryParameters['tab'];
-                      final parsed = tabParam == null ? null : int.tryParse(tabParam);
+                      final parsed = tabParam == null
+                          ? null
+                          : int.tryParse(tabParam);
                       return MyProfilePage(initialTabIndex: parsed);
                     },
                   ),
@@ -460,11 +476,7 @@ class _AuthCallbackPageState extends State<_AuthCallbackPage> {
           context.go('/login');
         }
       },
-      child: const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      ),
+      child: const Scaffold(body: Center(child: CircularProgressIndicator())),
     );
   }
 }
@@ -485,57 +497,57 @@ class _MainShell extends StatelessWidget {
           themeNotifier.customImagePath,
         );
         return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          Container(decoration: decoration),
-          navigationShell,
-        ],
-      ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: Colors.grey.shade200)),
-        ),
-        child: NavigationBar(
-          selectedIndex: navigationShell.currentIndex,
-          onDestinationSelected: (index) {
-            // Меняем только активную ветку shell-роута.
-            navigationShell.goBranch(index);
-          },
           backgroundColor: Colors.transparent,
-          elevation: 0,
-          indicatorColor: Colors.transparent,
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.home_outlined, size: 26),
-              selectedIcon: Icon(Icons.home_rounded, size: 26),
-              label: 'Публикации',
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              Container(decoration: decoration),
+              navigationShell,
+            ],
+          ),
+          bottomNavigationBar: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: Colors.grey.shade200)),
             ),
-            NavigationDestination(
-              icon: Icon(Icons.search_outlined, size: 26),
-              selectedIcon: Icon(Icons.search_rounded, size: 26),
-              label: 'Поиск',
+            child: NavigationBar(
+              selectedIndex: navigationShell.currentIndex,
+              onDestinationSelected: (index) {
+                // Меняем только активную ветку shell-роута.
+                navigationShell.goBranch(index);
+              },
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              indicatorColor: Colors.transparent,
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.home_outlined, size: 26),
+                  selectedIcon: Icon(Icons.home_rounded, size: 26),
+                  label: 'Публикации',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.search_outlined, size: 26),
+                  selectedIcon: Icon(Icons.search_rounded, size: 26),
+                  label: 'Поиск',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.add_circle_outline, size: 28),
+                  selectedIcon: Icon(Icons.add_circle_rounded, size: 28),
+                  label: 'Добавить',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.article_outlined, size: 26),
+                  selectedIcon: Icon(Icons.article_rounded, size: 26),
+                  label: 'Новости',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.person_outline_rounded, size: 26),
+                  selectedIcon: Icon(Icons.person_rounded, size: 26),
+                  label: 'Профиль',
+                ),
+              ],
             ),
-            NavigationDestination(
-              icon: Icon(Icons.add_circle_outline, size: 28),
-              selectedIcon: Icon(Icons.add_circle_rounded, size: 28),
-              label: 'Добавить',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.article_outlined, size: 26),
-              selectedIcon: Icon(Icons.article_rounded, size: 26),
-              label: 'Новости',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.person_outline_rounded, size: 26),
-              selectedIcon: Icon(Icons.person_rounded, size: 26),
-              label: 'Профиль',
-            ),
-          ],
-        ),
-      ),
+          ),
         );
       },
     );

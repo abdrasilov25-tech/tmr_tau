@@ -46,12 +46,19 @@ class PostRepositoryImpl implements PostRepository {
           .select('post_id')
           .eq('user_id', currentUserId)
           .inFilter('post_id', ids);
+      final saves = await _client
+          .from(SupabaseConstants.postSavesTable)
+          .select('post_id')
+          .eq('user_id', currentUserId)
+          .inFilter('post_id', ids);
       final likedIds = (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
       final repostedIds = (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
+      final savedIds = (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
       return list
           .map((p) => PostModel(
                 id: p.id,
                 userId: p.userId,
+                kind: p.kind,
                 imageUrl: p.imageUrl,
                 caption: p.caption,
                 videoUrl: p.videoUrl,
@@ -66,6 +73,7 @@ class PostRepositoryImpl implements PostRepository {
                 isLikedByMe: likedIds.contains(p.id),
                 isDislikedByMe: p.isDislikedByMe,
                 isRepostedByMe: repostedIds.contains(p.id),
+                isSavedByMe: savedIds.contains(p.id),
               ))
           .toList();
     }
@@ -116,11 +124,18 @@ class PostRepositoryImpl implements PostRepository {
         .select('post_id')
         .eq('user_id', currentUserId)
         .inFilter('post_id', ids);
+    final saves = await _client
+        .from(SupabaseConstants.postSavesTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
     final likedIds =
         (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
     final repostedIds = (reposts as List)
         .map((e) => (e as Map)['post_id'] as String)
         .toSet();
+    final savedIds =
+        (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
 
     return list
         .map(
@@ -141,6 +156,7 @@ class PostRepositoryImpl implements PostRepository {
             isLikedByMe: likedIds.contains(p.id),
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: repostedIds.contains(p.id),
+            isSavedByMe: savedIds.contains(p.id),
           ),
         )
         .toList(growable: false);
@@ -172,11 +188,18 @@ class PostRepositoryImpl implements PostRepository {
           .select('post_id')
           .eq('user_id', currentUserId)
           .inFilter('post_id', ids);
+      final saves = await _client
+          .from(SupabaseConstants.postSavesTable)
+          .select('post_id')
+          .eq('user_id', currentUserId)
+          .inFilter('post_id', ids);
       final likedIds = (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
+      final savedIds = (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
       return list
           .map((p) => PostModel(
                 id: p.id,
                 userId: p.userId,
+                kind: p.kind,
                 imageUrl: p.imageUrl,
                 caption: p.caption,
                 videoUrl: p.videoUrl,
@@ -191,6 +214,7 @@ class PostRepositoryImpl implements PostRepository {
                 isLikedByMe: likedIds.contains(p.id),
                 isDislikedByMe: p.isDislikedByMe,
                 isRepostedByMe: p.isRepostedByMe,
+                isSavedByMe: savedIds.contains(p.id),
               ))
           .toList();
     }
@@ -331,6 +355,83 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
+  Future<void> toggleSave(String postId, String userId) async {
+    final existing = await _client
+        .from(SupabaseConstants.postSavesTable)
+        .select('post_id')
+        .eq('post_id', postId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from(SupabaseConstants.postSavesTable)
+          .delete()
+          .eq('post_id', postId)
+          .eq('user_id', userId);
+    } else {
+      await _client.from(SupabaseConstants.postSavesTable).insert({
+        'post_id': postId,
+        'user_id': userId,
+      });
+    }
+  }
+
+  @override
+  Future<List<PostEntity>> getSavedPublications(
+    String userId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final saves = await _client
+        .from(SupabaseConstants.postSavesTable)
+        .select('post_id, created_at')
+        .eq('user_id', userId)
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
+    final postIds = (saves as List)
+        .map((e) => (e as Map<String, dynamic>)['post_id'] as String?)
+        .whereType<String>()
+        .toList(growable: false);
+    if (postIds.isEmpty) return const [];
+
+    final res = await _client
+        .from(SupabaseConstants.postsTable)
+        .select('*, users!user_id(name, avatar)')
+        .eq('kind', 'publication')
+        .inFilter('id', postIds);
+    final list = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+    final order = {for (var i = 0; i < postIds.length; i++) postIds[i]: i};
+    list.sort((a, b) => (order[a.id] ?? 1 << 20).compareTo(order[b.id] ?? 1 << 20));
+
+    return list
+        .map(
+          (p) => PostModel(
+            id: p.id,
+            userId: p.userId,
+            kind: p.kind,
+            imageUrl: p.imageUrl,
+            caption: p.caption,
+            videoUrl: p.videoUrl,
+            videoDurationSeconds: p.videoDurationSeconds,
+            createdAt: p.createdAt,
+            likesCount: p.likesCount,
+            dislikesCount: p.dislikesCount,
+            commentsCount: p.commentsCount,
+            repostsCount: p.repostsCount,
+            userName: p.userName,
+            userAvatarUrl: p.userAvatarUrl,
+            isLikedByMe: p.isLikedByMe,
+            isDislikedByMe: p.isDislikedByMe,
+            isRepostedByMe: p.isRepostedByMe,
+            isSavedByMe: true,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
   Future<List<PostCommentEntity>> getComments(String postId) async {
     final res = await _client
         .from(SupabaseConstants.postCommentsTable)
@@ -449,11 +550,18 @@ class PostRepositoryImpl implements PostRepository {
         .select('post_id')
         .eq('user_id', currentUserId)
         .inFilter('post_id', ids);
+    final saves = await _client
+        .from(SupabaseConstants.postSavesTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
 
     final likedIds =
         (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
     final repostedIds =
         (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
+    final savedIds =
+        (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
 
     return list
         .map(
@@ -474,6 +582,7 @@ class PostRepositoryImpl implements PostRepository {
             isLikedByMe: likedIds.contains(p.id),
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: repostedIds.contains(p.id),
+            isSavedByMe: savedIds.contains(p.id),
           ),
         )
         .toList(growable: false);
@@ -536,16 +645,24 @@ class PostRepositoryImpl implements PostRepository {
           .select('post_id')
           .eq('user_id', currentUserId)
           .inFilter('post_id', ids);
+      final saves = await _client
+          .from(SupabaseConstants.postSavesTable)
+          .select('post_id')
+          .eq('user_id', currentUserId)
+          .inFilter('post_id', ids);
       final likedIds =
           (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
       final repostedIds = (reposts as List)
           .map((e) => (e as Map)['post_id'] as String)
           .toSet();
+      final savedIds =
+          (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
       return list
           .map(
             (p) => PostModel(
               id: p.id,
               userId: p.userId,
+              kind: p.kind,
               imageUrl: p.imageUrl,
               caption: p.caption,
               videoUrl: p.videoUrl,
@@ -560,6 +677,7 @@ class PostRepositoryImpl implements PostRepository {
               isLikedByMe: likedIds.contains(p.id),
               isDislikedByMe: p.isDislikedByMe,
               isRepostedByMe: repostedIds.contains(p.id),
+              isSavedByMe: savedIds.contains(p.id),
             ),
           )
           .toList(growable: false);
@@ -590,9 +708,16 @@ class PostRepositoryImpl implements PostRepository {
           .eq('post_id', postId)
           .eq('user_id', currentUserId)
           .maybeSingle();
+      final save = await _client
+          .from(SupabaseConstants.postSavesTable)
+          .select('post_id')
+          .eq('post_id', postId)
+          .eq('user_id', currentUserId)
+          .maybeSingle();
       return PostModel(
         id: post.id,
         userId: post.userId,
+        kind: post.kind,
         imageUrl: post.imageUrl,
         caption: post.caption,
         videoUrl: post.videoUrl,
@@ -607,6 +732,7 @@ class PostRepositoryImpl implements PostRepository {
         isLikedByMe: like != null,
         isDislikedByMe: post.isDislikedByMe,
         isRepostedByMe: repost != null,
+        isSavedByMe: save != null,
       );
     }
     return post;

@@ -25,6 +25,12 @@ abstract class PostRepository {
   Future<void> toggleLike(String postId, String userId);
   Future<void> toggleDislike(String postId, String userId);
   Future<void> toggleRepost(String postId, String userId);
+  Future<void> toggleSave(String postId, String userId);
+  Future<List<PostEntity>> getSavedPublications(
+    String userId, {
+    int limit = 50,
+    int offset = 0,
+  });
   Future<List<PostCommentEntity>> getComments(String postId);
   Future<void> addComment({
     required String postId,

@@ -21,7 +21,13 @@ class SupabaseConstants {
   static const String postDislikesTable = 'post_dislikes';
   static const String postCommentsTable = 'post_comments';
   static const String repostsTable = 'reposts';
+  static const String postSavesTable = 'post_saves';
   static const String messagesTable = 'messages';
+  static const String chatGroupsTable = 'chat_groups';
+  static const String chatGroupMembersTable = 'chat_group_members';
+  static const String chatGroupMessagesTable = 'chat_group_messages';
+  static const String userChannelsTable = 'user_channels';
+  static const String channelMessagesTable = 'channel_messages';
 
   static const String bucketProducts = 'products';
   static const String bucketStories = 'stories';
