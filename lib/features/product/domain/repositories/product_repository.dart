@@ -1,4 +1,5 @@
 import '../entities/product_entity.dart';
+import '../../../../core/models/search_filters.dart';
 
 abstract class ProductRepository {
   Future<List<ProductEntity>> getFeedProducts({
@@ -11,13 +12,18 @@ abstract class ProductRepository {
     String sellerId, {
     String? currentUserId,
   });
-  Future<List<ProductEntity>> searchProducts(String query,
-      {int limit = 20, String? currentUserId});
+  Future<List<ProductEntity>> searchProducts(
+    String query, {
+    int limit = 20,
+    String? currentUserId,
+    SearchFilters? filters,
+  });
   Future<List<ProductEntity>> searchProductsWithOffset(
     String query, {
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    SearchFilters? filters,
   });
   Future<List<ProductEntity>> getTrendingProducts({
     int limit = 10,

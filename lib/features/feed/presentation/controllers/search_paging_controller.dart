@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../../core/models/search_filters.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/product_repository.dart';
 
@@ -44,13 +45,18 @@ class SearchPagingController extends ChangeNotifier {
 
   String _query = '';
   String get query => _query;
+  SearchFilters _filters = const SearchFilters();
+  SearchFilters get filters => _filters;
 
   int _requestVersion = 0;
 
-  Future<void> loadInitial(String query) async {
+  Future<void> loadInitial(String query, {SearchFilters? filters}) async {
     _requestVersion++;
     final localVersion = _requestVersion;
     _query = query.trim();
+    if (filters != null) {
+      _filters = filters;
+    }
     _products.clear();
     _items.clear();
     _productOffset = 0;
@@ -81,6 +87,7 @@ class SearchPagingController extends ChangeNotifier {
               limit: pageSize,
               offset: reset ? 0 : _productOffset,
               currentUserId: currentUserId,
+              filters: _filters,
             )
           : const <ProductEntity>[];
 
