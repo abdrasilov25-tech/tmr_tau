@@ -9,6 +9,7 @@ class ChatListStorage {
   static const _archivedKey = 'tmr_tau_chat_archived_ids';
   static const _readPrefix = 'tmr_tau_chat_read_';
   static const _dialogPrefix = 'tmr_tau_chat_dialog_';
+  static const _acceptedPrefix = 'tmr_tau_chat_accepted_';
 
   Set<String> getArchivedPeerIds() {
     final list = _prefs.getStringList(_archivedKey);
@@ -44,12 +45,24 @@ class ChatListStorage {
     await _prefs.setInt(_dialogPrefix + peerId, at.millisecondsSinceEpoch);
   }
 
+  /// Был ли для собеседника уже выбран вариант "Принять".
+  bool isAccepted(String peerId) {
+    return _prefs.getBool(_acceptedPrefix + peerId) ?? false;
+  }
+
+  Future<void> setAccepted(String peerId, bool value) async {
+    await _prefs.setBool(_acceptedPrefix + peerId, value);
+  }
+
   /// Полностью очищает локальное состояние чатов (архив/непрочитанное).
   Future<void> clearAll() async {
     await _prefs.remove(_archivedKey);
     final keys = _prefs.getKeys();
     for (final key in keys) {
       if (key.startsWith(_readPrefix) || key.startsWith(_dialogPrefix)) {
+        await _prefs.remove(key);
+      }
+      if (key.startsWith(_acceptedPrefix)) {
         await _prefs.remove(key);
       }
     }

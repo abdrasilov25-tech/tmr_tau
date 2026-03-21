@@ -12,22 +12,46 @@ class StoriesRepositoryImpl implements StoriesRepository {
   StoriesRepositoryImpl(this._client);
   final SupabaseClient _client;
 
+  Future<Set<String>> _hiddenOwnersForViewer(String viewerId) async {
+    final res = await _client
+        .from(SupabaseConstants.hiddenStoriesTable)
+        .select('owner_id')
+        .eq('hidden_user_id', viewerId);
+    return (res as List)
+        .map((e) => (e as Map<String, dynamic>)['owner_id'] as String?)
+        .whereType<String>()
+        .toSet();
+  }
+
   @override
   Future<List<StoryEntity>> getActiveStories() async {
+    final viewerId = _client.auth.currentUser?.id;
+    final hiddenOwners =
+        viewerId != null ? await _hiddenOwnersForViewer(viewerId) : const <String>{};
     try {
       final res = await _client
           .from(SupabaseConstants.storiesTable)
           .select('*, users!user_id(name, avatar)')
           .gt('expires_at', DateTime.now().toIso8601String())
           .order('created_at', ascending: false);
-      return (res as List).map((e) => _mapStory(e as Map<String, dynamic>)).toList();
+      final stories =
+          (res as List).map((e) => _mapStory(e as Map<String, dynamic>)).toList();
+      if (hiddenOwners.isEmpty) return stories;
+      return stories
+          .where((s) => !hiddenOwners.contains(s.userId))
+          .toList(growable: false);
     } catch (_) {
       final res = await _client
           .from(SupabaseConstants.storiesTable)
           .select()
           .gt('expires_at', DateTime.now().toIso8601String())
           .order('created_at', ascending: false);
-      return (res as List).map((e) => _mapStory(e as Map<String, dynamic>)).toList();
+      final stories =
+          (res as List).map((e) => _mapStory(e as Map<String, dynamic>)).toList();
+      if (hiddenOwners.isEmpty) return stories;
+      return stories
+          .where((s) => !hiddenOwners.contains(s.userId))
+          .toList(growable: false);
     }
   }
 
@@ -105,6 +129,16 @@ class StoriesRepositoryImpl implements StoriesRepository {
 
   @override
   Future<List<StoryEntity>> getStoriesByUser(String userId) async {
+    final viewerId = _client.auth.currentUser?.id;
+    if (viewerId != null && viewerId != userId) {
+      final row = await _client
+          .from(SupabaseConstants.hiddenStoriesTable)
+          .select('owner_id')
+          .eq('owner_id', userId)
+          .eq('hidden_user_id', viewerId)
+          .maybeSingle();
+      if (row != null) return const [];
+    }
     try {
       final res = await _client
           .from(SupabaseConstants.storiesTable)

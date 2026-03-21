@@ -38,7 +38,10 @@ class _ChatPageState extends State<ChatPage> {
   late final SupabaseClient _client;
   String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
+  final ScrollController _messagesScrollController = ScrollController();
   bool _sending = false;
+  bool _showScrollToBottom = false;
+  bool _didInitialAutoScroll = false;
 
   @override
   void initState() {
@@ -56,6 +59,7 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _controller.dispose();
+    _messagesScrollController.dispose();
     super.dispose();
   }
 
@@ -112,6 +116,7 @@ class _ChatPageState extends State<ChatPage> {
         'text': text,
       });
       _controller.clear();
+      _scrollToBottom(animated: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -126,13 +131,52 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _scrollToBottom({bool animated = false}) {
+    if (!_messagesScrollController.hasClients) return;
+    final max = _messagesScrollController.position.maxScrollExtent;
+    if (animated) {
+      _messagesScrollController.animateTo(
+        max,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _messagesScrollController.jumpTo(max);
+    }
+  }
+
+  void _handleScroll() {
+    if (!_messagesScrollController.hasClients) return;
+    final position = _messagesScrollController.position;
+    final distanceToBottom = position.maxScrollExtent - position.pixels;
+    final shouldShow = distanceToBottom > 160;
+    if (shouldShow != _showScrollToBottom) {
+      setState(() => _showScrollToBottom = shouldShow);
+    }
+  }
+
+  void _openPeerProfile() {
+    context.push('/profile/${widget.peerId}');
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
       return Scaffold(
         appBar: AppBar(
-          title: Text(widget.peerName),
+          title: GestureDetector(
+            onTap: _openPeerProfile,
+            behavior: HitTestBehavior.opaque,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(child: Text(widget.peerName)),
+                const SizedBox(width: 6),
+                const Icon(Icons.open_in_new, size: 18),
+              ],
+            ),
+          ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () => context.pop(),
@@ -170,7 +214,18 @@ class _ChatPageState extends State<ChatPage> {
             appBar: AppBar(
               backgroundColor: Colors.transparent,
               surfaceTintColor: Colors.transparent,
-              title: Text(widget.peerName),
+              title: GestureDetector(
+                onTap: _openPeerProfile,
+                behavior: HitTestBehavior.opaque,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(child: Text(widget.peerName)),
+                    const SizedBox(width: 6),
+                    const Icon(Icons.open_in_new, size: 18),
+                  ],
+                ),
+              ),
               leading: IconButton(
                 icon: const Icon(Icons.arrow_back),
                 onPressed: () => context.pop(),
@@ -182,12 +237,14 @@ class _ChatPageState extends State<ChatPage> {
                 ),
               ],
             ),
-            body: Column(
+            body: Stack(
               children: [
-                Expanded(
-                  child: StreamBuilder<List<Map<String, dynamic>>>(
-                    stream: _messagesStream(),
-                    builder: (context, snapshot) {
+                Column(
+                  children: [
+                    Expanded(
+                      child: StreamBuilder<List<Map<String, dynamic>>>(
+                        stream: _messagesStream(),
+                        builder: (context, snapshot) {
                       if (snapshot.connectionState ==
                           ConnectionState.waiting) {
                         return const Center(
@@ -211,13 +268,31 @@ class _ChatPageState extends State<ChatPage> {
                         );
                       }
                       final me = _currentUserId;
-                      return ListView.builder(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        itemCount: messages.length,
-                        itemBuilder: (context, index) {
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        if (!mounted || !_messagesScrollController.hasClients) return;
+                        final position = _messagesScrollController.position;
+                        final isNearBottom =
+                            (position.maxScrollExtent - position.pixels) < 120;
+                        if (!_didInitialAutoScroll) {
+                          _didInitialAutoScroll = true;
+                          _scrollToBottom();
+                        } else if (isNearBottom) {
+                          _scrollToBottom();
+                        }
+                      });
+                      return NotificationListener<ScrollNotification>(
+                        onNotification: (notification) {
+                          _handleScroll();
+                          return false;
+                        },
+                        child: ListView.builder(
+                          controller: _messagesScrollController,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
                           final m = messages[index];
                           final senderId = m['sender_id'] as String?;
                           final text = m['text'] as String? ?? '';
@@ -256,7 +331,8 @@ class _ChatPageState extends State<ChatPage> {
                                     ),
                             ),
                           );
-                        },
+                          },
+                        ),
                       );
                     },
                   ),
@@ -299,6 +375,24 @@ class _ChatPageState extends State<ChatPage> {
                         ),
                       ],
                     ),
+                    ),
+                  ),
+                ),
+                  ],
+                ),
+                Positioned(
+                  right: 16,
+                  bottom: 92,
+                  child: AnimatedOpacity(
+                    opacity: _showScrollToBottom ? 1 : 0,
+                    duration: const Duration(milliseconds: 180),
+                    child: IgnorePointer(
+                      ignoring: !_showScrollToBottom,
+                      child: FloatingActionButton.small(
+                        heroTag: 'chat_scroll_to_bottom',
+                        onPressed: () => _scrollToBottom(animated: true),
+                        child: const Icon(Icons.keyboard_arrow_down_rounded),
+                      ),
                     ),
                   ),
                 ),

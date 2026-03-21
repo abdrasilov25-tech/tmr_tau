@@ -12,6 +12,7 @@ class SupabaseConstants {
   static const String storiesTable = 'stories';
   static const String storyViewsTable = 'story_views';
   static const String storyRepliesTable = 'story_replies';
+  static const String hiddenStoriesTable = 'hidden_stories';
   static const String notificationsTable = 'notifications';
   static const String favoritesTable = 'favorites';
   static const String ordersTable = 'orders';

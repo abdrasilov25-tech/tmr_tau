@@ -206,7 +206,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
             ),
             child: BlocListener<AuthBloc, AuthState>(
               listenWhen: (prev, curr) =>
-                  curr is AuthAuthenticated && (prev is! AuthAuthenticated || (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+                  curr is AuthAuthenticated && (prev is! AuthAuthenticated || prev.user.id != curr.user.id),
               listener: (context, state) {
                 if (state is AuthAuthenticated) {
                   context.read<FeedBloc>().add(FeedLoaded(currentUserId: state.user.id));

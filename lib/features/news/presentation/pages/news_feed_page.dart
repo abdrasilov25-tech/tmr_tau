@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
-import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
@@ -25,7 +24,7 @@ class NewsFeedPage extends StatelessWidget {
       child: BlocListener<AuthBloc, AuthState>(
         listenWhen: (prev, curr) =>
             curr is AuthAuthenticated &&
-            (prev is! AuthAuthenticated || (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+            (prev is! AuthAuthenticated || prev.user.id != curr.user.id),
         listener: (context, state) {
           if (state is AuthAuthenticated) {
             context.read<NewsBloc>().add(NewsRefresh(currentUserId: state.user.id));

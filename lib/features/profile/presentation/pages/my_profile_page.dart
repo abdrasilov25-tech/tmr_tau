@@ -47,7 +47,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
   bool _updatingAvatar = false;
   bool _isSwitchingAccount = false;
   bool _autoReloadTriggeredForPublications = false;
-  bool _storiesLoading = true;
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
 
@@ -178,7 +177,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
   }
 
   Future<void> _loadProfileStories(String uid) async {
-    setState(() => _storiesLoading = true);
+    setState(() => _loading = true);
     try {
       final allGroups = await context.read<StoriesRepository>().getStoriesGroupedByUser();
       final ownStories = await context.read<StoriesRepository>().getStoriesByUser(uid);
@@ -238,11 +237,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
       setState(() {
         _storyGroups = groups;
         _newStoriesByUserId = nextMap;
-        _storiesLoading = false;
+        _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _storiesLoading = false);
+      setState(() => _loading = false);
     }
   }
 
@@ -434,7 +433,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
       body: BlocListener<AuthBloc, AuthState>(
         listenWhen: (prev, curr) =>
             curr is AuthAuthenticated &&
-            (prev is! AuthAuthenticated || (prev is AuthAuthenticated && prev.user.id != curr.user.id)),
+            (prev is! AuthAuthenticated || prev.user.id != curr.user.id),
         listener: (context, state) {
           if (state is AuthAuthenticated) _load();
         },

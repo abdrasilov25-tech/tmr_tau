@@ -654,6 +654,37 @@ create policy "Blocked users delete own"
   using (auth.uid() = blocker_id);
 
 
+-- Users hidden from my stories
+create table if not exists public.hidden_stories (
+  owner_id uuid not null references public.users(id) on delete cascade,
+  hidden_user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (owner_id, hidden_user_id)
+);
+
+alter table public.hidden_stories enable row level security;
+drop policy if exists "Hidden stories select own" on public.hidden_stories;
+drop policy if exists "Hidden stories insert own" on public.hidden_stories;
+drop policy if exists "Hidden stories delete own" on public.hidden_stories;
+drop policy if exists "Hidden stories select for hidden user" on public.hidden_stories;
+
+create policy "Hidden stories select own"
+  on public.hidden_stories for select
+  using (auth.uid() = owner_id);
+
+create policy "Hidden stories select for hidden user"
+  on public.hidden_stories for select
+  using (auth.uid() = hidden_user_id);
+
+create policy "Hidden stories insert own"
+  on public.hidden_stories for insert
+  with check (auth.uid() = owner_id);
+
+create policy "Hidden stories delete own"
+  on public.hidden_stories for delete
+  using (auth.uid() = owner_id);
+
+
 -- Support tickets ("Report a problem")
 create table if not exists public.support_tickets (
   id uuid primary key default gen_random_uuid(),

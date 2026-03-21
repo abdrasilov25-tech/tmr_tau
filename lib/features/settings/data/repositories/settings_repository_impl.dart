@@ -46,7 +46,7 @@ class SettingsRepositoryImpl implements SettingsRepository {
         .from(_userSettingsTable)
         .select()
         .eq('user_id', userId)
-        .maybeSingle() as Map<String, dynamic>?;
+        .maybeSingle();
 
     if (res == null) {
       final defaults = _defaults(userId);
