@@ -22,6 +22,7 @@ class ChatsPage extends StatefulWidget {
 }
 
 class _ChatsPageState extends State<ChatsPage> {
+  static const String _storyDmPrefix = '__story__';
   late final SupabaseClient _client;
   late final String _currentUserId;
   late final ChatListStorage _chatStorage;
@@ -237,7 +238,7 @@ class _ChatsPageState extends State<ChatsPage> {
       final senderId = json['sender_id'] as String;
       final receiverId = json['receiver_id'] as String;
       final peerId = senderId == _currentUserId ? receiverId : senderId;
-      final text = json['text'] as String? ?? '';
+      final text = _displayTextForThread(json['text'] as String? ?? '');
       final createdAt = DateTime.parse(json['created_at'] as String);
 
       if (!threadsByPeer.containsKey(peerId)) {
@@ -317,6 +318,23 @@ class _ChatsPageState extends State<ChatsPage> {
         return b.lastMessageAt.compareTo(a.lastMessageAt);
       });
     return threads;
+  }
+
+  String _displayTextForThread(String rawText) {
+    if (!rawText.startsWith('$_storyDmPrefix|')) return rawText;
+    final parts = rawText.split('|');
+    if (parts.length < 5) return 'Сторис';
+    String decode(String value) {
+      try {
+        return Uri.decodeComponent(value);
+      } catch (_) {
+        return value;
+      }
+    }
+    final kind = parts[1];
+    final payload = decode(parts[4]);
+    if (kind == 'reaction') return 'Реакция на сторис: $payload';
+    return 'Ответ на сторис: $payload';
   }
 
   Future<Set<String>> _loadBlockedPeerIds(List<String> peerIds) async {
