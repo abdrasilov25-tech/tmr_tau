@@ -443,6 +443,7 @@ drop policy if exists "Story replies select" on public.story_replies;
 drop policy if exists "Story replies insert" on public.story_replies;
 drop policy if exists "Story replies delete own" on public.story_replies;
 drop policy if exists "Story views select own" on public.story_views;
+drop policy if exists "Story views select story owner" on public.story_views;
 drop policy if exists "Story views insert own" on public.story_views;
 drop policy if exists "Story views update own" on public.story_views;
 create policy "Story replies select" on public.story_replies for select using (true);
@@ -450,6 +451,16 @@ create policy "Story replies insert" on public.story_replies for insert with che
 create policy "Story replies delete own" on public.story_replies for delete using (auth.uid() = user_id);
 
 create policy "Story views select own" on public.story_views for select using (auth.uid() = viewer_id);
+create policy "Story views select story owner"
+  on public.story_views for select
+  using (
+    exists (
+      select 1
+      from public.stories s
+      where s.id = story_views.story_id
+        and s.user_id = auth.uid()
+    )
+  );
 create policy "Story views insert own" on public.story_views for insert with check (auth.uid() = viewer_id);
 create policy "Story views update own" on public.story_views for update using (auth.uid() = viewer_id) with check (auth.uid() = viewer_id);
 

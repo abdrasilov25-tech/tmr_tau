@@ -370,10 +370,29 @@ class _ChatPageState extends State<ChatPage> {
         );
         return;
       }
+      final stories = peerGroup.stories;
+      final storyIndex = stories.indexWhere((s) => s.id == storyId);
+      if (storyIndex == -1) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Эта сторис уже недоступна')),
+        );
+        return;
+      }
+      final reorderedStories = [
+        ...stories.sublist(storyIndex),
+        ...stories.sublist(0, storyIndex),
+      ];
+      final reorderedGroup = StoryGroupEntity(
+        userId: peerGroup.userId,
+        stories: reorderedStories,
+        userName: peerGroup.userName,
+        userAvatarUrl: peerGroup.userAvatarUrl,
+      );
       await context.push(
         '/stories',
         extra: StoryViewerArgs(
-          groups: [peerGroup],
+          groups: [reorderedGroup],
           initialGroupIndex: 0,
         ),
       );
