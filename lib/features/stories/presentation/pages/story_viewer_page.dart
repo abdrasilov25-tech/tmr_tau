@@ -37,6 +37,9 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
   late int _currentGroupIndex;
   Timer? _timer;
   static const Duration _storyDuration = Duration(seconds: 5);
+  Duration _remainingDuration = _storyDuration;
+  DateTime? _timerStartedAt;
+  bool _isPaused = false;
 
   @override
   void initState() {
@@ -69,11 +72,42 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
   }
 
   void _startTimer() {
+    if (_isPaused) return;
     _timer?.cancel();
-    _timer = Timer(_storyDuration, () {
+    _timerStartedAt = DateTime.now();
+    _timer = Timer(_remainingDuration, () {
       if (!mounted) return;
+      _remainingDuration = _storyDuration;
       _goNext();
     });
+  }
+
+  void _pausePlayback() {
+    if (_isPaused) return;
+    _isPaused = true;
+    final startedAt = _timerStartedAt;
+    if (startedAt != null) {
+      final elapsed = DateTime.now().difference(startedAt);
+      final remainingMs =
+          _remainingDuration.inMilliseconds - elapsed.inMilliseconds;
+      _remainingDuration = Duration(
+        milliseconds: remainingMs < 0 ? 0 : remainingMs,
+      );
+    }
+    _timer?.cancel();
+    if (mounted) setState(() {});
+  }
+
+  void _resumePlayback() {
+    if (!_isPaused) return;
+    _isPaused = false;
+    if (_remainingDuration.inMilliseconds <= 0) {
+      _remainingDuration = _storyDuration;
+      _goNext();
+      return;
+    }
+    _startTimer();
+    if (mounted) setState(() {});
   }
 
   void _goNext() {
@@ -92,6 +126,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
           curve: Curves.easeInOut,
         );
       }
+      _remainingDuration = _storyDuration;
       _startTimer();
     } else if (_currentGroupIndex < widget.groups.length - 1) {
       _currentGroupIndex++;
@@ -105,6 +140,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
       if (nextController.hasClients) {
         nextController.jumpToPage(0);
       }
+      _remainingDuration = _storyDuration;
       _startTimer();
     } else {
       context.pop();
@@ -126,6 +162,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
           curve: Curves.easeInOut,
         );
       }
+      _remainingDuration = _storyDuration;
       _startTimer();
     } else if (_currentGroupIndex > 0) {
       _currentGroupIndex--;
@@ -140,6 +177,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
       if (prevController.hasClients) {
         prevController.jumpToPage(prevGroup.stories.length - 1);
       }
+      _remainingDuration = _storyDuration;
       _startTimer();
     } else {
       context.pop();
@@ -172,6 +210,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
         itemCount: widget.groups.length,
         onPageChanged: (i) {
           setState(() => _currentGroupIndex = i);
+          _remainingDuration = _storyDuration;
           _startTimer();
         },
         itemBuilder: (context, groupIndex) {
@@ -181,6 +220,9 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
             storyController: _storyPageControllers[groupIndex],
             onNext: _goNext,
             onPrev: _goPrev,
+            onPause: _pausePlayback,
+            onResume: _resumePlayback,
+            isPaused: _isPaused,
             currentUserId: currentUserId,
             storiesRepository: storiesRepo,
           );
@@ -196,6 +238,9 @@ class _StoryGroupView extends StatefulWidget {
     required this.storyController,
     required this.onNext,
     required this.onPrev,
+    required this.onPause,
+    required this.onResume,
+    required this.isPaused,
     this.currentUserId,
     required this.storiesRepository,
   });
@@ -204,6 +249,9 @@ class _StoryGroupView extends StatefulWidget {
   final PageController storyController;
   final VoidCallback onNext;
   final VoidCallback onPrev;
+  final VoidCallback onPause;
+  final VoidCallback onResume;
+  final bool isPaused;
   final String? currentUserId;
   final StoriesRepository storiesRepository;
 
@@ -216,6 +264,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   static const String _storyDmPrefix = '__story__';
   int _currentIndex = 0;
   final _replyController = TextEditingController();
+  final _replyFocusNode = FocusNode();
   bool _sendingReply = false;
   final Set<String> _markedViewedIds = <String>{};
   int _viewsCount = 0;
@@ -226,6 +275,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     super.initState();
     _markCurrentStoryViewed();
     _loadViewsCount();
+    _replyFocusNode.addListener(_handleReplyFocusChange);
   }
 
   @override
@@ -240,12 +290,33 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
 
   @override
   void dispose() {
+    _replyFocusNode
+      ..removeListener(_handleReplyFocusChange)
+      ..dispose();
     _replyController.dispose();
     super.dispose();
   }
 
   StoryEntity get _currentStory => widget.group.stories[_currentIndex];
   bool get _isOwnStory => widget.currentUserId != null && widget.group.userId == widget.currentUserId;
+
+  void _handleReplyFocusChange() {
+    if (_replyFocusNode.hasFocus) {
+      widget.onPause();
+    } else if (!_sendingReply) {
+      widget.onResume();
+    }
+  }
+
+  void _pauseForInteraction() {
+    widget.onPause();
+  }
+
+  void _resumeAfterInteractionIfPossible() {
+    if (!_replyFocusNode.hasFocus) {
+      widget.onResume();
+    }
+  }
 
   Future<void> _loadViewsCount() async {
     if (!_isOwnStory || widget.group.stories.isEmpty) return;
@@ -327,6 +398,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   Future<void> _sendReply() async {
     final text = _replyController.text.trim();
     if (text.isEmpty || widget.currentUserId == null || _sendingReply) return;
+    _pauseForInteraction();
     setState(() => _sendingReply = true);
     try {
       await widget.storiesRepository.addStoryReply(
@@ -348,12 +420,16 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         );
       }
     } finally {
-      if (mounted) setState(() => _sendingReply = false);
+      if (mounted) {
+        setState(() => _sendingReply = false);
+        _resumeAfterInteractionIfPossible();
+      }
     }
   }
 
   Future<void> _sendQuickReaction(String emoji) async {
     if (widget.currentUserId == null || _sendingReply) return;
+    _pauseForInteraction();
     setState(() => _sendingReply = true);
     try {
       await widget.storiesRepository.addStoryReply(
@@ -375,7 +451,10 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         const SnackBar(content: Text('Не удалось отправить реакцию')),
       );
     } finally {
-      if (mounted) setState(() => _sendingReply = false);
+      if (mounted) {
+        setState(() => _sendingReply = false);
+        _resumeAfterInteractionIfPossible();
+      }
     }
   }
 
@@ -534,6 +613,9 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
               story: widget.group.stories[index],
               onTapLeft: widget.onPrev,
               onTapRight: widget.onNext,
+              onHoldStart: widget.onPause,
+              onHoldEnd: widget.onResume,
+              isPaused: widget.isPaused,
             );
           },
         ),
@@ -544,6 +626,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                 count: widget.group.stories.length,
                 currentIndex: _currentIndex,
                 duration: _StoryViewerPageState._storyDuration,
+                paused: widget.isPaused,
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -651,6 +734,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                       Expanded(
                         child: TextField(
                           controller: _replyController,
+                          focusNode: _replyFocusNode,
                           style: const TextStyle(color: Colors.white),
                           decoration: InputDecoration(
                             hintText: 'Написать сообщение...',
@@ -660,6 +744,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                             fillColor: Colors.white12,
                             contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                           ),
+                          onTap: _pauseForInteraction,
                           onSubmitted: (_) => _sendReply(),
                         ),
                       ),
@@ -709,11 +794,13 @@ class _ProgressBars extends StatefulWidget {
     required this.count,
     required this.currentIndex,
     required this.duration,
+    required this.paused,
   });
 
   final int count;
   final int currentIndex;
   final Duration duration;
+  final bool paused;
 
   @override
   State<_ProgressBars> createState() => _ProgressBarsState();
@@ -738,6 +825,13 @@ class _ProgressBarsState extends State<_ProgressBars>
     if (oldWidget.currentIndex != widget.currentIndex) {
       _controller.reset();
       _controller.forward();
+    }
+    if (oldWidget.paused != widget.paused) {
+      if (widget.paused) {
+        _controller.stop();
+      } else {
+        _controller.forward();
+      }
     }
   }
 
@@ -800,16 +894,25 @@ class _StoryContent extends StatelessWidget {
     required this.story,
     required this.onTapLeft,
     required this.onTapRight,
+    required this.onHoldStart,
+    required this.onHoldEnd,
+    required this.isPaused,
   });
 
   final StoryEntity story;
   final VoidCallback onTapLeft;
   final VoidCallback onTapRight;
+  final VoidCallback onHoldStart;
+  final VoidCallback onHoldEnd;
+  final bool isPaused;
 
   @override
   Widget build(BuildContext context) {
     final hasVideo = story.videoUrl != null && story.videoUrl!.isNotEmpty;
     return GestureDetector(
+      onLongPressStart: (_) => onHoldStart(),
+      onLongPressEnd: (_) => onHoldEnd(),
+      onLongPressCancel: onHoldEnd,
       onTapDown: (details) {
         final w = MediaQuery.sizeOf(context).width;
         if (details.localPosition.dx < w * 0.4) {
@@ -823,7 +926,7 @@ class _StoryContent extends StatelessWidget {
           aspectRatio: _storyAspectRatio,
           child: ClipRect(
             child: hasVideo
-                ? _StoryVideoContent(videoUrl: story.videoUrl!)
+                ? _StoryVideoContent(videoUrl: story.videoUrl!, paused: isPaused)
                 : story.imageUrl.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: story.imageUrl,
@@ -850,9 +953,10 @@ class _StoryContent extends StatelessWidget {
 }
 
 class _StoryVideoContent extends StatefulWidget {
-  const _StoryVideoContent({required this.videoUrl});
+  const _StoryVideoContent({required this.videoUrl, required this.paused});
 
   final String videoUrl;
+  final bool paused;
 
   @override
   State<_StoryVideoContent> createState() => _StoryVideoContentState();
@@ -878,6 +982,19 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
   void dispose() {
     _controller.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StoryVideoContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_controller.value.isInitialized) return;
+    if (oldWidget.paused != widget.paused) {
+      if (widget.paused) {
+        _controller.pause();
+      } else {
+        _controller.play();
+      }
+    }
   }
 
   @override
