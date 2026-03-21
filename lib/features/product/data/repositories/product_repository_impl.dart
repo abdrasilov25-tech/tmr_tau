@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/models/search_filters.dart';
@@ -116,6 +118,27 @@ class ProductRepositoryImpl implements ProductRepository {
       } else if (filters?.condition == ProductCondition.used) {
         queryBuilder = queryBuilder.eq('condition', 'used');
       }
+      final nearbyRadiusKm = filters?.radiusKm;
+      final nearbyCenterLat = filters?.centerLatitude;
+      final nearbyCenterLng = filters?.centerLongitude;
+      final hasNearbyFilter =
+          nearbyRadiusKm != null &&
+          nearbyCenterLat != null &&
+          nearbyCenterLng != null;
+      if (hasNearbyFilter) {
+        final radiusKm = nearbyRadiusKm;
+        final lat = nearbyCenterLat;
+        final lng = nearbyCenterLng;
+        final latDelta = radiusKm / 111.0;
+        final lngDelta = radiusKm / _kmPerLongitudeDegree(lat);
+        queryBuilder = queryBuilder
+            .not('latitude', 'is', null)
+            .not('longitude', 'is', null)
+            .gte('latitude', lat - latDelta)
+            .lte('latitude', lat + latDelta)
+            .gte('longitude', lng - lngDelta)
+            .lte('longitude', lng + lngDelta);
+      }
       switch (filters?.sort ?? SearchSort.newest) {
         case SearchSort.newest:
           queryBuilder = queryBuilder.order('created_at', ascending: false);
@@ -133,7 +156,22 @@ class ProductRepositoryImpl implements ProductRepository {
       );
 
       final list = _mapProducts(res as List);
-      return await _enrichWithUserState(list, currentUserId);
+      final filteredList = hasNearbyFilter
+          ? _filterByRadius(
+              list,
+              radiusKm: nearbyRadiusKm,
+              centerLatitude: nearbyCenterLat,
+              centerLongitude: nearbyCenterLng,
+            )
+          : list;
+      final sortedList = hasNearbyFilter
+          ? _sortByDistance(
+              filteredList,
+              centerLatitude: nearbyCenterLat,
+              centerLongitude: nearbyCenterLng,
+            )
+          : filteredList;
+      return await _enrichWithUserState(sortedList, currentUserId);
     } catch (_) {
       // При ошибке возвращаем ленту как "похожие".
       return getFeedProducts(
@@ -432,4 +470,59 @@ class ProductRepositoryImpl implements ProductRepository {
         )
         .toList();
   }
+
+  double _kmPerLongitudeDegree(double latitude) {
+    final value = 111.320 * math.cos(latitude * math.pi / 180);
+    return value.abs() < 0.0001 ? 0.0001 : value.abs();
+  }
+
+  List<ProductEntity> _filterByRadius(
+    List<ProductEntity> source, {
+    required double radiusKm,
+    required double centerLatitude,
+    required double centerLongitude,
+  }) {
+    return source.where((product) {
+      final lat = product.latitude;
+      final lng = product.longitude;
+      if (lat == null || lng == null) return false;
+      return _distanceKm(centerLatitude, centerLongitude, lat, lng) <= radiusKm;
+    }).toList(growable: false);
+  }
+
+  List<ProductEntity> _sortByDistance(
+    List<ProductEntity> source, {
+    required double centerLatitude,
+    required double centerLongitude,
+  }) {
+    final sorted = List<ProductEntity>.from(source);
+    sorted.sort((a, b) {
+      final aLat = a.latitude;
+      final aLng = a.longitude;
+      final bLat = b.latitude;
+      final bLng = b.longitude;
+      if (aLat == null || aLng == null) return 1;
+      if (bLat == null || bLng == null) return -1;
+      final da = _distanceKm(centerLatitude, centerLongitude, aLat, aLng);
+      final db = _distanceKm(centerLatitude, centerLongitude, bLat, bLng);
+      return da.compareTo(db);
+    });
+    return sorted;
+  }
+
+  double _distanceKm(double lat1, double lon1, double lat2, double lon2) {
+    const earthRadiusKm = 6371.0;
+    final dLat = _degreesToRadians(lat2 - lat1);
+    final dLon = _degreesToRadians(lon2 - lon1);
+    final a =
+        math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_degreesToRadians(lat1)) *
+            math.cos(_degreesToRadians(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  double _degreesToRadians(double degrees) => degrees * math.pi / 180;
 }

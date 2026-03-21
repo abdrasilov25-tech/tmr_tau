@@ -267,6 +267,10 @@ create index if not exists idx_products_is_urgent
   on public.products (is_urgent);
 create index if not exists idx_products_is_top
   on public.products (is_top);
+create index if not exists idx_products_latitude
+  on public.products (latitude);
+create index if not exists idx_products_longitude
+  on public.products (longitude);
 
 create table if not exists public.post_likes (
   post_id uuid not null references public.posts(id) on delete cascade,

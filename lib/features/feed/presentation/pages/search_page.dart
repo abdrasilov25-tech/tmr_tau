@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -291,6 +293,9 @@ class _SearchPageState extends State<SearchPage> {
                     case _QuickFilterType.city:
                       updated = filters.copyWith(clearCity: true);
                       break;
+                    case _QuickFilterType.nearby:
+                      updated = filters.copyWith(clearNearby: true);
+                      break;
                     case _QuickFilterType.condition:
                       updated = filters.copyWith(
                         condition: ProductCondition.any,
@@ -332,7 +337,11 @@ class _SearchPageState extends State<SearchPage> {
                       return const _BottomSkeletonLoader();
                     final item = items[index];
                     if (item is SearchProductResultItem) {
-                      return _ProductSearchTile(product: item.product);
+                      return _ProductSearchTile(
+                        product: item.product,
+                        centerLatitude: filters.centerLatitude,
+                        centerLongitude: filters.centerLongitude,
+                      );
                     }
                     return const SizedBox.shrink();
                   },
@@ -356,14 +365,21 @@ class _InitialLoading extends StatelessWidget {
 }
 
 class _ProductSearchTile extends StatelessWidget {
-  const _ProductSearchTile({required this.product});
+  const _ProductSearchTile({
+    required this.product,
+    this.centerLatitude,
+    this.centerLongitude,
+  });
 
   final ProductEntity product;
+  final double? centerLatitude;
+  final double? centerLongitude;
 
   @override
   Widget build(BuildContext context) {
     final isTop = product.isTop;
     final isUrgent = product.isUrgent;
+    final distanceLabel = _buildDistanceLabel();
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       clipBehavior: Clip.antiAlias,
@@ -458,7 +474,7 @@ class _ProductSearchTile extends StatelessWidget {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    '${product.city?.trim().isNotEmpty == true ? product.city : 'Город не указан'}  •  ${product.createdAt != null ? _formatDate(product.createdAt!) : ''}',
+                    _buildMetaText(distanceLabel),
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ],
@@ -474,6 +490,57 @@ class _ProductSearchTile extends StatelessWidget {
     final month = value.month.toString().padLeft(2, '0');
     final day = value.day.toString().padLeft(2, '0');
     return '$day.$month.${value.year}';
+  }
+
+  String _buildMetaText(String? distanceLabel) {
+    final city = product.city?.trim().isNotEmpty == true
+        ? product.city!
+        : 'Город не указан';
+    final date = product.createdAt != null ? _formatDate(product.createdAt!) : '';
+    if (distanceLabel != null && date.isNotEmpty) {
+      return '$city  •  $distanceLabel  •  $date';
+    }
+    if (distanceLabel != null) return '$city  •  $distanceLabel';
+    if (date.isNotEmpty) return '$city  •  $date';
+    return city;
+  }
+
+  String? _buildDistanceLabel() {
+    final centerLat = centerLatitude;
+    final centerLng = centerLongitude;
+    final productLat = product.latitude;
+    final productLng = product.longitude;
+    if (centerLat == null ||
+        centerLng == null ||
+        productLat == null ||
+        productLng == null) {
+      return null;
+    }
+    final distanceKm = _distanceKm(centerLat, centerLng, productLat, productLng);
+    if (distanceKm < 1) {
+      return '${(distanceKm * 1000).round()} м';
+    }
+    return '${distanceKm.toStringAsFixed(1)} км';
+  }
+
+  double _distanceKm(double lat1, double lon1, double lat2, double lon2) {
+    const earthRadiusKm = 6371.0;
+    final dLat = _degreesToRadians(lat2 - lat1);
+    final dLon = _degreesToRadians(lon2 - lon1);
+    final a =
+        _sinSquared(dLat / 2) +
+        math.cos(_degreesToRadians(lat1)) *
+            math.cos(_degreesToRadians(lat2)) *
+            _sinSquared(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  double _degreesToRadians(double degrees) => degrees * math.pi / 180;
+
+  double _sinSquared(double value) {
+    final s = math.sin(value);
+    return s * s;
   }
 }
 
@@ -501,7 +568,7 @@ class _Badge extends StatelessWidget {
   }
 }
 
-enum _QuickFilterType { category, price, city, condition, sort }
+enum _QuickFilterType { category, price, city, nearby, condition, sort }
 
 class _QuickFilterRow extends StatelessWidget {
   const _QuickFilterRow({
@@ -548,6 +615,17 @@ class _QuickFilterRow extends StatelessWidget {
         onTap: onFilterTap,
         onDelete: (filters.city?.trim().isNotEmpty ?? false)
             ? () => onClearOne(_QuickFilterType.city)
+            : null,
+      ),
+      _quickChip(
+        context,
+        label: filters.radiusKm != null
+            ? 'Рядом: ${filters.radiusKm!.toStringAsFixed(0)} км'
+            : 'Рядом',
+        active: filters.radiusKm != null,
+        onTap: onFilterTap,
+        onDelete: filters.radiusKm != null
+            ? () => onClearOne(_QuickFilterType.nearby)
             : null,
       ),
       _quickChip(
@@ -732,6 +810,12 @@ class _FiltersSheetState extends State<_FiltersSheet> {
   late final TextEditingController _minCtrl;
   late final TextEditingController _maxCtrl;
   late final TextEditingController _cityCtrl;
+  bool _nearbyEnabled = false;
+  bool _resolvingLocation = false;
+  static const List<double> _radiusOptions = [1, 3, 5, 10, 20, 50];
+  late double _radiusKm;
+  double? _centerLat;
+  double? _centerLng;
 
   @override
   void initState() {
@@ -744,6 +828,10 @@ class _FiltersSheetState extends State<_FiltersSheet> {
       text: widget.initial.maxPrice?.toStringAsFixed(0) ?? '',
     );
     _cityCtrl = TextEditingController(text: widget.initial.city ?? '');
+    _nearbyEnabled = widget.initial.radiusKm != null;
+    _radiusKm = widget.initial.radiusKm ?? 5;
+    _centerLat = widget.initial.centerLatitude;
+    _centerLng = widget.initial.centerLongitude;
   }
 
   @override
@@ -828,6 +916,57 @@ class _FiltersSheetState extends State<_FiltersSheet> {
               decoration: const InputDecoration(labelText: 'Город'),
             ),
             const SizedBox(height: 10),
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Рядом со мной'),
+              subtitle: Text(
+                _centerLat == null || _centerLng == null
+                    ? 'Локация не выбрана'
+                    : 'Точка выбрана',
+              ),
+              value: _nearbyEnabled,
+              onChanged: (value) {
+                setState(() => _nearbyEnabled = value);
+              },
+            ),
+            if (_nearbyEnabled) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<double>(
+                      initialValue: _radiusKm,
+                      decoration: const InputDecoration(labelText: 'Радиус'),
+                      items: _radiusOptions
+                          .map(
+                            (e) => DropdownMenuItem<double>(
+                              value: e,
+                              child: Text('${e.toStringAsFixed(0)} км'),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() => _radiusKm = value);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: _resolvingLocation ? null : _pickCurrentLocation,
+                    icon: _resolvingLocation
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.my_location_rounded),
+                    label: const Text('Моя геопозиция'),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 10),
             DropdownButtonFormField<ProductCondition>(
               initialValue: _filters.condition,
               decoration: const InputDecoration(labelText: 'Состояние'),
@@ -890,13 +1029,21 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                     onPressed: () {
                       final min = double.tryParse(_minCtrl.text.trim());
                       final max = double.tryParse(_maxCtrl.text.trim());
+                      final canApplyNearby =
+                          _nearbyEnabled &&
+                          _centerLat != null &&
+                          _centerLng != null;
                       final out = _filters.copyWith(
                         minPrice: min,
                         maxPrice: max,
                         city: _cityCtrl.text.trim(),
+                        radiusKm: canApplyNearby ? _radiusKm : null,
+                        centerLatitude: canApplyNearby ? _centerLat : null,
+                        centerLongitude: canApplyNearby ? _centerLng : null,
                         clearCity: _cityCtrl.text.trim().isEmpty,
                         clearMinPrice: _minCtrl.text.trim().isEmpty,
                         clearMaxPrice: _maxCtrl.text.trim().isEmpty,
+                        clearNearby: !canApplyNearby,
                       );
                       Navigator.of(context).pop(out);
                     },
@@ -909,6 +1056,69 @@ class _FiltersSheetState extends State<_FiltersSheet> {
         ),
       ),
     );
+  }
+
+  Future<void> _pickCurrentLocation() async {
+    setState(() => _resolvingLocation = true);
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Включите геолокацию на устройстве')),
+        );
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Нет доступа к геолокации')),
+        );
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
+      if (!mounted) return;
+      setState(() {
+        _centerLat = pos.latitude;
+        _centerLng = pos.longitude;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Геопозиция выбрана для фильтра рядом')),
+      );
+    } on TimeoutException {
+      final last = await Geolocator.getLastKnownPosition();
+      if (!mounted) return;
+      if (last != null) {
+        setState(() {
+          _centerLat = last.latitude;
+          _centerLng = last.longitude;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Использована последняя геопозиция')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось определить геопозицию')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ошибка получения геопозиции')),
+      );
+    } finally {
+      if (mounted) setState(() => _resolvingLocation = false);
+    }
   }
 }
 
