@@ -314,6 +314,13 @@ create table if not exists public.reposts (
   primary key (post_id, user_id)
 );
 
+create table if not exists public.post_saves (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (post_id, user_id)
+);
+
 -- ============== NOTIFICATIONS ==============
 create table if not exists public.notifications (
   id uuid primary key default gen_random_uuid(),
@@ -360,6 +367,7 @@ alter table public.post_likes enable row level security;
 alter table public.post_comments enable row level security;
 alter table public.post_dislikes enable row level security;
 alter table public.reposts enable row level security;
+alter table public.post_saves enable row level security;
 alter table public.favorites enable row level security;
 alter table public.orders enable row level security;
 
@@ -377,6 +385,8 @@ drop policy if exists "Post dislikes select" on public.post_dislikes;
 drop policy if exists "Post dislikes all" on public.post_dislikes;
 drop policy if exists "Reposts select" on public.reposts;
 drop policy if exists "Reposts all" on public.reposts;
+drop policy if exists "Post saves select" on public.post_saves;
+drop policy if exists "Post saves all" on public.post_saves;
 
 create policy "Posts select" on public.posts for select using (true);
 create policy "Posts insert" on public.posts for insert with check (auth.uid() = user_id);
@@ -395,6 +405,8 @@ create policy "Post dislikes all" on public.post_dislikes for all using (auth.ui
 
 create policy "Reposts select" on public.reposts for select using (true);
 create policy "Reposts all" on public.reposts for all using (auth.uid() = user_id);
+create policy "Post saves select" on public.post_saves for select using (auth.uid() = user_id);
+create policy "Post saves all" on public.post_saves for all using (auth.uid() = user_id);
 
 drop policy if exists "Users select" on public.users;
 drop policy if exists "Users update own" on public.users;
@@ -571,7 +583,8 @@ insert into storage.buckets (id, name, public)
 values
   ('products', 'products', true),
   ('posts', 'posts', true),
-  ('stories', 'stories', true)
+  ('stories', 'stories', true),
+  ('avatars', 'avatars', true)
 on conflict (id) do update set name = excluded.name, public = excluded.public;
 
 -- Политики Storage: загрузка для авторизованных, чтение для всех
@@ -589,6 +602,11 @@ drop policy if exists "Allow authenticated uploads to stories" on storage.object
 drop policy if exists "Allow public read stories" on storage.objects;
 create policy "Allow authenticated uploads to stories" on storage.objects for insert to authenticated with check (bucket_id = 'stories');
 create policy "Allow public read stories" on storage.objects for select to public using (bucket_id = 'stories');
+
+drop policy if exists "Allow authenticated uploads to avatars" on storage.objects;
+drop policy if exists "Allow public read avatars" on storage.objects;
+create policy "Allow authenticated uploads to avatars" on storage.objects for insert to authenticated with check (bucket_id = 'avatars');
+create policy "Allow public read avatars" on storage.objects for select to public using (bucket_id = 'avatars');
 
 -- ============== Delete expired stories (run via cron or Edge Function) ==============
 -- delete from public.stories where expires_at < now();
@@ -683,6 +701,185 @@ create policy "Hidden stories insert own"
 create policy "Hidden stories delete own"
   on public.hidden_stories for delete
   using (auth.uid() = owner_id);
+
+
+-- Group chats
+create table if not exists public.chat_groups (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null references public.users(id) on delete cascade,
+  title text not null,
+  description text default '',
+  avatar_url text default '',
+  updated_at timestamptz default now(),
+  created_at timestamptz default now()
+);
+
+create table if not exists public.chat_group_members (
+  group_id uuid not null references public.chat_groups(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  joined_at timestamptz default now(),
+  primary key (group_id, user_id)
+);
+
+create table if not exists public.chat_group_messages (
+  id uuid primary key default gen_random_uuid(),
+  group_id uuid not null references public.chat_groups(id) on delete cascade,
+  sender_id uuid not null references public.users(id) on delete cascade,
+  text text not null,
+  created_at timestamptz default now()
+);
+
+alter table public.chat_groups enable row level security;
+alter table public.chat_group_members enable row level security;
+alter table public.chat_group_messages enable row level security;
+
+drop policy if exists "Chat groups select members" on public.chat_groups;
+drop policy if exists "Chat groups insert own" on public.chat_groups;
+drop policy if exists "Chat groups update owner" on public.chat_groups;
+drop policy if exists "Chat groups delete owner" on public.chat_groups;
+drop policy if exists "Chat group members select own groups" on public.chat_group_members;
+drop policy if exists "Chat group members insert by owner" on public.chat_group_members;
+drop policy if exists "Chat group members delete by owner_or_self" on public.chat_group_members;
+drop policy if exists "Chat group messages select by member" on public.chat_group_messages;
+drop policy if exists "Chat group messages insert by member" on public.chat_group_messages;
+
+create or replace function public.is_group_member(_group_id uuid, _user_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.chat_group_members m
+    where m.group_id = _group_id
+      and m.user_id = _user_id
+  );
+$$;
+
+revoke all on function public.is_group_member(uuid, uuid) from public;
+grant execute on function public.is_group_member(uuid, uuid) to authenticated;
+
+create policy "Chat groups select members"
+  on public.chat_groups for select
+  using (
+    owner_id = auth.uid()
+    or public.is_group_member(id, auth.uid())
+  );
+
+create policy "Chat groups insert own"
+  on public.chat_groups for insert
+  with check (auth.uid() = owner_id);
+
+create policy "Chat groups update owner"
+  on public.chat_groups for update
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+create policy "Chat groups delete owner"
+  on public.chat_groups for delete
+  using (auth.uid() = owner_id);
+
+create policy "Chat group members select own groups"
+  on public.chat_group_members for select
+  using (
+    public.is_group_member(group_id, auth.uid())
+    or exists (
+      select 1 from public.chat_groups g
+      where g.id = chat_group_members.group_id
+        and g.owner_id = auth.uid()
+    )
+  );
+
+create policy "Chat group members insert by owner"
+  on public.chat_group_members for insert
+  with check (
+    exists (
+      select 1 from public.chat_groups g
+      where g.id = chat_group_members.group_id
+        and g.owner_id = auth.uid()
+    )
+  );
+
+create policy "Chat group members delete by owner_or_self"
+  on public.chat_group_members for delete
+  using (
+    user_id = auth.uid()
+    or exists (
+      select 1 from public.chat_groups g
+      where g.id = chat_group_members.group_id
+        and g.owner_id = auth.uid()
+    )
+  );
+
+create policy "Chat group messages select by member"
+  on public.chat_group_messages for select
+  using (public.is_group_member(group_id, auth.uid()));
+
+create policy "Chat group messages insert by member"
+  on public.chat_group_messages for insert
+  with check (
+    auth.uid() = sender_id
+    and public.is_group_member(group_id, auth.uid())
+  );
+
+-- Personal channels
+create table if not exists public.user_channels (
+  id uuid primary key default gen_random_uuid(),
+  owner_id uuid not null unique references public.users(id) on delete cascade,
+  title text not null default 'Мой канал',
+  created_at timestamptz default now()
+);
+
+create table if not exists public.channel_messages (
+  id uuid primary key default gen_random_uuid(),
+  channel_id uuid not null references public.user_channels(id) on delete cascade,
+  sender_id uuid not null references public.users(id) on delete cascade,
+  text text not null,
+  created_at timestamptz default now()
+);
+
+alter table public.user_channels enable row level security;
+alter table public.channel_messages enable row level security;
+
+drop policy if exists "User channels select all" on public.user_channels;
+drop policy if exists "User channels insert own" on public.user_channels;
+drop policy if exists "User channels update own" on public.user_channels;
+drop policy if exists "Channel messages select all" on public.channel_messages;
+drop policy if exists "Channel messages insert owner" on public.channel_messages;
+
+create policy "User channels select all"
+  on public.user_channels for select
+  using (true);
+
+create policy "User channels insert own"
+  on public.user_channels for insert
+  with check (auth.uid() = owner_id);
+
+create policy "User channels update own"
+  on public.user_channels for update
+  using (auth.uid() = owner_id)
+  with check (auth.uid() = owner_id);
+
+create policy "Channel messages select all"
+  on public.channel_messages for select
+  using (
+    exists (
+      select 1 from public.user_channels c
+      where c.id = channel_messages.channel_id
+    )
+  );
+
+create policy "Channel messages insert owner"
+  on public.channel_messages for insert
+  with check (
+    auth.uid() = sender_id
+    and exists (
+      select 1 from public.user_channels c
+      where c.id = channel_messages.channel_id
+        and c.owner_id = auth.uid()
+    )
+  );
 
 
 -- Support tickets ("Report a problem")

@@ -779,6 +779,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.bookmark_border_rounded),
+              title: const Text('Сохранённые публикации'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/saved-publications');
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.edit_outlined),
               title: const Text('Редактировать профиль'),
               onTap: () {

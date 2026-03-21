@@ -19,6 +19,7 @@ class PostEntity extends Equatable {
     this.isLikedByMe = false,
     this.isDislikedByMe = false,
     this.isRepostedByMe = false,
+    this.isSavedByMe = false,
   });
 
   final String id;
@@ -38,6 +39,7 @@ class PostEntity extends Equatable {
   final bool isLikedByMe;
   final bool isDislikedByMe;
   final bool isRepostedByMe;
+  final bool isSavedByMe;
 
   PostEntity copyWith({
     String? id,
@@ -59,6 +61,7 @@ class PostEntity extends Equatable {
     bool? isLikedByMe,
     bool? isDislikedByMe,
     bool? isRepostedByMe,
+    bool? isSavedByMe,
   }) {
     return PostEntity(
       id: id ?? this.id,
@@ -78,6 +81,7 @@ class PostEntity extends Equatable {
       isLikedByMe: isLikedByMe ?? this.isLikedByMe,
       isDislikedByMe: isDislikedByMe ?? this.isDislikedByMe,
       isRepostedByMe: isRepostedByMe ?? this.isRepostedByMe,
+      isSavedByMe: isSavedByMe ?? this.isSavedByMe,
     );
   }
 
@@ -100,5 +104,6 @@ class PostEntity extends Equatable {
         isLikedByMe,
         isDislikedByMe,
         isRepostedByMe,
+        isSavedByMe,
       ];
 }

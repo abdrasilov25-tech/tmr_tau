@@ -102,35 +102,14 @@ class _MainHomePageState extends State<MainHomePage> {
     _posts.clear();
     try {
       final repo = context.read<PostRepository>();
-      if (_currentUserId != null) {
-        final myPosts = await repo.getPostsByUser(
-          _currentUserId!,
-          currentUserId: _currentUserId,
-        );
-        if (!mounted) return;
-        var myPublications = myPosts
-            .where((p) => p.kind.trim().toLowerCase() != 'news')
-            .toList(growable: false)
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        if (myPublications.isEmpty && myPosts.isNotEmpty) {
-          myPublications = myPosts.toList(growable: false)
-            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        }
-        setState(() {
-          _posts.addAll(myPublications);
-          _hasMore = false;
-          _initialLoading = false;
-        });
-        debugPrint('[MainHomePage] loaded my publications=${myPublications.length}');
-        return;
-      }
       var list = await repo.getFeedPosts(
         limit: _pageSize,
         offset: _offset,
         currentUserId: _currentUserId,
       );
       var publicationOnly = list
-          .where((p) => p.kind.trim().toLowerCase() != 'news')
+          .where((p) => p.kind.trim().toLowerCase() == 'publication')
+          .where((p) => _currentUserId == null || p.userId != _currentUserId)
           .toList(growable: false);
       var scanOffset = _offset;
       var scanHasMore = list.length >= _pageSize;
@@ -144,26 +123,10 @@ class _MainHomePageState extends State<MainHomePage> {
         );
         if (!mounted) return;
         publicationOnly = list
-            .where((p) => p.kind.trim().toLowerCase() != 'news')
+            .where((p) => p.kind.trim().toLowerCase() == 'publication')
+            .where((p) => _currentUserId == null || p.userId != _currentUserId)
             .toList(growable: false);
         scanHasMore = list.length >= _pageSize;
-      }
-      if (_currentUserId != null) {
-        final myPosts = await repo.getPostsByUser(
-          _currentUserId!,
-          currentUserId: _currentUserId,
-        );
-        final myPublications = myPosts
-            .where((p) => p.kind.trim().toLowerCase() != 'news')
-            .toList(growable: false);
-        if (myPublications.isNotEmpty) {
-          final byId = <String, PostEntity>{
-            for (final p in myPublications) p.id: p,
-            for (final p in publicationOnly) p.id: p,
-          };
-          publicationOnly = byId.values.toList(growable: false)
-            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        }
       }
       if (!mounted) return;
 
@@ -185,7 +148,6 @@ class _MainHomePageState extends State<MainHomePage> {
 
   Future<void> _loadMore() async {
     if (!_hasMore) return;
-    if (_currentUserId != null) return;
     setState(() => _isLoadingMore = true);
     try {
       final repo = context.read<PostRepository>();
@@ -195,7 +157,8 @@ class _MainHomePageState extends State<MainHomePage> {
         currentUserId: _currentUserId,
       );
       var publicationOnly = list
-          .where((p) => p.kind.trim().toLowerCase() != 'news')
+          .where((p) => p.kind.trim().toLowerCase() == 'publication')
+          .where((p) => _currentUserId == null || p.userId != _currentUserId)
           .toList(growable: false);
       var scanOffset = _offset;
       var scanHasMore = list.length >= _pageSize;
@@ -209,7 +172,8 @@ class _MainHomePageState extends State<MainHomePage> {
         );
         if (!mounted) return;
         publicationOnly = list
-            .where((p) => p.kind.trim().toLowerCase() != 'news')
+            .where((p) => p.kind.trim().toLowerCase() == 'publication')
+            .where((p) => _currentUserId == null || p.userId != _currentUserId)
             .toList(growable: false);
         scanHasMore = list.length >= _pageSize;
       }
@@ -345,6 +309,29 @@ class _MainHomePageState extends State<MainHomePage> {
 
     try {
       await context.read<PostRepository>().toggleRepost(post.id, userId);
+      await _refreshPost(post.id);
+    } catch (_) {
+      await _refreshPost(post.id);
+    }
+  }
+
+  Future<void> _toggleSave(PostEntity post) async {
+    final userId = _currentUserId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы сохранять публикации')),
+      );
+      return;
+    }
+
+    final isNowSaved = !post.isSavedByMe;
+    setState(() {
+      final i = _posts.indexWhere((p) => p.id == post.id);
+      if (i == -1) return;
+      _posts[i] = post.copyWith(isSavedByMe: isNowSaved);
+    });
+    try {
+      await context.read<PostRepository>().toggleSave(post.id, userId);
       await _refreshPost(post.id);
     } catch (_) {
       await _refreshPost(post.id);
@@ -599,6 +586,7 @@ class _MainHomePageState extends State<MainHomePage> {
                               currentUserId: _currentUserId,
                               onLike: () => _toggleLike(post),
                               onRepost: () => _toggleRepost(post),
+                              onSave: () => _toggleSave(post),
                               onComment: () async {
                                 await context.push('/post/${post.id}', extra: post);
                                 await _refreshPost(post.id);
@@ -668,6 +656,7 @@ class _InstagramPostItem extends StatefulWidget {
     required this.onLike,
     required this.onComment,
     required this.onRepost,
+    required this.onSave,
     required this.onShare,
   });
 
@@ -678,6 +667,7 @@ class _InstagramPostItem extends StatefulWidget {
   final VoidCallback onLike;
   final VoidCallback onComment;
   final VoidCallback onRepost;
+  final VoidCallback onSave;
   final VoidCallback onShare;
 
   @override
@@ -792,7 +782,11 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
                           count: p.repostsCount,
                           onTap: widget.onRepost,
                         ),
-                        const SizedBox(width: 4),
+                        _SaveButton(
+                          onTap: widget.onSave,
+                          isSaved: p.isSavedByMe,
+                        ),
+                        const SizedBox(width: 2),
                         _ShareButton(
                           onTap: widget.onShare,
                           label: 'Поделиться',
@@ -945,6 +939,48 @@ class _ActionButton extends StatelessWidget {
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
                   fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SaveButton extends StatelessWidget {
+  const _SaveButton({required this.onTap, required this.isSaved});
+
+  final VoidCallback onTap;
+  final bool isSaved;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+        child: SizedBox(
+          width: 54,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                isSaved ? Icons.bookmark : Icons.bookmark_border,
+                color: Colors.white,
+                size: 25,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Сохран.',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 11,
                 ),
               ),
             ],
@@ -1354,7 +1390,7 @@ class _ShareToUserSheetState extends State<_ShareToUserSheet> {
             Expanded(
               child: ListView.separated(
                 itemCount: _users.length,
-                separatorBuilder: (_, __) => const Divider(color: Colors.white12, height: 1),
+                separatorBuilder: (_, _) => const Divider(color: Colors.white12, height: 1),
                 itemBuilder: (context, index) {
                   final u = _users[index];
                   return ListTile(
