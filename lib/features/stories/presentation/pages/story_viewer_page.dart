@@ -203,30 +203,39 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: PageView.builder(
-        controller: _groupPageController,
-        scrollDirection: Axis.vertical,
-        physics: const NeverScrollableScrollPhysics(),
-        itemCount: widget.groups.length,
-        onPageChanged: (i) {
-          setState(() => _currentGroupIndex = i);
-          _remainingDuration = _storyDuration;
-          _startTimer();
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragEnd: (details) {
+          final velocity = details.primaryVelocity ?? 0;
+          if (velocity > 350) {
+            context.pop();
+          }
         },
-        itemBuilder: (context, groupIndex) {
-          final group = widget.groups[groupIndex];
-          return _StoryGroupView(
-            group: group,
-            storyController: _storyPageControllers[groupIndex],
-            onNext: _goNext,
-            onPrev: _goPrev,
-            onPause: _pausePlayback,
-            onResume: _resumePlayback,
-            isPaused: _isPaused,
-            currentUserId: currentUserId,
-            storiesRepository: storiesRepo,
-          );
-        },
+        child: PageView.builder(
+          controller: _groupPageController,
+          scrollDirection: Axis.vertical,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: widget.groups.length,
+          onPageChanged: (i) {
+            setState(() => _currentGroupIndex = i);
+            _remainingDuration = _storyDuration;
+            _startTimer();
+          },
+          itemBuilder: (context, groupIndex) {
+            final group = widget.groups[groupIndex];
+            return _StoryGroupView(
+              group: group,
+              storyController: _storyPageControllers[groupIndex],
+              onNext: _goNext,
+              onPrev: _goPrev,
+              onPause: _pausePlayback,
+              onResume: _resumePlayback,
+              isPaused: _isPaused,
+              currentUserId: currentUserId,
+              storiesRepository: storiesRepo,
+            );
+          },
+        ),
       ),
     );
   }
@@ -365,6 +374,10 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                         ),
                         title: Text(v.viewerName ?? 'Пользователь'),
                         subtitle: Text('Просмотрено в $time'),
+                        onTap: () {
+                          Navigator.of(ctx).pop();
+                          context.push('/profile/${v.viewerId}');
+                        },
                       );
                     },
                   ),
