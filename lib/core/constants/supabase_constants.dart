@@ -22,6 +22,9 @@ class SupabaseConstants {
   static const String postCommentsTable = 'post_comments';
   static const String repostsTable = 'reposts';
   static const String postSavesTable = 'post_saves';
+  /// Просмотры публикаций в ленте (персональные рекомендации).
+  static const String publicationFeedImpressionsTable =
+      'publication_feed_impressions';
   static const String messagesTable = 'messages';
   static const String chatGroupsTable = 'chat_groups';
   static const String chatGroupMembersTable = 'chat_group_members';

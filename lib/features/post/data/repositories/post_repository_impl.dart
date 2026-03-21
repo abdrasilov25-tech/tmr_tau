@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/post_comment_entity.dart';
 import '../../domain/entities/post_entity.dart';
+import '../../domain/entities/publication_feed_page_result.dart';
 import '../../domain/exceptions/post_comment_exceptions.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../models/post_comment_model.dart';
@@ -11,6 +14,8 @@ class PostRepositoryImpl implements PostRepository {
   PostRepositoryImpl(this._client);
   final SupabaseClient _client;
 
+  static const String _postSelect = '*, users!user_id(name, avatar)';
+
   @override
   Future<List<PostEntity>> getFeedPosts({
     int limit = 20,
@@ -19,7 +24,7 @@ class PostRepositoryImpl implements PostRepository {
   }) async {
     var res = await _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select(_postSelect)
         .order('created_at', ascending: false)
         .range(offset, offset + limit - 1);
     var list =
@@ -34,50 +39,401 @@ class PostRepositoryImpl implements PostRepository {
           .map((e) => _mapPost(e as Map<String, dynamic>))
           .toList();
     }
-    if (currentUserId != null && list.isNotEmpty) {
-      final ids = list.map((e) => e.id).toList();
-      final likes = await _client
-          .from(SupabaseConstants.postLikesTable)
-          .select('post_id')
-          .eq('user_id', currentUserId)
-          .inFilter('post_id', ids);
-      final reposts = await _client
-          .from(SupabaseConstants.repostsTable)
-          .select('post_id')
-          .eq('user_id', currentUserId)
-          .inFilter('post_id', ids);
-      final saves = await _client
-          .from(SupabaseConstants.postSavesTable)
-          .select('post_id')
-          .eq('user_id', currentUserId)
-          .inFilter('post_id', ids);
-      final likedIds = (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
-      final repostedIds = (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
-      final savedIds = (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
-      return list
-          .map((p) => PostModel(
-                id: p.id,
-                userId: p.userId,
-                kind: p.kind,
-                imageUrl: p.imageUrl,
-                caption: p.caption,
-                videoUrl: p.videoUrl,
-                videoDurationSeconds: p.videoDurationSeconds,
-                createdAt: p.createdAt,
-                likesCount: p.likesCount,
-                dislikesCount: p.dislikesCount,
-                commentsCount: p.commentsCount,
-                repostsCount: p.repostsCount,
-                userName: p.userName,
-                userAvatarUrl: p.userAvatarUrl,
-                isLikedByMe: likedIds.contains(p.id),
-                isDislikedByMe: p.isDislikedByMe,
-                isRepostedByMe: repostedIds.contains(p.id),
-                isSavedByMe: savedIds.contains(p.id),
-              ))
-          .toList();
+    return await _applyPostUserState(list, currentUserId);
+  }
+
+  Future<List<PostEntity>> _applyPostUserState(
+    List<PostEntity> list,
+    String? currentUserId,
+  ) async {
+    if (currentUserId == null || list.isEmpty) return list;
+    final ids = list.map((e) => e.id).toList();
+    final likes = await _client
+        .from(SupabaseConstants.postLikesTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+    final reposts = await _client
+        .from(SupabaseConstants.repostsTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+    final saves = await _client
+        .from(SupabaseConstants.postSavesTable)
+        .select('post_id')
+        .eq('user_id', currentUserId)
+        .inFilter('post_id', ids);
+    final likedIds =
+        (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
+    final repostedIds =
+        (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
+    final savedIds =
+        (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
+    return list
+        .map(
+          (p) => PostModel(
+            id: p.id,
+            userId: p.userId,
+            kind: p.kind,
+            imageUrl: p.imageUrl,
+            caption: p.caption,
+            videoUrl: p.videoUrl,
+            videoDurationSeconds: p.videoDurationSeconds,
+            createdAt: p.createdAt,
+            likesCount: p.likesCount,
+            dislikesCount: p.dislikesCount,
+            commentsCount: p.commentsCount,
+            repostsCount: p.repostsCount,
+            userName: p.userName,
+            userAvatarUrl: p.userAvatarUrl,
+            isLikedByMe: likedIds.contains(p.id),
+            isDislikedByMe: p.isDislikedByMe,
+            isRepostedByMe: repostedIds.contains(p.id),
+            isSavedByMe: savedIds.contains(p.id),
+          ),
+        )
+        .toList();
+  }
+
+  @override
+  Future<PublicationFeedPageResult> getPublicationsFeedSubscriptions({
+    String? currentUserId,
+    required List<String> followingUserIds,
+    int limit = 10,
+    int offset = 0,
+  }) async {
+    final me = currentUserId;
+    final following =
+        followingUserIds.where((id) => id != me).toList(growable: false);
+    if (following.isEmpty) {
+      return const PublicationFeedPageResult(posts: [], nextOffset: 0);
     }
-    return list;
+    final res = await _client
+        .from(SupabaseConstants.postsTable)
+        .select(_postSelect)
+        .eq('kind', 'publication')
+        .inFilter('user_id', following)
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
+    final list = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+    final enriched = await _applyPostUserState(list, me);
+    return PublicationFeedPageResult(
+      posts: enriched,
+      nextOffset: offset + list.length,
+    );
+  }
+
+  @override
+  Future<PublicationFeedPageResult> getPublicationsFeedRecommendations({
+    String? currentUserId,
+    required List<String> followingUserIds,
+    int limit = 10,
+    int discoveryDbOffset = 0,
+  }) async {
+    final me = currentUserId;
+    final followingIdsSet =
+        followingUserIds.where((id) => id != me).toSet();
+
+    final targetPool = math.max(limit * 4, limit);
+    final discoveryPosts = <PostEntity>[];
+    var nextDiscoveryDb = discoveryDbOffset;
+    const batchSize = 40;
+    var scanned = 0;
+    const maxScan = 2000;
+
+    while (discoveryPosts.length < targetPool && scanned < maxScan) {
+      final res = await _client
+          .from(SupabaseConstants.postsTable)
+          .select(_postSelect)
+          .eq('kind', 'publication')
+          .order('created_at', ascending: false)
+          .range(nextDiscoveryDb, nextDiscoveryDb + batchSize - 1);
+      final batch = (res as List)
+          .map((e) => _mapPost(e as Map<String, dynamic>))
+          .toList(growable: false);
+      if (batch.isEmpty) {
+        break;
+      }
+      for (final p in batch) {
+        if (me != null && p.userId == me) {
+          continue;
+        }
+        if (followingIdsSet.contains(p.userId)) {
+          continue;
+        }
+        discoveryPosts.add(p);
+        if (discoveryPosts.length >= targetPool) {
+          break;
+        }
+      }
+      nextDiscoveryDb += batch.length;
+      scanned += batch.length;
+    }
+
+    final rng = math.Random();
+    List<PostEntity> ranked;
+    if (me == null) {
+      discoveryPosts.shuffle(rng);
+      ranked = discoveryPosts.take(limit).toList(growable: false);
+    } else {
+      final signals = await _loadRecommendationSignals(me);
+      ranked = _rankRecommendations(
+        discoveryPosts,
+        signals,
+        rng,
+        limit,
+      );
+    }
+
+    final enriched = await _applyPostUserState(ranked, me);
+
+    return PublicationFeedPageResult(
+      posts: enriched,
+      nextOffset: nextDiscoveryDb,
+    );
+  }
+
+  @override
+  Future<void> recordPublicationFeedImpression({
+    required String postId,
+    required int watchedMsDelta,
+    bool completed = false,
+  }) async {
+    if (_client.auth.currentUser == null) return;
+    if (watchedMsDelta <= 0 && !completed) return;
+    try {
+      await _client.rpc<void>(
+        'increment_publication_feed_impression',
+        params: {
+          'p_post_id': postId,
+          'p_delta_ms': watchedMsDelta,
+          'p_completed': completed,
+        },
+      );
+    } catch (_) {
+      // Таблица/RPC могут быть ещё не применены на стенде.
+    }
+  }
+
+  /// Хэштеги: `#слово` или `#word123` (Unicode).
+  static final RegExp _hashtagRe = RegExp(
+    r'#([^\s#]+)',
+    unicode: true,
+  );
+
+  static List<String> _extractHashtags(String caption) {
+    final tags = <String>[];
+    for (final m in _hashtagRe.allMatches(caption)) {
+      final raw = m.group(1);
+      if (raw == null || raw.isEmpty) continue;
+      tags.add(raw.toLowerCase());
+    }
+    return tags;
+  }
+
+  static List<List<T>> _chunkList<T>(List<T> list, int size) {
+    final out = <List<T>>[];
+    for (var i = 0; i < list.length; i += size) {
+      final end = i + size > list.length ? list.length : i + size;
+      out.add(list.sublist(i, end));
+    }
+    return out;
+  }
+
+  static void _normalize01(Map<String, double> m) {
+    if (m.isEmpty) return;
+    var mx = 0.0;
+    for (final v in m.values) {
+      if (v > mx) mx = v;
+    }
+    if (mx <= 0) return;
+    for (final k in m.keys.toList()) {
+      m[k] = m[k]! / mx;
+    }
+  }
+
+  static void _mergeScores(
+    Map<String, double> dest,
+    Map<String, double> src, {
+    double scale = 1,
+  }) {
+    for (final e in src.entries) {
+      dest[e.key] = (dest[e.key] ?? 0) + e.value * scale;
+    }
+  }
+
+  Future<Map<String, double>> _authorWeightsFromPostIds(
+    List<String> postIds,
+    double weightPerHit,
+  ) async {
+    final scores = <String, double>{};
+    if (postIds.isEmpty) return scores;
+    for (final batch in _chunkList(postIds, 120)) {
+      final res = await _client
+          .from(SupabaseConstants.postsTable)
+          .select('id, user_id, kind')
+          .inFilter('id', batch);
+      for (final row in res as List) {
+        final m = row as Map<String, dynamic>;
+        if (m['kind'] != 'publication') continue;
+        final uid = m['user_id'] as String;
+        scores[uid] = (scores[uid] ?? 0) + weightPerHit;
+      }
+    }
+    return scores;
+  }
+
+  Future<Map<String, double>> _authorWeightsFromLikes(String userId) async {
+    final res = await _client
+        .from(SupabaseConstants.postLikesTable)
+        .select('post_id')
+        .eq('user_id', userId)
+        .limit(500);
+    final ids = (res as List)
+        .map((e) => (e as Map)['post_id'] as String)
+        .toList(growable: false);
+    return _authorWeightsFromPostIds(ids, 5.0);
+  }
+
+  Future<Map<String, double>> _authorWeightsFromSaves(String userId) async {
+    final res = await _client
+        .from(SupabaseConstants.postSavesTable)
+        .select('post_id')
+        .eq('user_id', userId)
+        .limit(500);
+    final ids = (res as List)
+        .map((e) => (e as Map)['post_id'] as String)
+        .toList(growable: false);
+    return _authorWeightsFromPostIds(ids, 4.0);
+  }
+
+  Future<Map<String, double>> _authorWeightsFromImpressions(
+    String userId,
+  ) async {
+    final res = await _client
+        .from(SupabaseConstants.publicationFeedImpressionsTable)
+        .select('post_id, watched_ms')
+        .eq('user_id', userId)
+        .limit(800);
+    final rows = (res as List)
+        .map((e) => e as Map<String, dynamic>)
+        .toList(growable: false);
+    if (rows.isEmpty) return {};
+    final ids = rows.map((e) => e['post_id'] as String).toList(growable: false);
+    final authorByPost = <String, String>{};
+    for (final batch in _chunkList(ids, 120)) {
+      final pres = await _client
+          .from(SupabaseConstants.postsTable)
+          .select('id, user_id, kind')
+          .inFilter('id', batch);
+      for (final row in pres as List) {
+        final m = row as Map<String, dynamic>;
+        if (m['kind'] != 'publication') continue;
+        authorByPost[m['id'] as String] = m['user_id'] as String;
+      }
+    }
+    final scores = <String, double>{};
+    for (final row in rows) {
+      final pid = row['post_id'] as String;
+      final ms = (row['watched_ms'] as num?)?.toInt() ?? 0;
+      final author = authorByPost[pid];
+      if (author == null) continue;
+      final w = math.min(ms / 25000.0, 4.0);
+      scores[author] = (scores[author] ?? 0) + w;
+    }
+    return scores;
+  }
+
+  Future<Map<String, double>> _hashtagAffinityFromLikes(String userId) async {
+    final res = await _client
+        .from(SupabaseConstants.postLikesTable)
+        .select('post_id')
+        .eq('user_id', userId)
+        .limit(400);
+    final ids = (res as List)
+        .map((e) => (e as Map)['post_id'] as String)
+        .toList(growable: false);
+    if (ids.isEmpty) return {};
+    final tagCounts = <String, double>{};
+    for (final batch in _chunkList(ids, 80)) {
+      final pres = await _client
+          .from(SupabaseConstants.postsTable)
+          .select('caption, kind')
+          .inFilter('id', batch);
+      for (final row in pres as List) {
+        final m = row as Map<String, dynamic>;
+        if (m['kind'] != 'publication') continue;
+        final cap = m['caption'] as String? ?? '';
+        for (final t in _extractHashtags(cap)) {
+          tagCounts[t] = (tagCounts[t] ?? 0) + 1;
+        }
+      }
+    }
+    _normalize01(tagCounts);
+    return tagCounts;
+  }
+
+  Future<_RecommendationSignals> _loadRecommendationSignals(String userId) async {
+    final futures = await Future.wait([
+      _authorWeightsFromLikes(userId),
+      _authorWeightsFromSaves(userId),
+      _authorWeightsFromImpressions(userId),
+      _hashtagAffinityFromLikes(userId),
+    ]);
+    final likes = futures[0];
+    final saves = futures[1];
+    final impressions = futures[2];
+    final tags = futures[3];
+
+    final author = <String, double>{};
+    _mergeScores(author, likes);
+    _mergeScores(author, saves);
+    _mergeScores(author, impressions);
+    _normalize01(author);
+
+    return _RecommendationSignals(authorNorm: author, hashtagNorm: tags);
+  }
+
+  static List<PostEntity> _rankRecommendations(
+    List<PostEntity> candidates,
+    _RecommendationSignals signals,
+    math.Random rng,
+    int limit,
+  ) {
+    if (candidates.isEmpty) return [];
+    final scored = <({PostEntity p, double s})>[];
+    for (final p in candidates) {
+      final s = _scorePublication(p, signals, rng);
+      scored.add((p: p, s: s));
+    }
+    scored.sort((a, b) => b.s.compareTo(a.s));
+    return scored.take(limit).map((e) => e.p).toList(growable: false);
+  }
+
+  static double _scorePublication(
+    PostEntity p,
+    _RecommendationSignals signals,
+    math.Random rng,
+  ) {
+    final a = signals.authorNorm[p.userId] ?? 0.0;
+    final tags = _extractHashtags(p.caption);
+    double t = 0;
+    if (tags.isNotEmpty) {
+      for (final tag in tags) {
+        t += signals.hashtagNorm[tag] ?? 0.0;
+      }
+      t /= tags.length;
+    }
+    final pop = math.log(1 + p.likesCount) / 12.0;
+    final ageH = DateTime.now().difference(p.createdAt).inHours;
+    final recency = math.exp(-ageH / 96.0);
+    return 4.2 * a +
+        2.5 * t +
+        0.9 * pop +
+        1.8 * recency +
+        0.35 * rng.nextDouble();
   }
 
   @override
@@ -823,4 +1179,14 @@ class PostRepositoryImpl implements PostRepository {
     if (post == null) return null;
     return post['user_id'] as String?;
   }
+}
+
+class _RecommendationSignals {
+  const _RecommendationSignals({
+    required this.authorNorm,
+    required this.hashtagNorm,
+  });
+
+  final Map<String, double> authorNorm;
+  final Map<String, double> hashtagNorm;
 }

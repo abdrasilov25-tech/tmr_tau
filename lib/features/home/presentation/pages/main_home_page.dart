@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
@@ -21,7 +20,8 @@ import '../../../notifications/domain/repositories/notifications_repository.dart
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 
-/// Экран «Главное» — Instagram-подобная лента публикаций.
+/// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
+/// **Рекомендации** и **Подписки** (без своих постов — они в профиле).
 ///
 /// Подключение:
 /// - Для показа медиа используются поля `imageUrl/videoUrl` у `PostEntity`.
@@ -36,20 +36,47 @@ class MainHomePage extends StatefulWidget {
   State<MainHomePage> createState() => _MainHomePageState();
 }
 
+enum _FeedTab {
+  /// «Для вас» — не от себя и не от подписок; персональный скор (лайки/сохранения/просмотры/хэштеги).
+  recommendations,
+  /// Только авторы из подписок.
+  subscriptions,
+}
+
 class _MainHomePageState extends State<MainHomePage> {
   static const int _pageSize = 10;
 
   final _scrollController = ScrollController();
-  final _feedKey = const PageStorageKey<String>('main_home_feed');
+
+  /// Высота одной карточки ленты (для расчёта видимого индекса и просмотров).
+  double? _feedItemHeight;
+  String? _impressionActivePostId;
+  Timer? _impressionTimer;
 
   bool _initialLoading = true;
   bool _isLoadingMore = false;
-  bool _hasMore = true;
   bool _storiesLoading = true;
   bool _storyRetryScheduled = false;
-  int _offset = 0;
 
-  final List<PostEntity> _posts = [];
+  _FeedTab _feedTab = _FeedTab.recommendations;
+
+  final List<PostEntity> _postsRecommendations = [];
+  final List<PostEntity> _postsSubscriptions = [];
+
+  int _cursorRecommendations = 0;
+  int _cursorSubscriptions = 0;
+
+  bool _hasMoreRecommendations = true;
+  bool _hasMoreSubscriptions = true;
+
+  /// Текущая видимая лента (по выбранной вкладке).
+  List<PostEntity> get _posts => _feedTab == _FeedTab.recommendations
+      ? _postsRecommendations
+      : _postsSubscriptions;
+
+  bool get _hasMore => _feedTab == _FeedTab.recommendations
+      ? _hasMoreRecommendations
+      : _hasMoreSubscriptions;
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
 
@@ -72,10 +99,54 @@ class _MainHomePageState extends State<MainHomePage> {
 
   @override
   void dispose() {
+    _cancelImpressionTimer();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
     super.dispose();
+  }
+
+  void _ensureImpressionTimer() {
+    if (_impressionTimer != null) return;
+    if (_currentUserId == null) return;
+    _impressionTimer = Timer.periodic(
+      const Duration(seconds: 4),
+      (_) => _pulseFeedImpression(),
+    );
+  }
+
+  void _cancelImpressionTimer() {
+    _impressionTimer?.cancel();
+    _impressionTimer = null;
+    _impressionActivePostId = null;
+  }
+
+  void _pulseFeedImpression() {
+    if (!mounted) return;
+    if (_feedTab != _FeedTab.recommendations) return;
+    final postId = _impressionActivePostId;
+    if (postId == null) return;
+    unawaited(
+      context.read<PostRepository>().recordPublicationFeedImpression(
+            postId: postId,
+            watchedMsDelta: 4000,
+          ),
+    );
+  }
+
+  void _syncVisiblePostForImpression() {
+    if (_feedTab != _FeedTab.recommendations) return;
+    final h = _feedItemHeight;
+    if (h == null || h <= 0) return;
+    if (_postsRecommendations.isEmpty) return;
+    if (!_scrollController.hasClients) return;
+    final idx = (_scrollController.offset / h)
+        .floor()
+        .clamp(0, _postsRecommendations.length - 1);
+    final post = _postsRecommendations[idx];
+    if (post.id != _impressionActivePostId) {
+      _impressionActivePostId = post.id;
+    }
   }
 
   void _onScroll() {
@@ -88,6 +159,7 @@ class _MainHomePageState extends State<MainHomePage> {
     if (max - current <= 450) {
       _loadMore();
     }
+    _syncVisiblePostForImpression();
   }
 
   Future<void> _loadInitial() async {
@@ -96,53 +168,126 @@ class _MainHomePageState extends State<MainHomePage> {
         authState is AuthAuthenticated ? authState.user.id : null;
     _currentUserId = activeUserId;
     _loadedUserId = _currentUserId;
+    _feedTab = _FeedTab.recommendations;
     setState(() => _initialLoading = true);
-    _offset = 0;
-    _hasMore = true;
-    _posts.clear();
+    _postsRecommendations.clear();
+    _postsSubscriptions.clear();
+    _cursorRecommendations = 0;
+    _cursorSubscriptions = 0;
+    _hasMoreRecommendations = true;
+    _hasMoreSubscriptions = true;
     try {
-      final repo = context.read<PostRepository>();
-      var list = await repo.getFeedPosts(
-        limit: _pageSize,
-        offset: _offset,
-        currentUserId: _currentUserId,
-      );
-      var publicationOnly = list
-          .where((p) => p.kind.trim().toLowerCase() == 'publication')
-          .where((p) => _currentUserId == null || p.userId != _currentUserId)
-          .toList(growable: false);
-      var scanOffset = _offset;
-      var scanHasMore = list.length >= _pageSize;
-
-      while (publicationOnly.isEmpty && scanHasMore) {
-        scanOffset += list.length;
-        list = await repo.getFeedPosts(
-          limit: _pageSize,
-          offset: scanOffset,
-          currentUserId: _currentUserId,
-        );
-        if (!mounted) return;
-        publicationOnly = list
-            .where((p) => p.kind.trim().toLowerCase() == 'publication')
-            .where((p) => _currentUserId == null || p.userId != _currentUserId)
-            .toList(growable: false);
-        scanHasMore = list.length >= _pageSize;
-      }
+      await _fetchPageForTab(_feedTab, reset: true);
       if (!mounted) return;
-
-      setState(() {
-        _posts.addAll(publicationOnly);
-        _offset = scanOffset + list.length;
-        _hasMore = scanHasMore;
-        _initialLoading = false;
-      });
-      debugPrint('[MainHomePage] loaded publications=${publicationOnly.length}');
+      setState(() => _initialLoading = false);
+      debugPrint(
+        '[MainHomePage] loaded tab=$_feedTab count=${_posts.length}',
+      );
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _initialLoading = false;
-        _hasMore = false;
+        if (_feedTab == _FeedTab.recommendations) {
+          _hasMoreRecommendations = false;
+        } else {
+          _hasMoreSubscriptions = false;
+        }
       });
+    }
+  }
+
+  Future<void> _fetchPageForTab(_FeedTab tab, {required bool reset}) async {
+    final repo = context.read<PostRepository>();
+    final followingIds = await _loadFollowingUserIds();
+
+    if (tab == _FeedTab.recommendations) {
+      if (reset) {
+        _cursorRecommendations = 0;
+      }
+      final page = await repo.getPublicationsFeedRecommendations(
+        currentUserId: _currentUserId,
+        followingUserIds: followingIds,
+        limit: _pageSize,
+        discoveryDbOffset: _cursorRecommendations,
+      );
+      if (!mounted) return;
+      setState(() {
+        if (reset) {
+          _postsRecommendations
+            ..clear()
+            ..addAll(page.posts);
+        } else {
+          final existingIds = _postsRecommendations.map((p) => p.id).toSet();
+          for (final p in page.posts) {
+            if (existingIds.add(p.id)) {
+              _postsRecommendations.add(p);
+            }
+          }
+        }
+        _cursorRecommendations = page.nextOffset;
+        _hasMoreRecommendations =
+            page.posts.isNotEmpty && page.posts.length >= _pageSize;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_feedTab != _FeedTab.recommendations) return;
+        _syncVisiblePostForImpression();
+        _ensureImpressionTimer();
+      });
+      return;
+    }
+
+    // Подписки
+    if (reset) {
+      _cursorSubscriptions = 0;
+    }
+    final page = await repo.getPublicationsFeedSubscriptions(
+      currentUserId: _currentUserId,
+      followingUserIds: followingIds,
+      limit: _pageSize,
+      offset: _cursorSubscriptions,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (reset) {
+        _postsSubscriptions
+          ..clear()
+          ..addAll(page.posts);
+      } else {
+        final existingIds = _postsSubscriptions.map((p) => p.id).toSet();
+        for (final p in page.posts) {
+          if (existingIds.add(p.id)) {
+            _postsSubscriptions.add(p);
+          }
+        }
+      }
+      _cursorSubscriptions = page.nextOffset;
+      _hasMoreSubscriptions =
+          page.posts.isNotEmpty && page.posts.length >= _pageSize;
+    });
+  }
+
+  void _onFeedTabChanged(_FeedTab tab) {
+    if (_feedTab == tab) return;
+    if (tab == _FeedTab.subscriptions) {
+      _cancelImpressionTimer();
+    }
+    setState(() => _feedTab = tab);
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    if (tab == _FeedTab.recommendations) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _syncVisiblePostForImpression();
+        _ensureImpressionTimer();
+      });
+    }
+    final tabEmpty = tab == _FeedTab.recommendations
+        ? _postsRecommendations.isEmpty
+        : _postsSubscriptions.isEmpty;
+    if (tabEmpty) {
+      unawaited(_fetchPageForTab(tab, reset: true));
     }
   }
 
@@ -150,41 +295,9 @@ class _MainHomePageState extends State<MainHomePage> {
     if (!_hasMore) return;
     setState(() => _isLoadingMore = true);
     try {
-      final repo = context.read<PostRepository>();
-      var list = await repo.getFeedPosts(
-        limit: _pageSize,
-        offset: _offset,
-        currentUserId: _currentUserId,
-      );
-      var publicationOnly = list
-          .where((p) => p.kind.trim().toLowerCase() == 'publication')
-          .where((p) => _currentUserId == null || p.userId != _currentUserId)
-          .toList(growable: false);
-      var scanOffset = _offset;
-      var scanHasMore = list.length >= _pageSize;
-
-      while (publicationOnly.isEmpty && scanHasMore) {
-        scanOffset += list.length;
-        list = await repo.getFeedPosts(
-          limit: _pageSize,
-          offset: scanOffset,
-          currentUserId: _currentUserId,
-        );
-        if (!mounted) return;
-        publicationOnly = list
-            .where((p) => p.kind.trim().toLowerCase() == 'publication')
-            .where((p) => _currentUserId == null || p.userId != _currentUserId)
-            .toList(growable: false);
-        scanHasMore = list.length >= _pageSize;
-      }
+      await _fetchPageForTab(_feedTab, reset: false);
       if (!mounted) return;
-
-      setState(() {
-        _posts.addAll(publicationOnly);
-        _offset = scanOffset + list.length;
-        _hasMore = scanHasMore;
-        _isLoadingMore = false;
-      });
+      setState(() => _isLoadingMore = false);
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoadingMore = false);
@@ -223,6 +336,18 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
+  Future<List<String>> _loadFollowingUserIds() async {
+    final uid = _currentUserId;
+    if (uid == null) return const [];
+    try {
+      final profiles =
+          await context.read<ProfileRepository>().getFollowingUsers(uid);
+      return profiles.map((p) => p.id).toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
   Future<List<StoryGroupEntity>> _filterStoriesByFollowing(
     List<StoryGroupEntity> groups,
   ) async {
@@ -252,9 +377,16 @@ class _MainHomePageState extends State<MainHomePage> {
     if (!mounted) return;
     if (updated == null) return;
 
-    final i = _posts.indexWhere((p) => p.id == postId);
-    if (i == -1) return;
-    setState(() => _posts[i] = updated);
+    setState(() {
+      var i = _postsRecommendations.indexWhere((p) => p.id == postId);
+      if (i != -1) {
+        _postsRecommendations[i] = updated;
+      }
+      i = _postsSubscriptions.indexWhere((p) => p.id == postId);
+      if (i != -1) {
+        _postsSubscriptions[i] = updated;
+      }
+    });
   }
 
   Future<void> _toggleLike(PostEntity post) async {
@@ -358,7 +490,7 @@ class _MainHomePageState extends State<MainHomePage> {
 
     if (pickedUser == null) return;
     // Открываем чат.
-    if (!context.mounted) return;
+    if (!mounted) return;
 
     // Реальная отправка сообщения в чат (так же, как это делает `ChatPage`).
     // TODO: Чтобы это было «правильным» шеринговым типом, лучше хранить post_id отдельным полем.
@@ -378,11 +510,13 @@ class _MainHomePageState extends State<MainHomePage> {
         'text': shareText,
       });
     } catch (_) {
-      if (!context.mounted) return;
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось отправить сообщение')),
       );
+      return;
     }
+    if (!mounted) return;
     context.push(
       '/chat/${pickedUser.userId}?name=${Uri.encodeComponent(pickedUser.name)}',
     );
@@ -423,10 +557,6 @@ class _MainHomePageState extends State<MainHomePage> {
                 final isPublication =
                     created.kind.trim().toLowerCase() != 'news';
                 if (!isPublication) return;
-                setState(() {
-                  _posts.removeWhere((p) => p.id == created.id);
-                  _posts.insert(0, created);
-                });
               },
             ),
             ListTile(
@@ -442,17 +572,10 @@ class _MainHomePageState extends State<MainHomePage> {
               title: const Text('Видео'),
               onTap: () async {
                 Navigator.pop(sheetContext);
-                final created = await context.push<PostEntity>(
+                await context.push<PostEntity>(
                   '/add-publication?video=1',
                 );
-                if (created == null || !mounted) return;
-                final isPublication =
-                    created.kind.trim().toLowerCase() != 'news';
-                if (!isPublication) return;
-                setState(() {
-                  _posts.removeWhere((p) => p.id == created.id);
-                  _posts.insert(0, created);
-                });
+                if (!mounted) return;
               },
             ),
             ListTile(
@@ -551,6 +674,27 @@ class _MainHomePageState extends State<MainHomePage> {
                             await _loadStories();
                           },
                         ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                    child: SegmentedButton<_FeedTab>(
+                      segments: const [
+                        ButtonSegment(
+                          value: _FeedTab.recommendations,
+                          label: Text('Рекомендации'),
+                        ),
+                        ButtonSegment(
+                          value: _FeedTab.subscriptions,
+                          label: Text('Подписки'),
+                        ),
+                      ],
+                      selected: {_feedTab},
+                      onSelectionChanged: (Set<_FeedTab> selection) {
+                        if (selection.isEmpty) return;
+                        _onFeedTabChanged(selection.first);
+                      },
+                      emptySelectionAllowed: false,
+                    ),
+                  ),
                   Expanded(
                     child: LayoutBuilder(
                       builder: (context, constraints) {
@@ -558,9 +702,30 @@ class _MainHomePageState extends State<MainHomePage> {
                                 constraints.maxHeight > 0
                             ? constraints.maxHeight
                             : h;
+                        _feedItemHeight = itemHeight;
+
+                        if (_posts.isEmpty) {
+                          return Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                _feedTab == _FeedTab.subscriptions
+                                    ? (_currentUserId == null
+                                        ? 'Войдите, чтобы видеть публикации подписок.'
+                                        : 'Нет публикаций от подписок. Подпишитесь на авторов или откройте вкладку «Рекомендации».')
+                                    : 'Пока нет публикаций в рекомендациях.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.grey.shade600,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
+                          );
+                        }
 
                         return ListView.builder(
-                          key: _feedKey,
+                          key: ValueKey(_feedTab),
                           controller: _scrollController,
                           padding: EdgeInsets.zero,
                           itemExtent: itemHeight,
