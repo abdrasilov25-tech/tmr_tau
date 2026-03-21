@@ -134,13 +134,14 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
                       onRefresh: _load,
                       child: ListView.separated(
                         itemCount: _items.length,
-                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        separatorBuilder: (context, _) =>
+                            const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final item = _items[index];
                           return ListTile(
                             onTap: () async {
                               await _markOneRead(item);
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               final postId = _extractPostId(item.body);
                               if (postId != null) {
                                 await context.push('/post/$postId');

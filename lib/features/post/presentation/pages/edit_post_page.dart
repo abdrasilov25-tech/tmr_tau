@@ -359,7 +359,7 @@ class _EditPostPageState extends State<EditPostPage> {
                                 width: double.infinity,
                                 height: double.infinity,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) => Container(
+                                errorBuilder: (context, error, stackTrace) => Container(
                                   color: Colors.grey.shade200,
                                   child: const Icon(
                                     Icons.broken_image_outlined,

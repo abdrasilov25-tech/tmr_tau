@@ -97,7 +97,8 @@ class AccountSwitcherSheet extends StatelessWidget {
                 shrinkWrap: true,
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 itemCount: allAccounts.length,
-                separatorBuilder: (_, __) => const Divider(height: 1, indent: 88),
+                separatorBuilder: (context, index) =>
+                    const Divider(height: 1, indent: 88),
                 itemBuilder: (context, index) {
                   final account = allAccounts[index];
                   final isCurrent = account.id == currentId;

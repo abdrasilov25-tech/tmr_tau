@@ -103,7 +103,7 @@ class _FollowersPageState extends State<FollowersPage> {
           }
           return ListView.separated(
             itemCount: list.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
+            separatorBuilder: (context, index) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final u = list[index];
               return ListTile(

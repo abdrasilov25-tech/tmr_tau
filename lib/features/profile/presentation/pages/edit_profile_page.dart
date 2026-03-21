@@ -74,6 +74,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
           ),
         );
       } catch (_) {}
+      if (!mounted) return;
       // Обновим профиль в AuthBloc.
       context.read<AuthBloc>().add(const AuthCheckRequested());
       context.pop();

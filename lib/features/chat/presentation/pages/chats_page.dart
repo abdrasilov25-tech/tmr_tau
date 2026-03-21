@@ -248,7 +248,7 @@ class _ChatsPageState extends State<ChatsPage> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setStateDialog) {
-            Future<List<_UserSuggestion>> _fetchSuggestions(String q) async {
+            Future<List<_UserSuggestion>> fetchSuggestions(String q) async {
               final query = q.trim();
               if (query.isEmpty) return const [];
               final res = await _client
@@ -306,16 +306,18 @@ class _ChatsPageState extends State<ChatsPage> {
                                   if (!sheetOpen || !ctx.mounted) return;
                                   setStateDialog(() => loading = true);
                                   try {
-                                    final res = await _fetchSuggestions(v);
-                                    if (!mounted || !sheetOpen || !ctx.mounted)
+                                    final res = await fetchSuggestions(v);
+                                    if (!mounted || !sheetOpen || !ctx.mounted) {
                                       return;
+                                    }
                                     setStateDialog(() {
                                       suggestions = res;
                                       loading = false;
                                     });
                                   } catch (_) {
-                                    if (!mounted || !sheetOpen || !ctx.mounted)
+                                    if (!mounted || !sheetOpen || !ctx.mounted) {
                                       return;
+                                    }
                                     setStateDialog(() {
                                       suggestions = const [];
                                       loading = false;
@@ -555,6 +557,7 @@ class _ChatsPageState extends State<ChatsPage> {
           .from(SupabaseConstants.chatGroupMembersTable)
           .upsert(members);
 
+      if (!rootContext.mounted) return;
       await rootContext.push(
         '/chat-group/$groupId?name=${Uri.encodeComponent(title)}',
       );
@@ -981,10 +984,11 @@ class _ChatsPageState extends State<ChatsPage> {
             .eq('receiver_id', _currentUserId);
       }
       await _chatStorage.setArchived(t.storageKey, false);
-      if (mounted)
+      if (mounted) {
         setState(() {
           _pageFuture = _loadPageData();
         });
+      }
     } catch (e) {
       debugPrint('_deleteChat error: $e');
       if (mounted) {
@@ -1103,6 +1107,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     setState(() {
                       _pageFuture = _loadPageData();
                     });
+                    if (!context.mounted) return;
                     await context.push(
                       '/stories',
                       extra: StoryViewerArgs(
@@ -1214,11 +1219,13 @@ class _ChatsPageState extends State<ChatsPage> {
       );
       if (!mounted) return;
       await _chatStorage.setLastDialogShownAt(t.peerId, lastIncoming);
+      if (!mounted) return;
       if (accept == true) {
         await _chatStorage.setAccepted(t.peerId, true);
         final at = lastIncoming.add(const Duration(milliseconds: 1));
         await _chatStorage.setLastReadAt(t.peerId, at);
       }
+      if (!mounted) return;
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
       );
@@ -1227,10 +1234,11 @@ class _ChatsPageState extends State<ChatsPage> {
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}',
       );
     }
-    if (mounted)
+    if (mounted) {
       setState(() {
         _pageFuture = _loadPageData();
       });
+    }
   }
 
   Future<void> _markThreadRead(_ChatThread t) async {

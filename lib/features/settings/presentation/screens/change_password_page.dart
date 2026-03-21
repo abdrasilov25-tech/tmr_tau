@@ -50,8 +50,9 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         SnackBar(content: Text('Не удалось отправить ссылку: $e')),
       );
     } finally {
-      if (!mounted) return;
-      setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 

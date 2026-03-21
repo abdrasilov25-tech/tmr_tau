@@ -50,8 +50,9 @@ class ThemeRepositoryImpl implements ThemeRepository {
         if (await f.exists()) await f.delete();
       } catch (_) {}
     }
-    final fileName =
-        '${_customThemePrefix}${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final prefix = _customThemePrefix;
+    final fileName = '$prefix$stamp.jpg';
     final file = File('${themeDir.path}/$fileName');
     await file.writeAsBytes(imageBytes);
     final absolutePath = file.absolute.path;

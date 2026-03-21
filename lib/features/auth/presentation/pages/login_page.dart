@@ -175,7 +175,7 @@ class _LoginPageState extends State<LoginPage>
           _authHandled = true;
           final password = _passwordController.text;
           final storage = context.read<MultiAccountStorage>();
-          final doNavigate = () {
+          void doNavigate() {
             if (!context.mounted) return;
             if (widget.addAccountMode) {
               context.pop(LoginResult(
@@ -188,7 +188,7 @@ class _LoginPageState extends State<LoginPage>
             } else {
               context.go('/home/feed');
             }
-          };
+          }
           if (password.isEmpty) {
             doNavigate();
             return;
@@ -352,7 +352,7 @@ class _LoginPageState extends State<LoginPage>
                         return ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: _quickAccounts.length,
-                          separatorBuilder: (_, __) =>
+                          separatorBuilder: (context, index) =>
                               const SizedBox(width: 12),
                           itemBuilder: (context, index) {
                             final acc = _quickAccounts[index];

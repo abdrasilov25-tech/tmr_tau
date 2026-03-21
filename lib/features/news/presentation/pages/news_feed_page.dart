@@ -243,7 +243,7 @@ class _NewsPostCard extends StatelessWidget {
                         ),
                       );
                     },
-                    errorBuilder: (_, __, ___) => Container(
+                    errorBuilder: (context, error, stackTrace) => Container(
                       height: 200,
                       color: Colors.grey.shade200,
                       child: const Icon(Icons.broken_image_outlined, size: 48),
