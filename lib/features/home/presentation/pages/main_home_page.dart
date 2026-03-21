@@ -11,9 +11,9 @@ import 'package:video_player/video_player.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/constants/supabase_constants.dart';
-import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../chat/presentation/widgets/chat_stories_friends_strip.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../profile/domain/repositories/profile_repository.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
@@ -230,22 +230,17 @@ class _MainHomePageState extends State<MainHomePage> {
   Future<void> _loadStories() async {
     setState(() => _storiesLoading = true);
     try {
-      final allGroups = (await context.read<StoriesRepository>().getStoriesGroupedByUser())
+      final storiesRepo = context.read<StoriesRepository>();
+      final allGroups = (await storiesRepo.getStoriesGroupedByUser())
           .where((g) => g.stories.isNotEmpty)
           .toList(growable: false);
-      final groups = await _filterStoriesByChatPeers(allGroups);
+      final groups = await _filterStoriesByFollowing(allGroups);
+      final viewedStoryIds = _currentUserId == null
+          ? const <String>{}
+          : await storiesRepo.getViewedStoryIds(_currentUserId!);
       final nextMap = <String, bool>{};
       for (final g in groups) {
-        final latestStoryAt = g.firstStory.createdAt;
-        try {
-          final seenStorage = context.read<ChatStoryListStorage>();
-          final lastSeenAt = seenStorage.getLastSeenAt(g.userId);
-          nextMap[g.userId] = lastSeenAt == null || latestStoryAt.isAfter(lastSeenAt);
-        } catch (_) {
-          // Даже если локальное хранилище "видел/не видел" не сработало,
-          // сами сторис должны отображаться в ленте.
-          nextMap[g.userId] = true;
-        }
+        nextMap[g.userId] = g.stories.any((s) => !viewedStoryIds.contains(s.id));
       }
       if (!mounted) return;
       setState(() {
@@ -264,30 +259,16 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
-  Future<List<StoryGroupEntity>> _filterStoriesByChatPeers(
+  Future<List<StoryGroupEntity>> _filterStoriesByFollowing(
     List<StoryGroupEntity> groups,
   ) async {
     final uid = _currentUserId;
     if (uid == null || groups.isEmpty) return groups;
     try {
-      final rows = await supa.Supabase.instance.client
-          .from(SupabaseConstants.messagesTable)
-          .select('sender_id, receiver_id')
-          .or('sender_id.eq.$uid,receiver_id.eq.$uid');
-      final peerIds = <String>{};
-      for (final row in (rows as List<dynamic>)) {
-        final map = row as Map<String, dynamic>;
-        final senderId = map['sender_id'] as String?;
-        final receiverId = map['receiver_id'] as String?;
-        if (senderId == null || receiverId == null) continue;
-        if (senderId == uid) {
-          peerIds.add(receiverId);
-        } else if (receiverId == uid) {
-          peerIds.add(senderId);
-        }
-      }
+      final following = await context.read<ProfileRepository>().getFollowingUsers(uid);
+      final followingIds = following.map((u) => u.id).toSet();
       return groups
-          .where((g) => g.userId == uid || peerIds.contains(g.userId))
+          .where((g) => g.userId == uid || followingIds.contains(g.userId))
           .toList(growable: false);
     } catch (_) {
       return groups;
@@ -614,19 +595,10 @@ class _MainHomePageState extends State<MainHomePage> {
                       : ChatStoriesFriendsStrip(
                           groups: _storyGroups,
                           newStoriesByUserId: _newStoriesByUserId,
+                          currentUserId: _currentUserId,
+                          onAddStoryTap: _openAddStoryAndRefresh,
                           onStoryTap: (group) async {
                             if (group.stories.isEmpty) return;
-                            final latestStoryAt = group.firstStory.createdAt;
-                            await context
-                                .read<ChatStoryListStorage>()
-                                .setLastSeenAt(group.userId, latestStoryAt);
-                            if (!mounted) return;
-                            setState(() {
-                              _newStoriesByUserId = {
-                                ..._newStoriesByUserId,
-                                group.userId: false,
-                              };
-                            });
                             await context.push(
                               '/stories',
                               extra: StoryViewerArgs(

@@ -49,6 +49,30 @@ class StoriesRepositoryImpl implements StoriesRepository {
   }
 
   @override
+  Future<Set<String>> getViewedStoryIds(String viewerId) async {
+    final res = await _client
+        .from(SupabaseConstants.storyViewsTable)
+        .select('story_id')
+        .eq('viewer_id', viewerId);
+    return (res as List)
+        .map((e) => (e as Map<String, dynamic>)['story_id'] as String?)
+        .whereType<String>()
+        .toSet();
+  }
+
+  @override
+  Future<void> markStoryViewed({
+    required String storyId,
+    required String viewerId,
+  }) async {
+    await _client.from(SupabaseConstants.storyViewsTable).upsert({
+      'story_id': storyId,
+      'viewer_id': viewerId,
+      'viewed_at': DateTime.now().toIso8601String(),
+    });
+  }
+
+  @override
   Future<List<StoryEntity>> getStoriesByUser(String userId) async {
     try {
       final res = await _client
