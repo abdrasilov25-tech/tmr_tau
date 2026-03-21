@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -30,6 +31,7 @@ class ChatPage extends StatefulWidget {
 }
 
 class _ChatPageState extends State<ChatPage> {
+  static const String _storyDmPrefix = '__story__';
   late final SupabaseClient _client;
   String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
@@ -216,6 +218,7 @@ class _ChatPageState extends State<ChatPage> {
                           final m = messages[index];
                           final senderId = m['sender_id'] as String?;
                           final text = m['text'] as String? ?? '';
+                          final structured = _parseStoryDirectMessage(text);
                           final isMe = senderId == me;
                           return Align(
                             alignment: isMe
@@ -233,13 +236,18 @@ class _ChatPageState extends State<ChatPage> {
                                     : Colors.grey.shade200,
                                 borderRadius: BorderRadius.circular(16),
                               ),
-                              child: Text(
-                                text,
-                                style: TextStyle(
-                                  color:
-                                      isMe ? Colors.white : Colors.black87,
-                                ),
-                              ),
+                              child: structured == null
+                                  ? Text(
+                                      text,
+                                      style: TextStyle(
+                                        color:
+                                            isMe ? Colors.white : Colors.black87,
+                                      ),
+                                    )
+                                  : _StoryLinkedChatBubble(
+                                      message: structured,
+                                      isMe: isMe,
+                                    ),
                             ),
                           );
                         },
@@ -310,6 +318,88 @@ class _ChatPageState extends State<ChatPage> {
         if (!mounted) return;
         await themeNotifier.setCustomThemeFromImageBytes(bytes);
       },
+    );
+  }
+
+  _StoryDirectMessage? _parseStoryDirectMessage(String text) {
+    if (!text.startsWith('$_storyDmPrefix|')) return null;
+    final parts = text.split('|');
+    if (parts.length < 5) return null;
+    String decode(String value) {
+      try {
+        return Uri.decodeComponent(value);
+      } catch (_) {
+        return value;
+      }
+    }
+
+    final kind = parts[1];
+    final storyId = decode(parts[2]);
+    final previewUrl = decode(parts[3]);
+    final payload = decode(parts[4]);
+    if (storyId.isEmpty) return null;
+    return _StoryDirectMessage(
+      kind: kind,
+      storyId: storyId,
+      previewUrl: previewUrl,
+      payload: payload,
+    );
+  }
+}
+
+class _StoryDirectMessage {
+  const _StoryDirectMessage({
+    required this.kind,
+    required this.storyId,
+    required this.previewUrl,
+    required this.payload,
+  });
+
+  final String kind;
+  final String storyId;
+  final String previewUrl;
+  final String payload;
+}
+
+class _StoryLinkedChatBubble extends StatelessWidget {
+  const _StoryLinkedChatBubble({required this.message, required this.isMe});
+
+  final _StoryDirectMessage message;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isMe ? Colors.white : Colors.black87;
+    final title = message.kind == 'reaction'
+        ? 'Реакция на сторис: ${message.payload}'
+        : 'Ответ на сторис: ${message.payload}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (message.previewUrl.isNotEmpty)
+          Container(
+            width: 140,
+            height: 180,
+            margin: const EdgeInsets.only(bottom: 6),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              color: Colors.black12,
+            ),
+            child: CachedNetworkImage(
+              imageUrl: message.previewUrl,
+              fit: BoxFit.cover,
+              errorWidget: (_, url, error) => const Center(
+                child: Icon(Icons.broken_image_outlined),
+              ),
+            ),
+          ),
+        Text(
+          title,
+          style: TextStyle(color: textColor, fontWeight: FontWeight.w600),
+        ),
+      ],
     );
   }
 }

@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import '../../../../core/constants/supabase_constants.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/story_entity.dart';
 import '../../domain/entities/story_group_entity.dart';
@@ -210,6 +212,8 @@ class _StoryGroupView extends StatefulWidget {
 }
 
 class _StoryGroupViewState extends State<_StoryGroupView> {
+  static const List<String> _quickReactions = ['🔥', '😍', '👏', '😂', '😮'];
+  static const String _storyDmPrefix = '__story__';
   int _currentIndex = 0;
   final _replyController = TextEditingController();
   bool _sendingReply = false;
@@ -330,6 +334,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         userId: widget.currentUserId!,
         text: text,
       );
+      await _sendToDirect(kind: 'reply', payload: text);
       if (mounted) {
         _replyController.clear();
         ScaffoldMessenger.of(context).showSnackBar(
@@ -344,6 +349,62 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       }
     } finally {
       if (mounted) setState(() => _sendingReply = false);
+    }
+  }
+
+  Future<void> _sendQuickReaction(String emoji) async {
+    if (widget.currentUserId == null || _sendingReply) return;
+    setState(() => _sendingReply = true);
+    try {
+      await widget.storiesRepository.addStoryReply(
+        storyId: _currentStory.id,
+        userId: widget.currentUserId!,
+        text: emoji,
+      );
+      await _sendToDirect(kind: 'reaction', payload: emoji);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Реакция $emoji отправлена'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось отправить реакцию')),
+      );
+    } finally {
+      if (mounted) setState(() => _sendingReply = false);
+    }
+  }
+
+  Future<void> _sendToDirect({
+    required String kind,
+    required String payload,
+  }) async {
+    final senderId = widget.currentUserId;
+    if (senderId == null) return;
+    final receiverId = widget.group.userId;
+    if (receiverId.isEmpty || receiverId == senderId) return;
+    final previewUrl = _currentStory.imageUrl.isNotEmpty
+        ? _currentStory.imageUrl
+        : (_currentStory.videoUrl ?? '');
+    final structuredText = [
+      _storyDmPrefix,
+      kind,
+      Uri.encodeComponent(_currentStory.id),
+      Uri.encodeComponent(previewUrl),
+      Uri.encodeComponent(payload),
+    ].join('|');
+    try {
+      await Supabase.instance.client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': senderId,
+        'receiver_id': receiverId,
+        'text': structuredText,
+      });
+    } catch (_) {
+      // Chat delivery should not block story reaction flow.
     }
   }
 
@@ -564,29 +625,52 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(begin: Alignment.bottomCenter, end: Alignment.topCenter, colors: [Colors.black54, Colors.transparent]),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _replyController,
-                      style: const TextStyle(color: Colors.white),
-                      decoration: InputDecoration(
-                        hintText: 'Написать сообщение...',
-                        hintStyle: TextStyle(color: Colors.grey.shade400),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                        filled: true,
-                        fillColor: Colors.white12,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                      ),
-                      onSubmitted: (_) => _sendReply(),
+                  SizedBox(
+                    height: 36,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _quickReactions.length,
+                      separatorBuilder: (_, index) => const SizedBox(width: 8),
+                      itemBuilder: (context, index) {
+                        final emoji = _quickReactions[index];
+                        return ActionChip(
+                          label: Text(emoji),
+                          onPressed: _sendingReply
+                              ? null
+                              : () => _sendQuickReaction(emoji),
+                        );
+                      },
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _sendingReply ? null : _sendReply,
-                    icon: _sendingReply
-                        ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.send_rounded, color: Colors.white),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _replyController,
+                          style: const TextStyle(color: Colors.white),
+                          decoration: InputDecoration(
+                            hintText: 'Написать сообщение...',
+                            hintStyle: TextStyle(color: Colors.grey.shade400),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                            filled: true,
+                            fillColor: Colors.white12,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                          ),
+                          onSubmitted: (_) => _sendReply(),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: _sendingReply ? null : _sendReply,
+                        icon: _sendingReply
+                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.send_rounded, color: Colors.white),
+                      ),
+                    ],
                   ),
                 ],
               ),
