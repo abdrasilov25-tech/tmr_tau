@@ -213,6 +213,22 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   int _currentIndex = 0;
   final _replyController = TextEditingController();
   bool _sendingReply = false;
+  final Set<String> _markedViewedIds = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _markCurrentStoryViewed();
+  }
+
+  @override
+  void didUpdateWidget(covariant _StoryGroupView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.group.userId != widget.group.userId) {
+      _currentIndex = 0;
+      _markCurrentStoryViewed();
+    }
+  }
 
   @override
   void dispose() {
@@ -222,6 +238,22 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
 
   StoryEntity get _currentStory => widget.group.stories[_currentIndex];
   bool get _isOwnStory => widget.currentUserId != null && widget.group.userId == widget.currentUserId;
+
+  Future<void> _markCurrentStoryViewed() async {
+    final viewerId = widget.currentUserId;
+    if (viewerId == null || _isOwnStory || widget.group.stories.isEmpty) return;
+    final storyId = _currentStory.id;
+    if (_markedViewedIds.contains(storyId)) return;
+    _markedViewedIds.add(storyId);
+    try {
+      await widget.storiesRepository.markStoryViewed(
+        storyId: storyId,
+        viewerId: viewerId,
+      );
+    } catch (_) {
+      // Viewing metrics should never break story playback.
+    }
+  }
 
   Future<void> _sendReply() async {
     final text = _replyController.text.trim();
@@ -355,6 +387,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         setState(() => _currentIndex = safeIndex);
+        _markCurrentStoryViewed();
       });
     }
     return Stack(
@@ -364,7 +397,10 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           controller: widget.storyController,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: widget.group.stories.length,
-          onPageChanged: (i) => setState(() => _currentIndex = i),
+          onPageChanged: (i) {
+            setState(() => _currentIndex = i);
+            _markCurrentStoryViewed();
+          },
           itemBuilder: (context, index) {
             return _StoryContent(
               story: widget.group.stories[index],
@@ -618,10 +654,10 @@ class _StoryContent extends StatelessWidget {
                         fit: BoxFit.cover,
                         width: double.infinity,
                         height: double.infinity,
-                        placeholder: (_, __) => const Center(
+                        placeholder: (_, progress) => const Center(
                           child: CircularProgressIndicator(color: Colors.white),
                         ),
-                        errorWidget: (_, __, ___) => const Center(
+                        errorWidget: (_, error, stackTrace) => const Center(
                           child: Icon(Icons.broken_image_outlined,
                               size: 64, color: Colors.white54),
                         ),

@@ -551,6 +551,14 @@ class _ChatsPageState extends State<ChatsPage> {
                 ChatStoriesFriendsStrip(
                   groups: data.visibleStoryGroups,
                   newStoriesByUserId: data.newStoriesByUserId,
+                  currentUserId: _currentUserId,
+                  onAddStoryTap: () async {
+                    await context.push('/add-story');
+                    if (!mounted) return;
+                    setState(() {
+                      _pageFuture = _loadPageData();
+                    });
+                  },
                   onStoryTap: (group) async {
                     if (group.stories.isEmpty) return;
                     final latestStoryAt = group.firstStory.createdAt;

@@ -475,30 +475,34 @@ class _MyProfilePageState extends State<MyProfilePage> {
             onAvatarTap: _changeAvatar,
             updatingAvatar: _updatingAvatar,
             ownStoryGroup: ownGroup,
-            onOpenOwnStory: ownGroup == null
-                ? null
-                : () async {
-                    await context.push(
-                      '/stories',
-                      extra: StoryViewerArgs(groups: [ownGroup], initialGroupIndex: 0),
-                    );
-                    if (!mounted) return;
-                    try {
-                      final latestStoryAt = ownGroup.firstStory.createdAt;
-                      await context
-                          .read<ChatStoryListStorage>()
-                          .setLastSeenAt(ownGroup.userId, latestStoryAt);
-                      if (!mounted) return;
-                      setState(() {
-                        _newStoriesByUserId = {
-                          ..._newStoriesByUserId,
-                          ownGroup.userId: false,
-                        };
-                      });
-                    } catch (_) {}
-                    if (!mounted) return;
-                    await _loadProfileStories(user.id);
-                  },
+            onOpenOwnStory: () async {
+              if (ownGroup == null) {
+                await context.push('/add-story');
+                if (!mounted) return;
+                await _loadProfileStories(user.id);
+                return;
+              }
+              await context.push(
+                '/stories',
+                extra: StoryViewerArgs(groups: [ownGroup], initialGroupIndex: 0),
+              );
+              if (!mounted) return;
+              try {
+                final latestStoryAt = ownGroup.firstStory.createdAt;
+                await context
+                    .read<ChatStoryListStorage>()
+                    .setLastSeenAt(ownGroup.userId, latestStoryAt);
+                if (!mounted) return;
+                setState(() {
+                  _newStoriesByUserId = {
+                    ..._newStoriesByUserId,
+                    ownGroup.userId: false,
+                  };
+                });
+              } catch (_) {}
+              if (!mounted) return;
+              await _loadProfileStories(user.id);
+            },
           );
         },
         ),

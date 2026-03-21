@@ -8,6 +8,8 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
     super.key,
     required this.groups,
     required this.newStoriesByUserId,
+    required this.currentUserId,
+    required this.onAddStoryTap,
     required this.onStoryTap,
   });
 
@@ -15,6 +17,8 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
 
   /// `userId -> true` means show red “new” ring.
   final Map<String, bool> newStoriesByUserId;
+  final String? currentUserId;
+  final VoidCallback onAddStoryTap;
 
   /// Called when user taps a friend's story.
   final void Function(StoryGroupEntity group) onStoryTap;
@@ -24,46 +28,86 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
     if (groups.isEmpty) {
       return const SizedBox.shrink();
     }
+    final ownGroup = currentUserId == null
+        ? null
+        : groups.cast<StoryGroupEntity?>().firstWhere(
+              (g) => g?.userId == currentUserId,
+              orElse: () => null,
+            );
+    final otherGroups = currentUserId == null
+        ? groups
+        : groups.where((g) => g.userId != currentUserId).toList(growable: false);
 
     return SizedBox(
       height: 102,
-      child: ListView.builder(
+      child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        itemCount: groups.length,
-        itemBuilder: (context, index) {
-          final g = groups[index];
-          final isNew = newStoriesByUserId[g.userId] == true;
-          return _FriendStoryCircle(
-            group: g,
-            isNew: isNew,
-            onTap: () => onStoryTap(g),
-          );
-        },
+        children: [
+          if (currentUserId != null)
+            _FriendStoryCircle(
+              group: ownGroup,
+              fallbackLabel: 'Ваша история',
+              ringState: ownGroup == null
+                  ? _StoryRingState.seen
+                  : (newStoriesByUserId[ownGroup.userId] == true
+                        ? _StoryRingState.unseen
+                        : _StoryRingState.seen),
+              showPlusBadge: true,
+              onTap: ownGroup == null ? onAddStoryTap : () => onStoryTap(ownGroup),
+              onPlusTap: onAddStoryTap,
+            ),
+          ...otherGroups.map((g) {
+            final isNew = newStoriesByUserId[g.userId] == true;
+            return _FriendStoryCircle(
+              group: g,
+              ringState: isNew ? _StoryRingState.unseen : _StoryRingState.seen,
+              onTap: () => onStoryTap(g),
+            );
+          }),
+        ],
       ),
     );
   }
 }
 
+enum _StoryRingState { unseen, seen }
+
 class _FriendStoryCircle extends StatelessWidget {
   const _FriendStoryCircle({
-    required this.group,
-    required this.isNew,
+    this.group,
+    this.fallbackLabel,
+    required this.ringState,
+    this.showPlusBadge = false,
     required this.onTap,
+    this.onPlusTap,
   });
 
-  final StoryGroupEntity group;
-  final bool isNew;
+  final StoryGroupEntity? group;
+  final String? fallbackLabel;
+  final _StoryRingState ringState;
+  final bool showPlusBadge;
   final VoidCallback onTap;
+  final VoidCallback? onPlusTap;
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = isNew ? Colors.redAccent : Colors.white24;
-    // Целочисленная толщина границы уменьшает «смаз» из-за полу-пикселей.
-    final borderWidth = isNew ? 3.0 : 2.0;
+    final label = fallbackLabel ?? group?.userName ?? 'Пользователь';
     const outerSize = 56.0;
-    final innerRadius = (outerSize - borderWidth * 2) / 2;
+    const ringWidth = 2.8;
+    final innerRadius = (outerSize - ringWidth * 2) / 2;
     final innerDiameter = innerRadius * 2;
+    final ringGradient = ringState == _StoryRingState.unseen
+        ? const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFFF6F61), Color(0xFFE53935)],
+          )
+        : const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFF66BB6A), Color(0xFF2E7D32)],
+          );
 
     return Padding(
       padding: const EdgeInsets.only(right: 14),
@@ -73,32 +117,69 @@ class _FriendStoryCircle extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
+            SizedBox(
               width: outerSize,
               height: outerSize,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: borderColor, width: borderWidth),
-              ),
-              child: ClipOval(
-                clipBehavior: Clip.hardEdge,
-                child: SizedBox(
-                  width: innerDiameter,
-                  height: innerDiameter,
-                  child: _StoryAvatarImage(
-                    imageUrl: group.userAvatarUrl,
-                    fallbackText: group.userName ?? 'Пользователь',
-                    diameter: innerDiameter,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    width: outerSize,
+                    height: outerSize,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: ringGradient,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(ringWidth),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          shape: BoxShape.circle,
+                        ),
+                        child: ClipOval(
+                          clipBehavior: Clip.hardEdge,
+                          child: SizedBox(
+                            width: innerDiameter,
+                            height: innerDiameter,
+                            child: _StoryAvatarImage(
+                              imageUrl: group?.userAvatarUrl,
+                              fallbackText: label,
+                              diameter: innerDiameter,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
-                ),
+                  if (showPlusBadge)
+                    Positioned(
+                      right: -1,
+                      bottom: -1,
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: onPlusTap ?? onTap,
+                        child: Container(
+                          width: 20,
+                          height: 20,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E88E5),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                          ),
+                          child: const Icon(Icons.add, size: 12, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 6),
             SizedBox(
               width: 68,
               child: Text(
-                group.userName ?? 'Пользователь',
+                label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,

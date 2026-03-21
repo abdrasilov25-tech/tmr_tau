@@ -6,6 +6,11 @@ import '../entities/story_reply_entity.dart';
 abstract class StoriesRepository {
   Future<List<StoryEntity>> getActiveStories();
   Future<List<StoryGroupEntity>> getStoriesGroupedByUser();
+  Future<Set<String>> getViewedStoryIds(String viewerId);
+  Future<void> markStoryViewed({
+    required String storyId,
+    required String viewerId,
+  });
   Future<List<StoryEntity>> getStoriesByUser(String userId);
   Future<void> addStory({
     required String userId,

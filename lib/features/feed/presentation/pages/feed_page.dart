@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
@@ -11,6 +10,7 @@ import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../product/domain/entities/product_entity.dart';
+import '../../../profile/domain/repositories/profile_repository.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
@@ -151,11 +151,12 @@ class _FeedPageState extends State<FeedPage> {
                           onSellerTap: () =>
                               context.push('/profile/${product.sellerId}'),
                           onLike: () {
-                            if (currentUserId != null) {
+                            final userId = currentUserId;
+                            if (userId != null) {
                               context.read<FeedBloc>().add(
                                     FeedToggleLike(
                                       productId: product.id,
-                                      userId: currentUserId!,
+                                      userId: userId,
                                     ),
                                   );
                             } else {
@@ -238,6 +239,8 @@ class _StoriesStrip extends StatefulWidget {
 
 class _StoriesStripState extends State<_StoriesStrip> {
   List<StoryGroupEntity> _groups = [];
+  Set<String> _followingUserIds = const {};
+  Set<String> _viewedStoryIds = const {};
   bool _loading = true;
 
   @override
@@ -248,11 +251,30 @@ class _StoriesStripState extends State<_StoriesStrip> {
 
   Future<void> _load() async {
     try {
+      final authState = context.read<AuthBloc>().state;
+      final currentUserId =
+          authState is AuthAuthenticated ? authState.user.id : null;
       final repo = context.read<StoriesRepository>();
-      final list = await repo.getStoriesGroupedByUser();
+      final listFuture = repo.getStoriesGroupedByUser();
+      Future<Set<String>> viewedStoryIdsFuture() async {
+        if (currentUserId == null) return const <String>{};
+        return repo.getViewedStoryIds(currentUserId);
+      }
+      Future<Set<String>> followingIdsFuture() async {
+        if (currentUserId == null) return const <String>{};
+        final profiles = await context
+            .read<ProfileRepository>()
+            .getFollowingUsers(currentUserId);
+        return profiles.map((p) => p.id).toSet();
+      }
+      final list = await listFuture;
+      final followingIds = await followingIdsFuture();
+      final viewedStoryIds = await viewedStoryIdsFuture();
       if (mounted) {
         setState(() {
           _groups = list;
+          _followingUserIds = followingIds;
+          _viewedStoryIds = viewedStoryIds;
           _loading = false;
         });
       }
@@ -279,11 +301,27 @@ class _StoriesStripState extends State<_StoriesStrip> {
             );
     final otherGroups = currentUserId == null
         ? _groups
-        : _groups.where((g) => g.userId != currentUserId).toList(growable: false);
-    final visibleGroups = [
-      if (ownGroup != null) ownGroup,
+        : _groups
+            .where(
+              (g) => g.userId != currentUserId && _followingUserIds.contains(g.userId),
+            )
+            .toList(growable: false);
+    final allGroupsForViewer = <StoryGroupEntity>[
+      if (ownGroup case final StoryGroupEntity group) group,
       ...otherGroups,
     ];
+    bool groupHasUnseen(StoryGroupEntity group) {
+      if (currentUserId == null) return true;
+      return group.stories.any((s) => !_viewedStoryIds.contains(s.id));
+    }
+    final sortedOtherGroups = [...otherGroups]..sort((a, b) {
+      final aUnseen = groupHasUnseen(a);
+      final bUnseen = groupHasUnseen(b);
+      if (aUnseen != bUnseen) return aUnseen ? -1 : 1;
+      final aLatest = a.stories.first.createdAt;
+      final bLatest = b.stories.first.createdAt;
+      return bLatest.compareTo(aLatest);
+    });
 
     return SizedBox(
       height: 100,
@@ -294,8 +332,20 @@ class _StoriesStripState extends State<_StoriesStrip> {
           if (isLoggedIn)
             _StoryCircle(
               label: 'Ваша история',
-              isAdd: true,
-              onTap: () {
+              avatarUrl: ownGroup?.userAvatarUrl,
+              showPlusBadge: true,
+              onTap: () async {
+                if (ownGroup != null) {
+                  await context.push(
+                    '/stories',
+                    extra: StoryViewerArgs(
+                      groups: allGroupsForViewer,
+                      initialGroupIndex: 0,
+                    ),
+                  );
+                  if (mounted) _load();
+                  return;
+                }
                 showModalBottomSheet<void>(
                   context: context,
                   backgroundColor: Colors.transparent,
@@ -332,17 +382,26 @@ class _StoriesStripState extends State<_StoriesStrip> {
               ),
             )
           else
-            ...visibleGroups.map((g) => _StoryCircle(
+            ...sortedOtherGroups.map((g) => _StoryCircle(
                   label: g.userName ?? 'История',
                   avatarUrl: g.userAvatarUrl,
-                  onTap: () {
-                    context.push(
+                  hasUnseen: groupHasUnseen(g),
+                  onTap: () async {
+                    final initialIndex =
+                        ownGroup == null
+                            ? sortedOtherGroups.indexOf(g)
+                            : sortedOtherGroups.indexOf(g) + 1;
+                    await context.push(
                       '/stories',
                       extra: StoryViewerArgs(
-                        groups: visibleGroups,
-                        initialGroupIndex: visibleGroups.indexOf(g),
+                        groups: [
+                          if (ownGroup case final StoryGroupEntity group) group,
+                          ...sortedOtherGroups,
+                        ],
+                        initialGroupIndex: initialIndex,
                       ),
                     );
+                    if (mounted) _load();
                   },
                 )),
         ],
@@ -354,13 +413,15 @@ class _StoriesStripState extends State<_StoriesStrip> {
 class _StoryCircle extends StatelessWidget {
   const _StoryCircle({
     required this.label,
-    this.isAdd = false,
+    this.showPlusBadge = false,
+    this.hasUnseen = true,
     this.avatarUrl,
     this.onTap,
   });
 
   final String label;
-  final bool isAdd;
+  final bool showPlusBadge;
+  final bool hasUnseen;
   final String? avatarUrl;
   final VoidCallback? onTap;
 
@@ -373,33 +434,61 @@ class _StoryCircle extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
+            SizedBox(
               width: 56,
               height: 56,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isAdd ? Colors.grey : Colors.white24,
-                  width: 2,
-                ),
-              ),
-              child: ClipOval(
-                child: isAdd
-                    ? Icon(Icons.add, size: 28, color: Colors.grey.shade400)
-                    : avatarUrl != null && avatarUrl!.isNotEmpty
-                        ? CachedAvatar(
-                            imageUrl: avatarUrl,
-                            radius: 28,
-                            fallbackText: label,
-                          )
-                        : Container(
-                            color: Colors.grey.shade800,
-                            child: CachedAvatar(
-                              imageUrl: null,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: hasUnseen
+                            ? const Color(0xFFE91E63)
+                            : Colors.grey.shade600,
+                        width: hasUnseen ? 2.4 : 2,
+                      ),
+                    ),
+                    child: ClipOval(
+                      child: avatarUrl != null && avatarUrl!.isNotEmpty
+                          ? CachedAvatar(
+                              imageUrl: avatarUrl,
                               radius: 28,
                               fallbackText: label,
+                            )
+                          : Container(
+                              color: Colors.grey.shade800,
+                              child: CachedAvatar(
+                                imageUrl: null,
+                                radius: 28,
+                                fallbackText: label,
+                              ),
                             ),
-                          ),
+                    ),
+                ),
+                  if (showPlusBadge)
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E88E5),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.black, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.add,
+                          size: 14,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 4),

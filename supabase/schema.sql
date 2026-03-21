@@ -187,6 +187,13 @@ create table if not exists public.story_replies (
   created_at timestamptz default now()
 );
 
+create table if not exists public.story_views (
+  story_id uuid not null references public.stories(id) on delete cascade,
+  viewer_id uuid not null references public.users(id) on delete cascade,
+  viewed_at timestamptz default now(),
+  primary key (story_id, viewer_id)
+);
+
 -- ============== POSTS (новости, в стиле Threads — жители Темиртау) ==============
 create table if not exists public.posts (
   id uuid primary key default gen_random_uuid(),
@@ -271,6 +278,10 @@ create index if not exists idx_products_latitude
   on public.products (latitude);
 create index if not exists idx_products_longitude
   on public.products (longitude);
+create index if not exists idx_story_views_viewer
+  on public.story_views (viewer_id);
+create index if not exists idx_story_views_story
+  on public.story_views (story_id);
 
 create table if not exists public.post_likes (
   post_id uuid not null references public.posts(id) on delete cascade,
@@ -342,6 +353,7 @@ alter table public.product_comments enable row level security;
 alter table public.followers enable row level security;
 alter table public.stories enable row level security;
 alter table public.story_replies enable row level security;
+alter table public.story_views enable row level security;
 alter table public.notifications enable row level security;
 alter table public.posts enable row level security;
 alter table public.post_likes enable row level security;
@@ -430,9 +442,16 @@ create policy "Stories delete own" on public.stories for delete using (auth.uid(
 drop policy if exists "Story replies select" on public.story_replies;
 drop policy if exists "Story replies insert" on public.story_replies;
 drop policy if exists "Story replies delete own" on public.story_replies;
+drop policy if exists "Story views select own" on public.story_views;
+drop policy if exists "Story views insert own" on public.story_views;
+drop policy if exists "Story views update own" on public.story_views;
 create policy "Story replies select" on public.story_replies for select using (true);
 create policy "Story replies insert" on public.story_replies for insert with check (auth.uid() = user_id);
 create policy "Story replies delete own" on public.story_replies for delete using (auth.uid() = user_id);
+
+create policy "Story views select own" on public.story_views for select using (auth.uid() = viewer_id);
+create policy "Story views insert own" on public.story_views for insert with check (auth.uid() = viewer_id);
+create policy "Story views update own" on public.story_views for update using (auth.uid() = viewer_id) with check (auth.uid() = viewer_id);
 
 drop policy if exists "Notifications select" on public.notifications;
 drop policy if exists "Notifications update own" on public.notifications;
