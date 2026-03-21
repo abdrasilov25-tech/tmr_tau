@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -6,7 +8,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
-import 'package:postgrest/postgrest.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -137,7 +138,15 @@ class _EditProductPageState extends State<EditProductPage> {
       if (!enabled) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Включите геолокацию на устройстве')),
+          SnackBar(
+            content: const Text(
+              'Геолокация выключена. Включите службы геолокации',
+            ),
+            action: SnackBarAction(
+              label: 'Настройки',
+              onPressed: Geolocator.openLocationSettings,
+            ),
+          ),
         );
         return;
       }
@@ -149,23 +158,76 @@ class _EditProductPageState extends State<EditProductPage> {
           permission == LocationPermission.denied) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Нет доступа к геолокации')),
+          SnackBar(
+            content: const Text('Нет доступа к геолокации для приложения'),
+            action: SnackBarAction(
+              label: 'Открыть',
+              onPressed: Geolocator.openAppSettings,
+            ),
+          ),
         );
         return;
       }
-      final pos = await Geolocator.getCurrentPosition();
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 12),
+        ),
+      );
       if (!mounted) return;
       setState(() {
         _latitude = pos.latitude;
         _longitude = pos.longitude;
       });
-    } catch (_) {
+      await _fillCityFromCoordinates(pos.latitude, pos.longitude);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Геолокация добавлена')));
+    } on TimeoutException {
+      final last = await Geolocator.getLastKnownPosition();
+      if (!mounted) return;
+      if (last != null) {
+        setState(() {
+          _latitude = last.latitude;
+          _longitude = last.longitude;
+        });
+        await _fillCityFromCoordinates(last.latitude, last.longitude);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Использованы последние известные координаты'),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Не удалось получить координаты вовремя'),
+          ),
+        );
+      }
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось получить геолокацию')),
+        SnackBar(content: Text('Не удалось получить геолокацию: $e')),
       );
     } finally {
       if (mounted) setState(() => _gettingLocation = false);
+    }
+  }
+
+  Future<void> _fillCityFromCoordinates(double lat, double lng) async {
+    try {
+      final places = await placemarkFromCoordinates(lat, lng);
+      if (!mounted || places.isEmpty) return;
+      final p = places.first;
+      final city =
+          (p.locality ?? p.subAdministrativeArea ?? p.administrativeArea ?? '')
+              .trim();
+      if (city.isEmpty) return;
+      if (_cityController.text.trim().isEmpty) {
+        _cityController.text = city;
+      }
+    } catch (_) {
+      // Ignore reverse geocoding errors, coordinates are still saved.
     }
   }
 

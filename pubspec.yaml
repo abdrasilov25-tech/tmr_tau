@@ -50,6 +50,7 @@ dependencies:
   path_provider: ^2.1.2
   url_launcher: ^6.3.2
   geolocator: ^13.0.2
+  geocoding: ^3.0.0
 
 dev_dependencies:
   flutter_test:
