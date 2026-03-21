@@ -1,5 +1,6 @@
 import '../entities/post_comment_entity.dart';
 import '../entities/post_entity.dart';
+import '../entities/publication_feed_page_result.dart';
 
 abstract class PostRepository {
   Future<List<PostEntity>> getFeedPosts({
@@ -7,6 +8,31 @@ abstract class PostRepository {
     int offset = 0,
     String? currentUserId,
   });
+
+  /// Только публикации от авторов из [followingUserIds] (вкладка «Подписки»).
+  Future<PublicationFeedPageResult> getPublicationsFeedSubscriptions({
+    String? currentUserId,
+    required List<String> followingUserIds,
+    int limit = 10,
+    int offset = 0,
+  });
+
+  /// Рекомендации: публикации не от себя и не от подписок (вкладка «Рекомендации»).
+  /// Персонализация: лайки/сохранения/просмотры и хэштеги (см. реализацию).
+  Future<PublicationFeedPageResult> getPublicationsFeedRecommendations({
+    String? currentUserId,
+    required List<String> followingUserIds,
+    int limit = 10,
+    int discoveryDbOffset = 0,
+  });
+
+  /// Запись просмотра в ленте рекомендаций (для скоринга). Без сессии — no-op.
+  Future<void> recordPublicationFeedImpression({
+    required String postId,
+    required int watchedMsDelta,
+    bool completed = false,
+  });
+
   Future<List<PostEntity>> getPopularPosts({String? userId});
   Future<List<PostEntity>> getNewsPosts({
     int limit = 20,
