@@ -100,6 +100,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _bootstrapSearchUx() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     final storage = SearchPreferencesStorage(prefs);
     List<CategoryEntity> categories = const [];
     try {
@@ -333,8 +334,9 @@ class _SearchPageState extends State<SearchPage> {
                   controller: _scrollController,
                   itemCount: items.length + (showBottomLoader ? 1 : 0),
                   itemBuilder: (context, index) {
-                    if (index >= items.length)
+                    if (index >= items.length) {
                       return const _BottomSkeletonLoader();
+                    }
                     final item = items[index];
                     if (item is SearchProductResultItem) {
                       return _ProductSearchTile(
@@ -697,7 +699,7 @@ class _SuggestionsBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         scrollDirection: Axis.horizontal,
         itemCount: suggestions.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final text = suggestions[index];
           return ActionChip(label: Text(text), onPressed: () => onTap(text));

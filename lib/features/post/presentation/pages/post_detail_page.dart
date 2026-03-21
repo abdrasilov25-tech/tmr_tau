@@ -97,18 +97,18 @@ class _PostDetailPageState extends State<PostDetailPage> {
       if (!mounted) return;
       await _loadComments();
     } on PostCommentReplyFallbackException catch (_) {
-      if (mounted) {
-        await _loadComments();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Ответ добавлен. Для вложенных ответов выполните в Supabase SQL Editor: '
-              'ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES post_comments(id) ON DELETE CASCADE;',
-            ),
-            duration: Duration(seconds: 6),
+      if (!mounted) return;
+      await _loadComments();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Ответ добавлен. Для вложенных ответов выполните в Supabase SQL Editor: '
+            'ALTER TABLE post_comments ADD COLUMN IF NOT EXISTS parent_id UUID REFERENCES post_comments(id) ON DELETE CASCADE;',
           ),
-        );
-      }
+          duration: Duration(seconds: 6),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         final msg = e is PostgrestException ? e.message : e.toString();
@@ -294,7 +294,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                         _post.imageUrl,
                         width: double.infinity,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(
+                        errorBuilder: (context, error, stackTrace) => Container(
                           height: 200,
                           color: Colors.grey.shade200,
                           child: const Icon(Icons.broken_image_outlined, size: 48),

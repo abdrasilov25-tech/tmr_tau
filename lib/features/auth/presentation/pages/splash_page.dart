@@ -125,7 +125,7 @@ class _SplashPageState extends State<SplashPage>
                       width: 160,
                       height: 160,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) => const Icon(
+                      errorBuilder: (_, _, _) => const Icon(
                         Icons.image_outlined,
                         size: 120,
                         color: Colors.white54,

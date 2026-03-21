@@ -136,6 +136,7 @@ class _AddProductPageState extends State<AddProductPage> {
         _longitude = pos.longitude;
       });
       await _fillCityFromCoordinates(pos.latitude, pos.longitude);
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Геолокация добавлена')));
@@ -148,6 +149,7 @@ class _AddProductPageState extends State<AddProductPage> {
           _longitude = last.longitude;
         });
         await _fillCityFromCoordinates(last.latitude, last.longitude);
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Использованы последние известные координаты'),

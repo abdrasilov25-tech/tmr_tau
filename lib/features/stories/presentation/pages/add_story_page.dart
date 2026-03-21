@@ -265,6 +265,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
         alsoToProfile = choice == true;
       }
 
+      if (!mounted) return;
       final storiesRepository = context.read<StoriesRepository>();
       await storiesRepository.addStory(
             userId: authState.user.id,
@@ -272,6 +273,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
             videoUrl: videoUrl,
             caption: _captionController.text.trim().isEmpty ? null : _captionController.text.trim(),
           );
+      if (!mounted) return;
       final ownStories = await storiesRepository.getStoriesByUser(authState.user.id);
       if (ownStories.isEmpty) {
         throw Exception(

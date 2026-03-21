@@ -39,6 +39,7 @@ dependencies:
   go_router: ^14.2.0
   # Backend
   supabase_flutter: ^2.6.0
+  postgrest: ^2.6.0 # явная зависимость (FeedBloc ловит PostgrestException)
   # UI
   google_fonts: ^6.2.1
   cached_network_image: ^3.3.1

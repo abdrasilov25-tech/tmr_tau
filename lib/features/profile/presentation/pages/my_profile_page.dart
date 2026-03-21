@@ -82,6 +82,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         file,
         fileOptions: const supa.FileOptions(upsert: true),
       );
+      if (!mounted) return;
       final publicUrl = storageRef.getPublicUrl(fileName);
 
       await context.read<ProfileRepository>().updateProfile(
@@ -89,13 +90,13 @@ class _MyProfilePageState extends State<MyProfilePage> {
             avatarUrl: publicUrl,
           );
 
-      if (mounted) {
-        context.read<AuthBloc>().add(const AuthCheckRequested());
-        await _load();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Аватар обновлён')),
-        );
-      }
+      if (!mounted) return;
+      context.read<AuthBloc>().add(const AuthCheckRequested());
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Аватар обновлён')),
+      );
     } catch (e, st) {
       if (!mounted) return;
       String message = 'Не удалось обновить аватар: $e';
@@ -125,9 +126,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
     setState(() => _loading = true);
     try {
       final repo = context.read<ProfileRepository>();
+      final postRepo = context.read<PostRepository>();
       final profile = await repo.getSellerProfile(uid);
+      if (!mounted) return;
       final posts =
-          await context.read<PostRepository>().getPostsByUser(uid, currentUserId: uid);
+          await postRepo.getPostsByUser(uid, currentUserId: uid);
       final newsPosts = posts
           .where((p) => p.kind.trim().toLowerCase() == 'news')
           .toList(growable: false);
@@ -135,7 +138,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
           .where((p) => p.kind.trim().toLowerCase() == 'publication')
           .toList(growable: false);
       if (publicationPosts.isEmpty) {
-        final publicationFeed = await context.read<PostRepository>().searchPublicationsByCursor(
+        if (!mounted) return;
+        final publicationFeed = await postRepo.searchPublicationsByCursor(
               query: '',
               limit: 100,
               currentUserId: uid,
@@ -179,8 +183,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
   Future<void> _loadProfileStories(String uid) async {
     setState(() => _loading = true);
     try {
-      final allGroups = await context.read<StoriesRepository>().getStoriesGroupedByUser();
-      final ownStories = await context.read<StoriesRepository>().getStoriesByUser(uid);
+      final storiesRepo = context.read<StoriesRepository>();
+      final authForStories = context.read<AuthBloc>().state;
+      final allGroups = await storiesRepo.getStoriesGroupedByUser();
+      if (!mounted) return;
+      final ownStories = await storiesRepo.getStoriesByUser(uid);
       final peerIds = <String>{};
       try {
         final rows = await supa.Supabase.instance.client
@@ -201,6 +208,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
       } catch (_) {
         // Даже если чат-список недоступен, собственные сторис все равно покажем.
       }
+      if (!mounted) return;
       var groups = allGroups
           .where((g) => g.stories.isNotEmpty)
           .where((g) => g.userId == uid || peerIds.contains(g.userId))
@@ -210,22 +218,22 @@ class _MyProfilePageState extends State<MyProfilePage> {
           .toList(growable: false);
       if (aliveOwnStories.isNotEmpty &&
           groups.every((g) => g.userId != uid)) {
+        final auth = authForStories is AuthAuthenticated ? authForStories : null;
         groups = [
           StoryGroupEntity(
             userId: uid,
             stories: aliveOwnStories,
-            userName: context.read<AuthBloc>().state is AuthAuthenticated
-                ? (context.read<AuthBloc>().state as AuthAuthenticated).user.username ??
-                    (context.read<AuthBloc>().state as AuthAuthenticated).user.name ??
-                    (context.read<AuthBloc>().state as AuthAuthenticated).user.email
+            userName: auth != null
+                ? (auth.user.username ??
+                    auth.user.name ??
+                    auth.user.email)
                 : 'Вы',
-            userAvatarUrl: context.read<AuthBloc>().state is AuthAuthenticated
-                ? (context.read<AuthBloc>().state as AuthAuthenticated).user.avatarUrl
-                : null,
+            userAvatarUrl: auth?.user.avatarUrl,
           ),
           ...groups,
         ];
       }
+      if (!mounted) return;
       final seenStorage = context.read<ChatStoryListStorage>();
       final nextMap = <String, bool>{};
       for (final g in groups) {
@@ -477,7 +485,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             onOpenOwnStory: () async {
               if (ownGroup == null) {
                 await context.push('/add-story');
-                if (!mounted) return;
+                if (!context.mounted) return;
                 await _loadProfileStories(user.id);
                 return;
               }
@@ -485,13 +493,13 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 '/stories',
                 extra: StoryViewerArgs(groups: [ownGroup], initialGroupIndex: 0),
               );
-              if (!mounted) return;
+              if (!context.mounted) return;
               try {
                 final latestStoryAt = ownGroup.firstStory.createdAt;
                 await context
                     .read<ChatStoryListStorage>()
                     .setLastSeenAt(ownGroup.userId, latestStoryAt);
-                if (!mounted) return;
+                if (!context.mounted) return;
                 setState(() {
                   _newStoriesByUserId = {
                     ..._newStoriesByUserId,
@@ -499,7 +507,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   };
                 });
               } catch (_) {}
-              if (!mounted) return;
+              if (!context.mounted) return;
               await _loadProfileStories(user.id);
             },
           );
@@ -543,11 +551,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       avatarUrl: currentUser.avatarUrl,
                     ),
                   );
+                  if (!rootContext.mounted) return;
                   final result = await rootContext.push<dynamic>(
                     '/login',
                     extra: {'addAccount': true},
                   );
-                  if (!mounted) return;
+                  if (!rootContext.mounted) return;
                   if (result is LoginResult) {
                     if (result.password != null &&
                         result.password!.isNotEmpty) {
@@ -583,7 +592,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                     password = null;
                   }
                   if (password == null || password.isEmpty) {
-                    if (!mounted) {
+                    if (!rootContext.mounted) {
                       _isSwitchingAccount = false;
                       return;
                     }
@@ -596,12 +605,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       '/login',
                       extra: {'email': account.email},
                     );
-                    if (mounted) {
+                    if (rootContext.mounted) {
                       setState(() => _isSwitchingAccount = false);
                     }
                     return;
                   }
-                  if (!mounted) {
+                  if (!rootContext.mounted) {
                     _isSwitchingAccount = false;
                     return;
                   }
@@ -629,11 +638,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
                     avatarUrl: currentUser.avatarUrl,
                   ),
                 );
+                if (!rootContext.mounted) return;
                 final result = await rootContext.push<dynamic>(
                   '/login',
                   extra: {'addAccount': true},
                 );
-                if (!mounted) return;
+                if (!rootContext.mounted) return;
                 if (result is LoginResult) {
                   if (result.password != null && result.password!.isNotEmpty) {
                     accountStorage.savePasswordImmediate(
@@ -667,7 +677,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       code == 'refresh_token_not_found' ||
                       message.contains('invalid refresh token');
                   if (isInvalidRefreshToken) {
-                    if (!mounted) {
+                    if (!rootContext.mounted) {
                       _isSwitchingAccount = false;
                       return;
                     }
@@ -682,14 +692,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       '/login',
                       extra: {'email': account.email},
                     );
-                    if (mounted) {
+                    if (rootContext.mounted) {
                       setState(() => _isSwitchingAccount = false);
                     }
                     return;
                   }
                   rethrow;
                 }
-                if (!mounted) {
+                if (!rootContext.mounted) {
                   _isSwitchingAccount = false;
                   return;
                 }
@@ -1472,7 +1482,7 @@ class _PostsGrid extends StatelessWidget {
             Image.network(
               p.imageUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (context, error, stackTrace) => Container(
                 color: Colors.grey.shade200,
                 child: const Icon(Icons.broken_image_outlined),
               ),

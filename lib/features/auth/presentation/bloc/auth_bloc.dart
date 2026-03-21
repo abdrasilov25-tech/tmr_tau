@@ -1,7 +1,6 @@
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../../core/storage/multi_account_storage.dart';
-import '../../../../core/storage/multi_account_storage.dart' show SavedAccount;
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 

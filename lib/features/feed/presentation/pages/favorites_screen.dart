@@ -32,10 +32,12 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   Future<void> _load() async {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
-      if (mounted) setState(() {
-        _loading = false;
-        _items = [];
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _items = [];
+        });
+      }
       return;
     }
     setState(() {
@@ -44,15 +46,19 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     });
     try {
       final list = await widget.productRepository.getFavorites(authState.user.id);
-      if (mounted) setState(() {
-        _items = list;
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _items = list;
+          _loading = false;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 

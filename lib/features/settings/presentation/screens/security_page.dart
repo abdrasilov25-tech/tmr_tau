@@ -30,16 +30,17 @@ class _SecurityPageState extends State<SecurityPage> {
     setState(() => _isClearing = true);
     try {
       await repo.clearSessionsAndLogout(userId: userId);
-      if (!mounted) return;
+      if (!context.mounted) return;
       context.go('/login');
     } catch (e) {
-      if (!mounted) return;
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Не удалось очистить сессии: $e')),
       );
     } finally {
-      if (!mounted) return;
-      setState(() => _isClearing = false);
+      if (mounted) {
+        setState(() => _isClearing = false);
+      }
     }
   }
 

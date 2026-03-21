@@ -450,6 +450,7 @@ class _ChatPageState extends State<ChatPage> {
     if (storyId.isEmpty) return;
     try {
       final groups = await context.read<StoriesRepository>().getStoriesGroupedByUser();
+      if (!mounted) return;
       StoryGroupEntity? peerGroup;
       for (final g in groups) {
         if (g.userId == widget.peerId) {

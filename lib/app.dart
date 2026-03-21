@@ -183,6 +183,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
               await widget.localReactionsStorage.clearReactions();
               await widget.chatListStorage.clearAll();
               await widget.chatStoryListStorage.clearAll();
+              if (!context.mounted) return;
               final session =
                   supa.Supabase.instance.client.auth.currentSession;
               final refreshToken = session?.refreshToken;

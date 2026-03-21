@@ -50,7 +50,9 @@ class ThemeIndexNotifier {
   Future<void> setIndex(int index) async {
     final clamped = index.clamp(0, 5);
     if (_state.value.index == clamped &&
-        _state.value.customImagePath == null) return;
+        _state.value.customImagePath == null) {
+      return;
+    }
     await _repository.setPresetTheme(clamped);
     _emitState();
   }
