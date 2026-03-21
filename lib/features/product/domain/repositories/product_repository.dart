@@ -36,6 +36,12 @@ abstract class ProductRepository {
     String imageUrl = '',
     String category = 'general',
     String? categoryId,
+    String? city,
+    String condition = 'any',
+    bool isUrgent = false,
+    bool isTop = false,
+    double? latitude,
+    double? longitude,
     required String sellerId,
   });
   Future<void> updateProduct({
@@ -46,6 +52,12 @@ abstract class ProductRepository {
     required String imageUrl,
     String category = 'general',
     String? categoryId,
+    String? city,
+    String condition = 'any',
+    bool isUrgent = false,
+    bool isTop = false,
+    double? latitude,
+    double? longitude,
   });
   Future<void> deleteProduct(String productId);
   Future<void> toggleProductLike(String productId, String userId);

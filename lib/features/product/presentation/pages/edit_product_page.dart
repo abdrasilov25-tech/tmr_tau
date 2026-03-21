@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -33,13 +34,20 @@ class _EditProductPageState extends State<EditProductPage> {
   late final TextEditingController _titleController;
   late final TextEditingController _priceController;
   late final TextEditingController _descriptionController;
+  late final TextEditingController _cityController;
   bool _loading = false;
+  bool _gettingLocation = false;
   File? _image;
   List<CategoryEntity> _mainCategories = [];
   List<CategoryEntity> _subcategories = [];
   CategoryEntity? _selectedMain;
   CategoryEntity? _selectedSubcategory;
   bool _categoriesLoading = true;
+  late String _condition;
+  late bool _isUrgent;
+  late bool _isTop;
+  double? _latitude;
+  double? _longitude;
 
   @override
   void initState() {
@@ -48,6 +56,12 @@ class _EditProductPageState extends State<EditProductPage> {
     _titleController = TextEditingController(text: p.title);
     _priceController = TextEditingController(text: p.price.toStringAsFixed(0));
     _descriptionController = TextEditingController(text: p.description);
+    _cityController = TextEditingController(text: p.city ?? '');
+    _condition = p.condition;
+    _isUrgent = p.isUrgent;
+    _isTop = p.isTop;
+    _latitude = p.latitude;
+    _longitude = p.longitude;
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadCategories());
   }
 
@@ -100,7 +114,9 @@ class _EditProductPageState extends State<EditProductPage> {
     });
     if (main == null) return;
     try {
-      final list = await context.read<CategoriesRepository>().getSubcategories(main.id);
+      final list = await context.read<CategoriesRepository>().getSubcategories(
+        main.id,
+      );
       if (mounted) setState(() => _subcategories = list);
     } catch (_) {}
   }
@@ -110,7 +126,47 @@ class _EditProductPageState extends State<EditProductPage> {
     _titleController.dispose();
     _priceController.dispose();
     _descriptionController.dispose();
+    _cityController.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickCurrentLocation() async {
+    setState(() => _gettingLocation = true);
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Включите геолокацию на устройстве')),
+        );
+        return;
+      }
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.deniedForever ||
+          permission == LocationPermission.denied) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Нет доступа к геолокации')),
+        );
+        return;
+      }
+      final pos = await Geolocator.getCurrentPosition();
+      if (!mounted) return;
+      setState(() {
+        _latitude = pos.latitude;
+        _longitude = pos.longitude;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось получить геолокацию')),
+      );
+    } finally {
+      if (mounted) setState(() => _gettingLocation = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -120,9 +176,9 @@ class _EditProductPageState extends State<EditProductPage> {
       _priceController.text.replaceAll(' ', '').replaceAll(',', '.'),
     );
     if (price == null || price < 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Введите корректную цену')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Введите корректную цену')));
       return;
     }
 
@@ -136,7 +192,11 @@ class _EditProductPageState extends State<EditProductPage> {
         final path = '${uuid.v4()}.$ext';
         await Supabase.instance.client.storage
             .from(SupabaseConstants.bucketProducts)
-            .upload(path, _image!, fileOptions: const FileOptions(upsert: true));
+            .upload(
+              path,
+              _image!,
+              fileOptions: const FileOptions(upsert: true),
+            );
         imageUrl = Supabase.instance.client.storage
             .from(SupabaseConstants.bucketProducts)
             .getPublicUrl(path);
@@ -149,18 +209,28 @@ class _EditProductPageState extends State<EditProductPage> {
         imageUrl: imageUrl,
         category: _selectedSubcategory?.name ?? widget.product.category,
         categoryId: _selectedSubcategory?.id ?? widget.product.categoryId,
+        city: _cityController.text.trim().isEmpty
+            ? null
+            : _cityController.text.trim(),
+        condition: _condition,
+        isUrgent: _isUrgent,
+        isTop: _isTop,
+        latitude: _latitude,
+        longitude: _longitude,
       );
       if (!mounted) return;
       final authState = context.read<AuthBloc>().state;
-      final currentUserId = authState is AuthAuthenticated ? authState.user.id : null;
+      final currentUserId = authState is AuthAuthenticated
+          ? authState.user.id
+          : null;
       final updated = await productRepository.getProductById(
         widget.productId,
         currentUserId: currentUserId,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Товар обновлён')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Товар обновлён')));
       context.pop(updated);
     } catch (e, st) {
       if (!mounted) return;
@@ -234,15 +304,17 @@ class _EditProductPageState extends State<EditProductPage> {
                                   Icon(
                                     Icons.add_photo_alternate_outlined,
                                     size: 48,
-                                    color:
-                                        Theme.of(context).colorScheme.outline,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.outline,
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
                                     'Изменить фото',
                                     style: TextStyle(
-                                      color:
-                                          Theme.of(context).colorScheme.outline,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.outline,
                                     ),
                                   ),
                                 ],
@@ -252,30 +324,43 @@ class _EditProductPageState extends State<EditProductPage> {
             ),
             const SizedBox(height: 24),
             if (_categoriesLoading)
-              const Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator()))
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(),
+                ),
+              )
             else ...[
               DropdownButtonFormField<CategoryEntity>(
                 initialValue: _selectedMain,
-                decoration: const InputDecoration(
-                  labelText: 'Категория',
-                ),
+                decoration: const InputDecoration(labelText: 'Категория'),
                 items: [
-                  const DropdownMenuItem<CategoryEntity>(value: null, child: Text('— Выберите категорию —')),
-                  ..._mainCategories.map((c) => DropdownMenuItem(value: c, child: Text(c.name))),
+                  const DropdownMenuItem<CategoryEntity>(
+                    value: null,
+                    child: Text('— Выберите категорию —'),
+                  ),
+                  ..._mainCategories.map(
+                    (c) => DropdownMenuItem(value: c, child: Text(c.name)),
+                  ),
                 ],
                 onChanged: (v) => _onMainCategorySelected(v),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<CategoryEntity>(
                 initialValue: _selectedSubcategory,
-                decoration: const InputDecoration(
-                  labelText: 'Подкатегория',
-                ),
+                decoration: const InputDecoration(labelText: 'Подкатегория'),
                 items: [
-                  const DropdownMenuItem<CategoryEntity>(value: null, child: Text('— Выберите подкатегорию —')),
-                  ..._subcategories.map((c) => DropdownMenuItem(value: c, child: Text(c.name))),
+                  const DropdownMenuItem<CategoryEntity>(
+                    value: null,
+                    child: Text('— Выберите подкатегорию —'),
+                  ),
+                  ..._subcategories.map(
+                    (c) => DropdownMenuItem(value: c, child: Text(c.name)),
+                  ),
                 ],
-                onChanged: _selectedMain == null ? null : (v) => setState(() => _selectedSubcategory = v),
+                onChanged: _selectedMain == null
+                    ? null
+                    : (v) => setState(() => _selectedSubcategory = v),
               ),
             ],
             const SizedBox(height: 16),
@@ -303,6 +388,57 @@ class _EditProductPageState extends State<EditProductPage> {
                 }
                 return null;
               },
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _cityController,
+              decoration: const InputDecoration(
+                labelText: 'Город',
+                hintText: 'Например, Алматы',
+              ),
+            ),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(
+              initialValue: _condition,
+              decoration: const InputDecoration(labelText: 'Состояние'),
+              items: const [
+                DropdownMenuItem(value: 'any', child: Text('Любое')),
+                DropdownMenuItem(value: 'new', child: Text('Новый')),
+                DropdownMenuItem(value: 'used', child: Text('Б/у')),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _condition = v);
+              },
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Срочное объявление'),
+              value: _isUrgent,
+              onChanged: (v) => setState(() => _isUrgent = v),
+            ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Поднять в ТОП'),
+              value: _isTop,
+              onChanged: (v) => setState(() => _isTop = v),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _gettingLocation ? null : _pickCurrentLocation,
+              icon: _gettingLocation
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.my_location_rounded),
+              label: Text(
+                _latitude == null || _longitude == null
+                    ? 'Добавить мою геолокацию'
+                    : 'Геолокация добавлена',
+              ),
             ),
             const SizedBox(height: 16),
             TextFormField(

@@ -8,6 +8,8 @@ import '../models/product_model.dart';
 class ProductRepositoryImpl implements ProductRepository {
   ProductRepositoryImpl(this._client);
   final SupabaseClient _client;
+  static const String _productSelect =
+      'id, title, description, price, image_url, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, users!seller_id(name, avatar), categories!category_id(name)';
 
   @override
   Future<List<ProductEntity>> getFeedProducts({
@@ -18,9 +20,7 @@ class ProductRepositoryImpl implements ProductRepository {
     final safeLimit = limit.clamp(1, 100);
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select(
-          'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-        )
+        .select(_productSelect)
         .order('created_at', ascending: false)
         .range(offset, offset + safeLimit - 1);
     final list = _mapProducts(res as List);
@@ -34,9 +34,7 @@ class ProductRepositoryImpl implements ProductRepository {
   }) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select(
-          'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-        )
+        .select(_productSelect)
         .eq('id', id)
         .maybeSingle();
     if (res == null) return null;
@@ -52,9 +50,7 @@ class ProductRepositoryImpl implements ProductRepository {
   }) async {
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select(
-          'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-        )
+        .select(_productSelect)
         .eq('seller_id', sellerId)
         .order('created_at', ascending: false);
     final list = _mapProducts(res as List);
@@ -68,28 +64,13 @@ class ProductRepositoryImpl implements ProductRepository {
     String? currentUserId,
     SearchFilters? filters,
   }) async {
-    final q = query.trim();
-    if (q.isEmpty) {
-      return getFeedProducts(limit: limit, currentUserId: currentUserId);
-    }
-    // Экранируем одинарную кавычку, чтобы не сломать фильтр Postgrest
-    final safe = q.replaceAll(r"'", r"''");
-    try {
-      final res = await _client
-          .from(SupabaseConstants.productsTable)
-          .select(
-            'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-          )
-          .or('title.ilike.%$safe%,description.ilike.%$safe%')
-          .gte('price', filters?.minPrice ?? 0)
-          .order('created_at', ascending: false)
-          .limit(limit);
-      final list = _mapProducts(res as List);
-      return await _enrichWithUserState(list, currentUserId);
-    } catch (_) {
-      // При ошибке (например неверный символ) возвращаем ленту как "похожие"
-      return getFeedProducts(limit: limit, currentUserId: currentUserId);
-    }
+    return searchProductsWithOffset(
+      query,
+      limit: limit,
+      offset: 0,
+      currentUserId: currentUserId,
+      filters: filters,
+    );
   }
 
   @override
@@ -101,13 +82,6 @@ class ProductRepositoryImpl implements ProductRepository {
     SearchFilters? filters,
   }) async {
     final q = query.trim();
-    if (q.isEmpty) {
-      return getFeedProducts(
-        limit: limit,
-        offset: offset,
-        currentUserId: currentUserId,
-      );
-    }
 
     final safeLimit = limit.clamp(1, 100);
     final safeOffset = offset < 0 ? 0 : offset;
@@ -117,13 +91,13 @@ class ProductRepositoryImpl implements ProductRepository {
     try {
       dynamic queryBuilder = _client
           .from(SupabaseConstants.productsTable)
-          .select(
-            'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-          );
+          .select(_productSelect);
 
-      queryBuilder = queryBuilder.or(
-        'title.ilike.%$safe%,description.ilike.%$safe%',
-      );
+      if (q.isNotEmpty) {
+        queryBuilder = queryBuilder.or(
+          'title.ilike.%$safe%,description.ilike.%$safe%',
+        );
+      }
       if (filters?.categoryId != null && filters!.categoryId!.isNotEmpty) {
         queryBuilder = queryBuilder.eq('category_id', filters.categoryId);
       }
@@ -135,18 +109,12 @@ class ProductRepositoryImpl implements ProductRepository {
       }
       if (filters?.city != null && filters!.city!.trim().isNotEmpty) {
         final city = filters.city!.trim().replaceAll(r"'", r"''");
-        queryBuilder = queryBuilder.or(
-          'title.ilike.%$safe%,description.ilike.%$safe%,title.ilike.%$city%,description.ilike.%$city%',
-        );
+        queryBuilder = queryBuilder.ilike('city', '%$city%');
       }
       if (filters?.condition == ProductCondition.newOnly) {
-        queryBuilder = queryBuilder.or(
-          'title.ilike.%нов%,description.ilike.%нов%',
-        );
+        queryBuilder = queryBuilder.eq('condition', 'new');
       } else if (filters?.condition == ProductCondition.used) {
-        queryBuilder = queryBuilder.or(
-          'title.ilike.%б/у%,description.ilike.%б/у%,title.ilike.%бу%,description.ilike.%бу%,title.ilike.%used%,description.ilike.%used%',
-        );
+        queryBuilder = queryBuilder.eq('condition', 'used');
       }
       switch (filters?.sort ?? SearchSort.newest) {
         case SearchSort.newest:
@@ -184,9 +152,7 @@ class ProductRepositoryImpl implements ProductRepository {
     final safeLimit = limit.clamp(1, 100);
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select(
-          'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-        )
+        .select(_productSelect)
         .order('created_at', ascending: false)
         .limit(safeLimit);
     final list = _mapProducts(res as List);
@@ -201,6 +167,12 @@ class ProductRepositoryImpl implements ProductRepository {
     String imageUrl = '',
     String category = 'general',
     String? categoryId,
+    String? city,
+    String condition = 'any',
+    bool isUrgent = false,
+    bool isTop = false,
+    double? latitude,
+    double? longitude,
     required String sellerId,
   }) async {
     final data = <String, dynamic>{
@@ -210,6 +182,12 @@ class ProductRepositoryImpl implements ProductRepository {
       'image_url': imageUrl,
       'category': category,
       'seller_id': sellerId,
+      'city': city,
+      'condition': condition,
+      'is_urgent': isUrgent,
+      'is_top': isTop,
+      'latitude': latitude,
+      'longitude': longitude,
     };
     if (categoryId != null) data['category_id'] = categoryId;
     await _client.from(SupabaseConstants.productsTable).insert(data);
@@ -224,6 +202,12 @@ class ProductRepositoryImpl implements ProductRepository {
     required String imageUrl,
     String category = 'general',
     String? categoryId,
+    String? city,
+    String condition = 'any',
+    bool isUrgent = false,
+    bool isTop = false,
+    double? latitude,
+    double? longitude,
   }) async {
     final data = <String, dynamic>{
       'title': title,
@@ -231,6 +215,12 @@ class ProductRepositoryImpl implements ProductRepository {
       'price': price,
       'image_url': imageUrl,
       'category': category,
+      'city': city,
+      'condition': condition,
+      'is_urgent': isUrgent,
+      'is_top': isTop,
+      'latitude': latitude,
+      'longitude': longitude,
     };
     if (categoryId != null) data['category_id'] = categoryId;
     await _client
@@ -303,9 +293,7 @@ class ProductRepositoryImpl implements ProductRepository {
     if (ids.isEmpty) return [];
     final res = await _client
         .from(SupabaseConstants.productsTable)
-        .select(
-          'id, title, description, price, image_url, category, category_id, seller_id, created_at, users!seller_id(name, avatar), categories!category_id(name)',
-        )
+        .select(_productSelect)
         .inFilter('id', ids)
         .order('created_at', ascending: false);
     final list = _mapProducts(res as List);
@@ -434,6 +422,12 @@ class ProductRepositoryImpl implements ProductRepository {
             isRepostedByMe: repostedIds.contains(p.id),
             isFollowingSeller: followingIds.contains(p.sellerId),
             sellerIsVerified: p.sellerIsVerified,
+            city: p.city,
+            condition: p.condition,
+            isUrgent: p.isUrgent,
+            isTop: p.isTop,
+            latitude: p.latitude,
+            longitude: p.longitude,
           ),
         )
         .toList();
