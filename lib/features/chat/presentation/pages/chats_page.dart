@@ -94,9 +94,12 @@ class _ChatsPageState extends State<ChatsPage> {
   }
 
   Future<void> _showCreateChatDialog() async {
+    final rootContext = context;
     final controller = TextEditingController();
     List<_UserSuggestion> suggestions = const [];
     bool loading = false;
+    bool sheetOpen = true;
+    _UserSuggestion? selectedUser;
 
     Timer? debounce;
 
@@ -131,15 +134,21 @@ class _ChatsPageState extends State<ChatsPage> {
                   .toList();
             }
 
-            return Padding(
+            final media = MediaQuery.of(ctx);
+            final desiredHeight = media.size.height * 0.75;
+            final maxUsableHeight = media.size.height - media.viewInsets.bottom - 24;
+            final sheetHeight = desiredHeight.clamp(280.0, maxUsableHeight);
+            return AnimatedPadding(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
               padding: EdgeInsets.only(
                 left: 16,
                 right: 16,
                 top: 12,
-                bottom: MediaQuery.of(ctx).viewInsets.bottom + 12,
+                bottom: media.viewInsets.bottom + 12,
               ),
               child: SizedBox(
-                height: MediaQuery.of(ctx).size.height * 0.7,
+                height: sheetHeight,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -153,18 +162,20 @@ class _ChatsPageState extends State<ChatsPage> {
                               prefixIcon: Icon(Icons.search_rounded),
                             ),
                             onChanged: (v) {
+                              if (!sheetOpen) return;
                               debounce?.cancel();
                               debounce = Timer(const Duration(milliseconds: 350), () async {
+                                if (!sheetOpen || !ctx.mounted) return;
                                 setStateDialog(() => loading = true);
                                 try {
                                   final res = await _fetchSuggestions(v);
-                                  if (!mounted) return;
+                                  if (!mounted || !sheetOpen || !ctx.mounted) return;
                                   setStateDialog(() {
                                     suggestions = res;
                                     loading = false;
                                   });
                                 } catch (_) {
-                                  if (!mounted) return;
+                                  if (!mounted || !sheetOpen || !ctx.mounted) return;
                                   setStateDialog(() {
                                     suggestions = const [];
                                     loading = false;
@@ -202,10 +213,8 @@ class _ChatsPageState extends State<ChatsPage> {
                                       ),
                                       title: Text(s.name ?? 'Пользователь'),
                                       onTap: () {
+                                        selectedUser = s;
                                         Navigator.pop(ctx);
-                                        context.push(
-                                          '/chat/${s.userId}?name=${Uri.encodeComponent(s.name ?? 'Пользователь')}',
-                                        );
                                       },
                                     );
                                   },
@@ -219,8 +228,20 @@ class _ChatsPageState extends State<ChatsPage> {
         );
       },
     );
+    sheetOpen = false;
     debounce?.cancel();
-    controller.dispose();
+    // Dispose after sheet is fully closed from widget tree.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      controller.dispose();
+    });
+    if (selectedUser == null || !rootContext.mounted) return;
+    await rootContext.push(
+      '/chat/${selectedUser!.userId}?name=${Uri.encodeComponent(selectedUser!.name ?? 'Пользователь')}',
+    );
+    if (!mounted) return;
+    setState(() {
+      _pageFuture = _loadPageData();
+    });
   }
 
   Future<List<_ChatThread>> _loadThreads() async {
@@ -672,13 +693,9 @@ class _ChatsPageState extends State<ChatsPage> {
         ),
       );
       if (!mounted) return;
-      if (lastIncoming != null) {
-        await _chatStorage.setLastDialogShownAt(t.peerId, lastIncoming);
-      }
-      if (accept == true) {
-        final at = (lastIncoming ?? DateTime.now()).add(const Duration(milliseconds: 1));
-        await _chatStorage.setLastReadAt(t.peerId, at);
-      }
+      await _chatStorage.setLastDialogShownAt(t.peerId, lastIncoming);
+      final at = lastIncoming.add(const Duration(milliseconds: 1));
+      await _chatStorage.setLastReadAt(t.peerId, at);
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
       );
