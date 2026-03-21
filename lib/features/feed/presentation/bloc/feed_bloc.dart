@@ -215,7 +215,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     if (!isClosed) emit(current.copyWith(products: updated));
     try {
       await _repository.toggleProductRepost(event.productId, event.userId);
-    } catch (e, st) {
+    } catch (e) {
       if (e is PostgrestException) {
         debugPrint('FeedBloc toggleRepost: ${e.message}');
       } else {

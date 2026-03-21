@@ -695,6 +695,6 @@ class PostRepositoryImpl implements PostRepository {
         .eq('id', postId)
         .maybeSingle();
     if (post == null) return null;
-    return (post as Map<String, dynamic>)['user_id'] as String?;
+    return post['user_id'] as String?;
   }
 }

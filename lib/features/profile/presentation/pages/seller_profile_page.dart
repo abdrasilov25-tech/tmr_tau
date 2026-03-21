@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
@@ -8,6 +10,7 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../core/constants/supabase_constants.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
@@ -23,6 +26,207 @@ class SellerProfilePage extends StatelessWidget {
 
   final String sellerId;
 
+  String _profileUrl(String userId) => 'https://tmr-tau.app/profile/$userId';
+
+  Future<bool> _isBlockedByMe(String currentUserId) async {
+    final row = await Supabase.instance.client
+        .from('blocked_users')
+        .select('blocked_user_id')
+        .eq('blocker_id', currentUserId)
+        .eq('blocked_user_id', sellerId)
+        .maybeSingle();
+    return row != null;
+  }
+
+  Future<bool> _isMutualFollow(String currentUserId) async {
+    final meFollowsPeer = await Supabase.instance.client
+        .from(SupabaseConstants.followersTable)
+        .select('follower_id')
+        .eq('follower_id', currentUserId)
+        .eq('following_id', sellerId)
+        .maybeSingle();
+    if (meFollowsPeer == null) return false;
+    final peerFollowsMe = await Supabase.instance.client
+        .from(SupabaseConstants.followersTable)
+        .select('follower_id')
+        .eq('follower_id', sellerId)
+        .eq('following_id', currentUserId)
+        .maybeSingle();
+    return peerFollowsMe != null;
+  }
+
+  Future<bool> _isMyStoryHiddenForPeer() async {
+    final current = Supabase.instance.client.auth.currentUser?.id;
+    if (current == null) return false;
+    final row = await Supabase.instance.client
+        .from(SupabaseConstants.hiddenStoriesTable)
+        .select('hidden_user_id')
+        .eq('owner_id', current)
+        .eq('hidden_user_id', sellerId)
+        .maybeSingle();
+    return row != null;
+  }
+
+  Future<void> _toggleMyStoryHiddenForPeer(bool hide) async {
+    final current = Supabase.instance.client.auth.currentUser?.id;
+    if (current == null) return;
+    if (hide) {
+      await Supabase.instance.client
+          .from(SupabaseConstants.hiddenStoriesTable)
+          .upsert({
+            'owner_id': current,
+            'hidden_user_id': sellerId,
+          });
+    } else {
+      await Supabase.instance.client
+          .from(SupabaseConstants.hiddenStoriesTable)
+          .delete()
+          .eq('owner_id', current)
+          .eq('hidden_user_id', sellerId);
+    }
+  }
+
+  Future<void> _toggleBlockUser(String currentUserId, bool currentlyBlocked) async {
+    final repo = SettingsRepositoryImpl(Supabase.instance.client);
+    if (currentlyBlocked) {
+      await repo.unblockUser(blockerId: currentUserId, blockedUserId: sellerId);
+      return;
+    }
+    await repo.blockUser(blockerId: currentUserId, blockedUserId: sellerId);
+  }
+
+  Future<void> _removeFollower(String currentUserId) async {
+    await Supabase.instance.client
+        .from(SupabaseConstants.followersTable)
+        .delete()
+        .eq('follower_id', sellerId)
+        .eq('following_id', currentUserId);
+  }
+
+  Future<void> _showProfileActionsSheet(
+    BuildContext context, {
+    required String currentUserId,
+  }) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final blocked = await _isBlockedByMe(currentUserId);
+    final mutual = await _isMutualFollow(currentUserId);
+    final storyHidden = await _isMyStoryHiddenForPeer();
+    if (!context.mounted) return;
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(
+                  blocked ? Icons.block : Icons.block_outlined,
+                  color: Colors.redAccent,
+                ),
+                title: Text(blocked ? 'Разблокировать' : 'Заблокировать'),
+                onTap: () => Navigator.pop(sheetContext, 'block'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: Text(
+                  storyHidden ? 'Показывать мою историю' : 'Скрыть мою историю',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'story'),
+              ),
+              if (mutual)
+                ListTile(
+                  leading: const Icon(Icons.person_remove_alt_1_outlined),
+                  title: const Text('Удалить подписчика'),
+                  onTap: () => Navigator.pop(sheetContext, 'remove_follower'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.link_outlined),
+                title: const Text('Скопировать URL пользователя'),
+                onTap: () => Navigator.pop(sheetContext, 'copy_url'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.ios_share_outlined),
+                title: const Text('Поделиться этим пользователем'),
+                onTap: () => Navigator.pop(sheetContext, 'share'),
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(sheetContext),
+                    child: const Text('Отмена'),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected == null || !context.mounted) return;
+
+    try {
+      switch (selected) {
+        case 'block':
+          await _toggleBlockUser(currentUserId, blocked);
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                blocked ? 'Пользователь разблокирован' : 'Пользователь заблокирован',
+              ),
+            ),
+          );
+          break;
+        case 'story':
+          await _toggleMyStoryHiddenForPeer(!storyHidden);
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                storyHidden
+                    ? 'Пользователь снова видит вашу историю'
+                    : 'Ваша история скрыта от этого пользователя',
+              ),
+            ),
+          );
+          break;
+        case 'remove_follower':
+          await _removeFollower(currentUserId);
+          messenger.showSnackBar(
+            const SnackBar(content: Text('Подписчик удален')),
+          );
+          break;
+        case 'copy_url':
+          final url = _profileUrl(sellerId);
+          await Clipboard.setData(ClipboardData(text: url));
+          messenger.showSnackBar(
+            const SnackBar(content: Text('Ссылка скопирована')),
+          );
+          break;
+        case 'share':
+          final url = _profileUrl(sellerId);
+          await SharePlus.instance.share(
+            ShareParams(text: url),
+          );
+          break;
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('Не удалось выполнить действие: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUserId = context.read<AuthBloc>().state is AuthAuthenticated
@@ -32,7 +236,19 @@ class SellerProfilePage extends StatelessWidget {
       create: (c) => ProfileBloc(c.read<ProfileRepository>())
         ..add(ProfileLoadRequested(sellerId, currentUserId: currentUserId)),
       child: Scaffold(
-        appBar: AppBar(title: const Text('Профиль')),
+        appBar: AppBar(
+          title: const Text('Профиль'),
+          actions: [
+            if (currentUserId != null && currentUserId != sellerId)
+              IconButton(
+                icon: const Icon(Icons.more_horiz),
+                onPressed: () => _showProfileActionsSheet(
+                  context,
+                  currentUserId: currentUserId,
+                ),
+              ),
+          ],
+        ),
         body: BlocBuilder<ProfileBloc, ProfileState>(
           builder: (context, state) {
             if (state is ProfileLoading) return const AppLoading();
@@ -69,8 +285,6 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   List<PostEntity> _publicationPosts = const [];
   bool _loadingPublications = true;
   String? _currentUserId;
-  bool _checkingBlocked = false;
-  bool _isBlocked = false;
 
   @override
   void initState() {
@@ -80,7 +294,6 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
       _currentUserId = authState.user.id;
     }
     _loadPublications();
-    _checkBlockedState();
   }
 
   Future<void> _loadPublications() async {
@@ -99,66 +312,6 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loadingPublications = false);
-    }
-  }
-
-  Future<void> _checkBlockedState() async {
-    if (_currentUserId == null || _currentUserId == widget.profile.id) return;
-    setState(() => _checkingBlocked = true);
-    try {
-      final res = await Supabase.instance.client
-          .from('blocked_users')
-          .select('blocked_user_id')
-          .eq('blocker_id', _currentUserId!)
-          .eq('blocked_user_id', widget.profile.id)
-          .maybeSingle();
-
-      if (!mounted) return;
-      setState(() => _isBlocked = res != null);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _isBlocked = false);
-    } finally {
-      if (!mounted) return;
-      setState(() => _checkingBlocked = false);
-    }
-  }
-
-  Future<void> _toggleBlock() async {
-    if (_currentUserId == null || _currentUserId == widget.profile.id) return;
-    if (_checkingBlocked) return;
-    setState(() => _checkingBlocked = true);
-
-    final repo = SettingsRepositoryImpl(Supabase.instance.client);
-    try {
-      if (_isBlocked) {
-        await repo.unblockUser(
-          blockerId: _currentUserId!,
-          blockedUserId: widget.profile.id,
-        );
-      } else {
-        await repo.blockUser(
-          blockerId: _currentUserId!,
-          blockedUserId: widget.profile.id,
-        );
-      }
-
-      await _checkBlockedState();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_isBlocked ? 'Пользователь разблокирован' : 'Пользователь заблокирован'),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось изменить блокировку: $e')),
-      );
-      await _checkBlockedState();
-    } finally {
-      if (!mounted) return;
-      setState(() => _checkingBlocked = false);
     }
   }
 
@@ -301,26 +454,6 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _checkingBlocked ? null : _toggleBlock,
-                    icon: Icon(
-                      _isBlocked ? Icons.block : Icons.block_outlined,
-                      color: _isBlocked ? Colors.redAccent : null,
-                    ),
-                    label: Text(_isBlocked ? 'Разблокировать' : 'Заблокировать'),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(
-                        color: _isBlocked ? Colors.redAccent : Colors.grey.shade400,
-                      ),
-                      foregroundColor:
-                          _isBlocked ? Colors.redAccent : null,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
                   ),
                 ],
                   ],
@@ -552,7 +685,7 @@ class _ProfilePublicationsGrid extends StatelessWidget {
             Image.network(
               p.imageUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              errorBuilder: (_, _, _) => Container(
                 color: Colors.grey.shade200,
                 child: const Icon(Icons.broken_image_outlined),
               ),

@@ -668,7 +668,9 @@ class _ChatsPageState extends State<ChatsPage> {
     final isUnread = t.unreadCount > 0;
     final lastIncoming = t.lastIncomingAt;
     final lastDialog = _chatStorage.getLastDialogShownAt(t.peerId);
+    final alreadyAccepted = _chatStorage.isAccepted(t.peerId);
     final shouldShowDialog = isUnread &&
+        !alreadyAccepted &&
         lastIncoming != null &&
         (lastDialog == null || lastIncoming.isAfter(lastDialog));
 
@@ -694,8 +696,11 @@ class _ChatsPageState extends State<ChatsPage> {
       );
       if (!mounted) return;
       await _chatStorage.setLastDialogShownAt(t.peerId, lastIncoming);
-      final at = lastIncoming.add(const Duration(milliseconds: 1));
-      await _chatStorage.setLastReadAt(t.peerId, at);
+      if (accept == true) {
+        await _chatStorage.setAccepted(t.peerId, true);
+        final at = lastIncoming.add(const Duration(milliseconds: 1));
+        await _chatStorage.setLastReadAt(t.peerId, at);
+      }
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
       );

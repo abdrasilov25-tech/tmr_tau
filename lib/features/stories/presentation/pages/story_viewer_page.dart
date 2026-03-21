@@ -504,57 +504,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     final newCaption = await showDialog<String>(
       context: context,
       builder: (ctx) {
-        final c = TextEditingController(text: _currentStory.caption ?? '');
-        return Theme(
-          data: ThemeData.light().copyWith(
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.light),
-            inputDecorationTheme: InputDecorationTheme(
-              fillColor: Colors.grey.shade200,
-              filled: true,
-              hintStyle: const TextStyle(color: Colors.black38),
-            ),
-          ),
-          child: AlertDialog(
-            backgroundColor: Colors.white,
-            title: const Text('Редактировать подпись', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
-            content: TextField(
-              controller: c,
-              cursorColor: Colors.black,
-              cursorWidth: 2,
-              style: const TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w500),
-              decoration: InputDecoration(
-                hintText: 'Подпись к истории',
-                hintStyle: const TextStyle(color: Colors.black38),
-                filled: true,
-                fillColor: Colors.grey.shade200,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Colors.black26),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: Colors.grey.shade400),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Colors.blue, width: 2),
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-              ),
-              maxLines: 3,
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Отмена', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, c.text.trim()),
-                child: const Text('Сохранить', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-        );
+        return _EditCaptionDialog(initialCaption: _currentStory.caption ?? '');
       },
     );
     if (newCaption == null || !mounted) return;
@@ -1023,6 +973,85 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
         width: _controller.value.size.width,
         height: _controller.value.size.height,
         child: VideoPlayer(_controller),
+      ),
+    );
+  }
+}
+
+class _EditCaptionDialog extends StatefulWidget {
+  const _EditCaptionDialog({required this.initialCaption});
+
+  final String initialCaption;
+
+  @override
+  State<_EditCaptionDialog> createState() => _EditCaptionDialogState();
+}
+
+class _EditCaptionDialogState extends State<_EditCaptionDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialCaption);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: ThemeData.light().copyWith(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue, brightness: Brightness.light),
+        inputDecorationTheme: InputDecorationTheme(
+          fillColor: Colors.grey.shade200,
+          filled: true,
+          hintStyle: const TextStyle(color: Colors.black38),
+        ),
+      ),
+      child: AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text('Редактировать подпись', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
+        content: TextField(
+          controller: _controller,
+          cursorColor: Colors.black,
+          cursorWidth: 2,
+          style: const TextStyle(color: Colors.black, fontSize: 16, fontWeight: FontWeight.w500),
+          decoration: InputDecoration(
+            hintText: 'Подпись к истории',
+            hintStyle: const TextStyle(color: Colors.black38),
+            filled: true,
+            fillColor: Colors.grey.shade200,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Colors.black26),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: Colors.grey.shade400),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Colors.blue, width: 2),
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          ),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена', style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w500)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, _controller.text.trim()),
+            child: const Text('Сохранить', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.w600)),
+          ),
+        ],
       ),
     );
   }

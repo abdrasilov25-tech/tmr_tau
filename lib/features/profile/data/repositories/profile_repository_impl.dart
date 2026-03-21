@@ -236,7 +236,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
     } on PostgrestException catch (e) {
       if (e.code != '23505') {
         // ignore: avoid_print
-        print('Postgrest toggleFollow error: ${e.message ?? e.toString()}');
+        print('Postgrest toggleFollow error: $e');
       }
     } catch (e) {
       // ignore: avoid_print
