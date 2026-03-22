@@ -20,13 +20,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Бинарник с GitHub — без supabase/setup-cli (он на Node 20 и даёт deprecation warning).
+      # Бинарник с GitHub — без supabase/setup-cli. Распаковка в /tmp: в репо уже есть папка `supabase/`,
+      # иначе tar пытается создать файл `supabase` в корне и падает с "File exists".
       - name: Install Supabase CLI
         run: |
           set -e
-          curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz -o supabase.tgz
-          tar -xzf supabase.tgz
-          sudo install -m 755 supabase /usr/local/bin/supabase
+          mkdir -p /tmp/supabase-cli
+          curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz \
+            -o /tmp/supabase-cli/bin.tgz
+          tar -xzf /tmp/supabase-cli/bin.tgz -C /tmp/supabase-cli
+          sudo install -m 755 /tmp/supabase-cli/supabase /usr/local/bin/supabase
           supabase --version
 
       - name: Deploy Edge Functions
