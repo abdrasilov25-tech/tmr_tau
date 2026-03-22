@@ -8,8 +8,8 @@ import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/models/search_filters.dart';
+import '../../../../core/models/search_view_mode.dart';
 import '../../../../core/storage/search_preferences_storage.dart';
-import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../product/domain/entities/category_entity.dart';
@@ -43,6 +43,9 @@ class _SearchPageState extends State<SearchPage> {
     'Велосипед',
   ];
   Timer? _debounce;
+
+  /// Локально сохраняется (как вид отображения в OLX).
+  SearchViewMode _viewMode = SearchViewMode.list;
 
   @override
   void initState() {
@@ -112,8 +115,93 @@ class _SearchPageState extends State<SearchPage> {
     setState(() {
       _searchStorage = storage;
       _categories = categories;
+      _viewMode = storage.getSearchViewMode();
     });
     _reloadLocalSearchPrefs();
+  }
+
+  Future<void> _persistViewMode(SearchViewMode mode) async {
+    setState(() => _viewMode = mode);
+    await _searchStorage?.setSearchViewMode(mode);
+  }
+
+  Future<void> _showCategoryPicker() async {
+    final picked = await showModalBottomSheet<CategoryEntity?>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.all_inclusive_rounded),
+              title: const Text('Все категории'),
+              onTap: () => Navigator.pop(ctx, null),
+            ),
+            const Divider(height: 1),
+            ..._categories.map(
+              (c) => ListTile(
+                title: Text(c.name),
+                onTap: () => Navigator.pop(ctx, c),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    final f = _pagingController.filters;
+    final next = picked == null
+        ? f.copyWith(clearCategory: true)
+        : f.copyWith(
+            categoryId: picked.id,
+            categoryName: picked.name,
+          );
+    await _pagingController.loadInitial(_queryController.text, filters: next);
+    setState(() {});
+  }
+
+  Future<void> _showLocationDialog() async {
+    final ctrl = TextEditingController(text: _pagingController.filters.city ?? '');
+    String? result;
+    try {
+      result = await showDialog<String?>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Местоположение'),
+          content: TextField(
+            controller: ctrl,
+            decoration: const InputDecoration(
+              hintText: 'Город или регион',
+              border: OutlineInputBorder(),
+            ),
+            textCapitalization: TextCapitalization.words,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: const Text('Везде'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Применить'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      ctrl.dispose();
+    }
+    if (!mounted || result == null) return;
+    final f = _pagingController.filters;
+    final next = result.isEmpty
+        ? f.copyWith(clearCity: true)
+        : f.copyWith(city: result);
+    await _pagingController.loadInitial(_queryController.text, filters: next);
+    setState(() {});
   }
 
   void _reloadLocalSearchPrefs() {
@@ -251,102 +339,30 @@ class _SearchPageState extends State<SearchPage> {
       body: AnimatedBuilder(
         animation: _pagingController,
         builder: (context, _) {
-          final suggestions = _autoSuggestions();
           final filters = _pagingController.filters;
-          if (_pagingController.items.isEmpty && _pagingController.isLoading) {
-            return const _InitialLoading();
-          }
-
-          if (_pagingController.items.isEmpty) {
-            return _SearchEmptyState(
-              query: _queryController.text.trim(),
-              hasFilters: filters.hasActiveFilters,
-              categories: _categories,
-              onResetFilters: () => _pagingController.loadInitial(
-                _queryController.text,
-                filters: const SearchFilters(),
-              ),
-            );
-          }
-
-          final items = _pagingController.items;
-          final showBottomLoader =
-              _pagingController.isLoading && _pagingController.hasMore;
-
           return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _QuickFilterRow(
+              _OlxSearchFilterBar(
+                viewMode: _viewMode,
                 filters: filters,
-                categories: _categories,
-                onFilterTap: _openFiltersSheet,
-                onClearOne: (type) async {
-                  SearchFilters updated = filters;
-                  switch (type) {
-                    case _QuickFilterType.category:
-                      updated = filters.copyWith(clearCategory: true);
-                      break;
-                    case _QuickFilterType.price:
-                      updated = filters.copyWith(
-                        clearMinPrice: true,
-                        clearMaxPrice: true,
-                      );
-                      break;
-                    case _QuickFilterType.city:
-                      updated = filters.copyWith(clearCity: true);
-                      break;
-                    case _QuickFilterType.nearby:
-                      updated = filters.copyWith(clearNearby: true);
-                      break;
-                    case _QuickFilterType.condition:
-                      updated = filters.copyWith(
-                        condition: ProductCondition.any,
-                      );
-                      break;
-                    case _QuickFilterType.sort:
-                      updated = filters.copyWith(sort: SearchSort.newest);
-                      break;
-                  }
+                onOpenFilters: _openFiltersSheet,
+                onSortChanged: (sort) async {
+                  final next = filters.copyWith(sort: sort);
                   await _pagingController.loadInitial(
                     _queryController.text,
-                    filters: updated,
+                    filters: next,
                   );
                   if (mounted) setState(() {});
                 },
+                onCategoryTap: _showCategoryPicker,
+                onLocationTap: _showLocationDialog,
+                onViewModeChanged: _persistViewMode,
               ),
-              if (_queryController.text.trim().isNotEmpty &&
-                  suggestions.isNotEmpty)
-                _SuggestionsBar(
-                  suggestions: suggestions,
-                  onTap: (value) {
-                    _queryController.text = value;
-                    _onSearchChanged(value);
-                    setState(() {});
-                  },
-                ),
-              if (_savedFilters.isNotEmpty)
-                _SavedFiltersBar(
-                  items: _savedFilters,
-                  onTap: _applySavedFilter,
-                  onRemove: _removeSavedFilter,
-                ),
               Expanded(
-                child: ListView.builder(
-                  controller: _scrollController,
-                  itemCount: items.length + (showBottomLoader ? 1 : 0),
-                  itemBuilder: (context, index) {
-                    if (index >= items.length) {
-                      return const _BottomSkeletonLoader();
-                    }
-                    final item = items[index];
-                    if (item is SearchProductResultItem) {
-                      return _ProductSearchTile(
-                        product: item.product,
-                        centerLatitude: filters.centerLatitude,
-                        centerLongitude: filters.centerLongitude,
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
+                child: _buildSearchResultsPane(
+                  suggestions: _autoSuggestions(),
+                  filters: filters,
                 ),
               ),
             ],
@@ -355,19 +371,369 @@ class _SearchPageState extends State<SearchPage> {
       ),
     );
   }
-}
 
-class _InitialLoading extends StatelessWidget {
-  const _InitialLoading();
+  Widget _buildSearchResultsPane({
+    required List<String> suggestions,
+    required SearchFilters filters,
+  }) {
+    if (_pagingController.items.isEmpty && _pagingController.isLoading) {
+      return const _InitialLoading();
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return const Center(child: CircularProgressIndicator());
+    if (_pagingController.items.isEmpty) {
+      return _SearchEmptyState(
+        query: _queryController.text.trim(),
+        hasFilters: filters.hasActiveFilters,
+        categories: _categories,
+        onResetFilters: () => _pagingController.loadInitial(
+          _queryController.text,
+          filters: const SearchFilters(),
+        ),
+      );
+    }
+
+    final items = _pagingController.items;
+    final showBottomLoader =
+        _pagingController.isLoading && _pagingController.hasMore;
+
+    return Column(
+      children: [
+        _QuickFilterRow(
+          filters: filters,
+          categories: _categories,
+          onFilterTap: _openFiltersSheet,
+          onClearOne: (type) async {
+            SearchFilters updated = filters;
+            switch (type) {
+              case _QuickFilterType.category:
+                updated = filters.copyWith(clearCategory: true);
+                break;
+              case _QuickFilterType.price:
+                updated = filters.copyWith(
+                  clearMinPrice: true,
+                  clearMaxPrice: true,
+                );
+                break;
+              case _QuickFilterType.city:
+                updated = filters.copyWith(clearCity: true);
+                break;
+              case _QuickFilterType.nearby:
+                updated = filters.copyWith(clearNearby: true);
+                break;
+              case _QuickFilterType.condition:
+                updated = filters.copyWith(
+                  condition: ProductCondition.any,
+                );
+                break;
+              case _QuickFilterType.sort:
+                updated = filters.copyWith(sort: SearchSort.newest);
+                break;
+            }
+            await _pagingController.loadInitial(
+              _queryController.text,
+              filters: updated,
+            );
+            if (mounted) setState(() {});
+          },
+        ),
+        if (_queryController.text.trim().isNotEmpty && suggestions.isNotEmpty)
+          _SuggestionsBar(
+            suggestions: suggestions,
+            onTap: (value) {
+              _queryController.text = value;
+              _onSearchChanged(value);
+              setState(() {});
+            },
+          ),
+        if (_savedFilters.isNotEmpty)
+          _SavedFiltersBar(
+            items: _savedFilters,
+            onTap: _applySavedFilter,
+            onRemove: _removeSavedFilter,
+          ),
+        Expanded(
+          child: _buildResultsScrollView(
+            items: items,
+            filters: filters,
+            showBottomLoader: showBottomLoader,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResultsScrollView({
+    required List<SearchResultItem> items,
+    required SearchFilters filters,
+    required bool showBottomLoader,
+  }) {
+    switch (_viewMode) {
+      case SearchViewMode.list:
+        return ListView.builder(
+          controller: _scrollController,
+          itemCount: items.length + (showBottomLoader ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= items.length) {
+              return const _BottomSkeletonLoader();
+            }
+            final item = items[index];
+            if (item is SearchProductResultItem) {
+              return _ProductSearchListCompact(
+                product: item.product,
+                centerLatitude: filters.centerLatitude,
+                centerLongitude: filters.centerLongitude,
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        );
+      case SearchViewMode.gallery:
+        return ListView.builder(
+          controller: _scrollController,
+          itemCount: items.length + (showBottomLoader ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= items.length) {
+              return const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final item = items[index];
+            if (item is SearchProductResultItem) {
+              return _ProductSearchGalleryCard(
+                product: item.product,
+                centerLatitude: filters.centerLatitude,
+                centerLongitude: filters.centerLongitude,
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        );
+      case SearchViewMode.tile:
+        return GridView.builder(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 0.68,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+          ),
+          itemCount: items.length + (showBottomLoader ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index >= items.length) {
+              return const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: CircularProgressIndicator(),
+                ),
+              );
+            }
+            final item = items[index];
+            if (item is SearchProductResultItem) {
+              return _ProductSearchGridTile(
+                product: item.product,
+                centerLatitude: filters.centerLatitude,
+                centerLongitude: filters.centerLongitude,
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        );
+    }
   }
 }
 
-class _ProductSearchTile extends StatelessWidget {
-  const _ProductSearchTile({
+String _searchSortButtonLabel(SearchSort s) => switch (s) {
+      SearchSort.newest => 'По дате',
+      SearchSort.priceAsc => 'Дешевле',
+      SearchSort.priceDesc => 'Дороже',
+    };
+
+String? _searchDistanceKmLabel(
+  ProductEntity product,
+  double? centerLatitude,
+  double? centerLongitude,
+) {
+  final centerLat = centerLatitude;
+  final centerLng = centerLongitude;
+  final productLat = product.latitude;
+  final productLng = product.longitude;
+  if (centerLat == null ||
+      centerLng == null ||
+      productLat == null ||
+      productLng == null) {
+    return null;
+  }
+  const earthRadiusKm = 6371.0;
+  final dLat = _degToRad(productLat - centerLat);
+  final dLon = _degToRad(productLng - centerLng);
+  final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+      math.cos(_degToRad(centerLat)) *
+          math.cos(_degToRad(productLat)) *
+          math.sin(dLon / 2) *
+          math.sin(dLon / 2);
+  final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+  final distanceKm = earthRadiusKm * c;
+  if (distanceKm < 1) {
+    return '${(distanceKm * 1000).round()} м';
+  }
+  return '${distanceKm.toStringAsFixed(1)} км';
+}
+
+double _degToRad(double degrees) => degrees * math.pi / 180;
+
+/// Панель как в OLX: фильтры, сортировка, категория, место, вид списка.
+class _OlxSearchFilterBar extends StatelessWidget {
+  const _OlxSearchFilterBar({
+    required this.viewMode,
+    required this.filters,
+    required this.onOpenFilters,
+    required this.onSortChanged,
+    required this.onCategoryTap,
+    required this.onLocationTap,
+    required this.onViewModeChanged,
+  });
+
+  final SearchViewMode viewMode;
+  final SearchFilters filters;
+  final VoidCallback onOpenFilters;
+  final ValueChanged<SearchSort> onSortChanged;
+  final VoidCallback onCategoryTap;
+  final VoidCallback onLocationTap;
+  final ValueChanged<SearchViewMode> onViewModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final hasFilters = filters.hasActiveFilters;
+    final categoryLabel = filters.categoryName?.trim().isNotEmpty == true
+        ? filters.categoryName!
+        : 'Категория';
+    final locationLabel = filters.city?.trim().isNotEmpty == true
+        ? filters.city!
+        : 'Везде';
+
+    return Material(
+      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 6, 6, 8),
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Badge(
+                isLabelVisible: hasFilters,
+                smallSize: 7,
+                child: FilledButton.tonalIcon(
+                  onPressed: onOpenFilters,
+                  icon: const Icon(Icons.tune_rounded, size: 20),
+                  label: const Text('Фильтры'),
+                ),
+              ),
+              const SizedBox(width: 6),
+              PopupMenuButton<SearchSort>(
+                tooltip: 'Сортировка',
+                onSelected: onSortChanged,
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
+                    value: SearchSort.newest,
+                    child: Text('Сначала новые'),
+                  ),
+                  const PopupMenuItem(
+                    value: SearchSort.priceAsc,
+                    child: Text('Сначала дешевле'),
+                  ),
+                  const PopupMenuItem(
+                    value: SearchSort.priceDesc,
+                    child: Text('Сначала дороже'),
+                  ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.sort_rounded, color: theme.colorScheme.primary),
+                      const SizedBox(width: 4),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 100),
+                        child: Text(
+                          _searchSortButtonLabel(filters.sort),
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.labelLarge,
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_drop_down_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 132),
+                child: OutlinedButton(
+                  onPressed: onCategoryTap,
+                  child: Text(
+                    categoryLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 120),
+                child: OutlinedButton.icon(
+                  onPressed: onLocationTap,
+                  icon: const Icon(Icons.place_outlined, size: 18),
+                  label: Text(
+                    locationLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SegmentedButton<SearchViewMode>(
+                segments: const [
+                  ButtonSegment<SearchViewMode>(
+                    value: SearchViewMode.list,
+                    icon: Icon(Icons.view_list_rounded),
+                    tooltip: 'Список',
+                  ),
+                  ButtonSegment<SearchViewMode>(
+                    value: SearchViewMode.gallery,
+                    icon: Icon(Icons.photo_library_outlined),
+                    tooltip: 'Галерея',
+                  ),
+                  ButtonSegment<SearchViewMode>(
+                    value: SearchViewMode.tile,
+                    icon: Icon(Icons.grid_view_rounded),
+                    tooltip: 'Плитка',
+                  ),
+                ],
+                selected: {viewMode},
+                onSelectionChanged: (next) {
+                  if (next.isNotEmpty) onViewModeChanged(next.first);
+                },
+                showSelectedIcon: false,
+                emptySelectionAllowed: false,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductSearchListCompact extends StatelessWidget {
+  const _ProductSearchListCompact({
     required this.product,
     this.centerLatitude,
     this.centerLongitude,
@@ -379,9 +745,107 @@ class _ProductSearchTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dist = _searchDistanceKmLabel(
+      product,
+      centerLatitude,
+      centerLongitude,
+    );
+    final city = product.city?.trim().isNotEmpty == true
+        ? product.city!
+        : 'Город не указан';
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      clipBehavior: Clip.antiAlias,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => context.push('/product/${product.id}', extra: product),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  width: 96,
+                  height: 96,
+                  child: product.imageUrl.isNotEmpty
+                      ? CachedProductImage(
+                          imageUrl: product.imageUrl,
+                          fit: BoxFit.cover,
+                        )
+                      : ColoredBox(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          child: const Center(
+                            child: Icon(Icons.shopping_bag_outlined, size: 40),
+                          ),
+                        ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      product.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      product.priceFormatted,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      dist != null ? '$city  •  $dist' : city,
+                      style: theme.textTheme.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductSearchGalleryCard extends StatelessWidget {
+  const _ProductSearchGalleryCard({
+    required this.product,
+    this.centerLatitude,
+    this.centerLongitude,
+  });
+
+  final ProductEntity product;
+  final double? centerLatitude;
+  final double? centerLongitude;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final isTop = product.isTop;
     final isUrgent = product.isUrgent;
-    final distanceLabel = _buildDistanceLabel();
+    final dist = _searchDistanceKmLabel(
+      product,
+      centerLatitude,
+      centerLongitude,
+    );
+    final city = product.city?.trim().isNotEmpty == true
+        ? product.city!
+        : 'Город не указан';
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       clipBehavior: Clip.antiAlias,
@@ -389,96 +853,185 @@ class _ProductSearchTile extends StatelessWidget {
       child: InkWell(
         onTap: () => context.push('/product/${product.id}', extra: product),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-              child: Row(
+            SizedBox(
+              height: 260,
+              width: double.infinity,
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  CachedAvatar(
-                    imageUrl: product.sellerAvatarUrl,
-                    radius: 18,
-                    fallbackText: product.sellerName,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      product.sellerName ?? 'Продавец',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                  ),
-                  if (product.createdAt != null)
-                    Text(
-                      _formatDate(product.createdAt!),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                ],
-              ),
-            ),
-            if (product.imageUrl.isNotEmpty)
-              SizedBox(
-                height: 220,
-                width: double.infinity,
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: CachedProductImage(imageUrl: product.imageUrl),
-                    ),
-                    if (isTop || isUrgent)
-                      Positioned(
-                        top: 10,
-                        left: 10,
-                        child: Wrap(
-                          spacing: 6,
-                          children: [
-                            if (isTop) const _Badge(label: 'ТОП'),
-                            if (isUrgent)
-                              const _Badge(
-                                label: 'СРОЧНО',
-                                color: Color(0xFFE53935),
+                  Positioned.fill(
+                    child: product.imageUrl.isNotEmpty
+                        ? CachedProductImage(
+                            imageUrl: product.imageUrl,
+                            fit: BoxFit.cover,
+                          )
+                        : ColoredBox(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            child: const Center(
+                              child: Icon(
+                                Icons.shopping_bag_outlined,
+                                size: 64,
                               ),
+                            ),
+                          ),
+                  ),
+                  if (isTop || isUrgent)
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: Wrap(
+                        spacing: 6,
+                        children: [
+                          if (isTop) const _Badge(label: 'ТОП'),
+                          if (isUrgent)
+                            const _Badge(
+                              label: 'СРОЧНО',
+                              color: Color(0xFFE53935),
+                            ),
+                        ],
+                      ),
+                    ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(12, 24, 12, 12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.75),
+                            Colors.transparent,
                           ],
                         ),
                       ),
-                  ],
-                ),
-              )
-            else
-              Container(
-                height: 220,
-                width: double.infinity,
-                color: Colors.black12,
-                alignment: Alignment.center,
-                child: const Icon(Icons.shopping_bag_outlined, size: 48),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            product.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            product.priceFormatted,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 20,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
+            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+              child: Text(
+                dist != null ? '$city  •  $dist' : city,
+                style: theme.textTheme.bodySmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductSearchGridTile extends StatelessWidget {
+  const _ProductSearchGridTile({
+    required this.product,
+    this.centerLatitude,
+    this.centerLongitude,
+  });
+
+  final ProductEntity product;
+  final double? centerLatitude;
+  final double? centerLongitude;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dist = _searchDistanceKmLabel(
+      product,
+      centerLatitude,
+      centerLongitude,
+    );
+    final city = product.city?.trim().isNotEmpty == true
+        ? product.city!
+        : '';
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: InkWell(
+        onTap: () => context.push('/product/${product.id}', extra: product),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: product.imageUrl.isNotEmpty
+                  ? CachedProductImage(
+                      imageUrl: product.imageUrl,
+                      fit: BoxFit.cover,
+                    )
+                  : ColoredBox(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Center(
+                        child: Icon(Icons.shopping_bag_outlined, size: 48),
+                      ),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
+                    product.priceFormatted,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
                     product.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (city.isNotEmpty || dist != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      [
+                        if (city.isNotEmpty) city,
+                        ?dist,
+                      ].join(' • '),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    product.priceFormatted,
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _buildMetaText(distanceLabel),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -487,62 +1040,14 @@ class _ProductSearchTile extends StatelessWidget {
       ),
     );
   }
+}
 
-  String _formatDate(DateTime value) {
-    final month = value.month.toString().padLeft(2, '0');
-    final day = value.day.toString().padLeft(2, '0');
-    return '$day.$month.${value.year}';
-  }
+class _InitialLoading extends StatelessWidget {
+  const _InitialLoading();
 
-  String _buildMetaText(String? distanceLabel) {
-    final city = product.city?.trim().isNotEmpty == true
-        ? product.city!
-        : 'Город не указан';
-    final date = product.createdAt != null ? _formatDate(product.createdAt!) : '';
-    if (distanceLabel != null && date.isNotEmpty) {
-      return '$city  •  $distanceLabel  •  $date';
-    }
-    if (distanceLabel != null) return '$city  •  $distanceLabel';
-    if (date.isNotEmpty) return '$city  •  $date';
-    return city;
-  }
-
-  String? _buildDistanceLabel() {
-    final centerLat = centerLatitude;
-    final centerLng = centerLongitude;
-    final productLat = product.latitude;
-    final productLng = product.longitude;
-    if (centerLat == null ||
-        centerLng == null ||
-        productLat == null ||
-        productLng == null) {
-      return null;
-    }
-    final distanceKm = _distanceKm(centerLat, centerLng, productLat, productLng);
-    if (distanceKm < 1) {
-      return '${(distanceKm * 1000).round()} м';
-    }
-    return '${distanceKm.toStringAsFixed(1)} км';
-  }
-
-  double _distanceKm(double lat1, double lon1, double lat2, double lon2) {
-    const earthRadiusKm = 6371.0;
-    final dLat = _degreesToRadians(lat2 - lat1);
-    final dLon = _degreesToRadians(lon2 - lon1);
-    final a =
-        _sinSquared(dLat / 2) +
-        math.cos(_degreesToRadians(lat1)) *
-            math.cos(_degreesToRadians(lat2)) *
-            _sinSquared(dLon / 2);
-    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-    return earthRadiusKm * c;
-  }
-
-  double _degreesToRadians(double degrees) => degrees * math.pi / 180;
-
-  double _sinSquared(double value) {
-    final s = math.sin(value);
-    return s * s;
+  @override
+  Widget build(BuildContext context) {
+    return const Center(child: CircularProgressIndicator());
   }
 }
 
