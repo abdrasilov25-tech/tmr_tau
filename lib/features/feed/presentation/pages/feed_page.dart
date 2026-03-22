@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/widgets/app_error_view.dart';
-import '../../../../core/widgets/app_loading.dart';
+import '../../../../core/widgets/feed_product_card_skeleton.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/widgets/verified_badge.dart';
@@ -61,9 +61,7 @@ class _FeedPageState extends State<FeedPage> {
             BlocBuilder<FeedBloc, FeedState>(
               builder: (context, state) {
                 if (state is FeedLoading) {
-                  return const SliverFillRemaining(
-                    child: Center(child: AppLoading()),
-                  );
+                  return const FeedProductSkeletonSliver(itemCount: 5);
                 }
                 if (state is FeedFailure) {
                   return SliverFillRemaining(
@@ -600,13 +598,21 @@ class _ProductCard extends StatelessWidget {
           ),
           GestureDetector(
             onTap: onProductTap,
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: CachedProductImage(
-                imageUrl: product.imageUrl,
-                width: double.infinity,
-                height: double.infinity,
-              ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final dpr = MediaQuery.devicePixelRatioOf(context);
+                final w = constraints.maxWidth;
+                return AspectRatio(
+                  aspectRatio: 1,
+                  child: CachedProductImage(
+                    imageUrl: product.imageUrl,
+                    width: double.infinity,
+                    height: double.infinity,
+                    memCacheWidth: (w * dpr).round(),
+                    compactPlaceholder: true,
+                  ),
+                );
+              },
             ),
           ),
           Padding(

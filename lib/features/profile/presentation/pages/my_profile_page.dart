@@ -534,6 +534,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
     final accountStorage = rootContext.read<MultiAccountStorage>();
     final accountManager = rootContext.read<AccountManager>();
     final savedAccounts = accountStorage.getAccounts();
+    // Один Future на открытие шита — не создаём новый при каждом rebuild.
+    final accountsFuture = accountManager.loadAccounts();
     showModalBottomSheet<void>(
       context: rootContext,
       backgroundColor: Colors.transparent,
@@ -544,7 +546,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         maxChildSize: 0.9,
         expand: false,
         builder: (_, scrollController) => FutureBuilder<List<AccountModel>>(
-          future: accountManager.loadAccounts(),
+          future: accountsFuture,
           builder: (sheetContext, snapshot) {
             final accounts = snapshot.data ?? const [];
             final active = accountManager.activeAccount;

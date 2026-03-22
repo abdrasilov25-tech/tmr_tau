@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/widgets/user_list_skeleton.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -57,7 +58,7 @@ class _FollowersPageState extends State<FollowersPage> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return const UserListSkeleton();
           }
           if (snapshot.hasError) {
             return Center(
