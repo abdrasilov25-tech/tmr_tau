@@ -27,6 +27,15 @@ class ProductEntity extends Equatable {
     this.latitude,
     this.longitude,
     this.contactPhone,
+    /// Платное «В топ» до (UTC). Суммируется с бесплатным [isTop] при отображении.
+    this.promoTopUntil,
+    /// Платное «Срочно» до (UTC). Суммируется с бесплатным [isUrgent].
+    this.promoUrgentUntil,
+    /// Платное выделение (рамка/цвет) до (UTC).
+    this.promoHighlightUntil,
+    /// Доступ продавца к статистике просмотров до (UTC).
+    this.statsAccessUntil,
+    this.viewCount = 0,
   });
 
   final String id;
@@ -57,10 +66,48 @@ class ProductEntity extends Equatable {
   /// Телефон для звонка покупателю (как в OLX), опционально.
   final String? contactPhone;
 
+  /// См. миграцию `product_promotions` — сроки платных опций.
+  final DateTime? promoTopUntil;
+  final DateTime? promoUrgentUntil;
+  final DateTime? promoHighlightUntil;
+  final DateTime? statsAccessUntil;
+  /// Счётчик просмотров (инкремент на экране товара).
+  final int viewCount;
+
   /// Обложка (совместимость со старым полем `image_url`).
   String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
 
   String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
+
+  // --- Визуальные флаги (лента / поиск): бесплатные переключатели + платные сроки ---
+
+  DateTime get _n => DateTime.now().toUtc();
+
+  /// Бейдж «ТОП»: форма **или** активная платная подписка.
+  bool get showTopBadge {
+    if (isTop) return true;
+    final t = promoTopUntil;
+    return t != null && t.toUtc().isAfter(_n);
+  }
+
+  /// Бейдж «СРОЧНО».
+  bool get showUrgentBadge {
+    if (isUrgent) return true;
+    final t = promoUrgentUntil;
+    return t != null && t.toUtc().isAfter(_n);
+  }
+
+  /// Выделение рамкой / цветом (только платное, по сроку).
+  bool get showHighlightBadge {
+    final t = promoHighlightUntil;
+    return t != null && t.toUtc().isAfter(_n);
+  }
+
+  /// Продавец видит блок статистики просмотров.
+  bool get hasActiveStatsAccess {
+    final t = statsAccessUntil;
+    return t != null && t.toUtc().isAfter(_n);
+  }
 
   @override
   List<Object?> get props => [
@@ -89,5 +136,10 @@ class ProductEntity extends Equatable {
     latitude,
     longitude,
     contactPhone,
+    promoTopUntil,
+    promoUrgentUntil,
+    promoHighlightUntil,
+    statsAccessUntil,
+    viewCount,
   ];
 }

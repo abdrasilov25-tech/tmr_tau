@@ -1024,3 +1024,7 @@ $$;
 
 grant execute on function public.increment_publication_feed_impression(uuid, int, boolean) to authenticated;
 
+-- ============== Платное продвижение товаров (см. migrations/20250322140000_product_promotions.sql) ==============
+-- Колонки: promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count;
+-- Таблица: product_promotion_orders; RPC: increment_product_view.
+

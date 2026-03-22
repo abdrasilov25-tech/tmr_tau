@@ -13,7 +13,7 @@ class ProductRepositoryImpl implements ProductRepository {
   final SupabaseClient _client;
 
   static const String _productSelect =
-      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, contact_phone, users!seller_id(name, avatar), categories!category_id(name)';
+      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, contact_phone, promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count, users!seller_id(name, avatar), categories!category_id(name)';
 
   @override
   Future<List<ProductEntity>> getFeedProducts({
@@ -394,6 +394,14 @@ class ProductRepositoryImpl implements ProductRepository {
     }
   }
 
+  @override
+  Future<void> incrementProductView(String productId) async {
+    await _client.rpc<void>(
+      'increment_product_view',
+      params: <String, dynamic>{'p_product_id': productId},
+    );
+  }
+
   List<ProductEntity> _mapProducts(List<dynamic> list) {
     return list.map((e) => _mapProduct(e as Map<String, dynamic>)).toList();
   }
@@ -475,32 +483,14 @@ class ProductRepositoryImpl implements ProductRepository {
     } catch (_) {}
     return list
         .map(
-          (p) => ProductModel(
-            id: p.id,
-            title: p.title,
-            description: p.description,
-            price: p.price,
-            imageUrls: p.imageUrls,
-            sellerId: p.sellerId,
-            category: p.category,
-            categoryId: p.categoryId,
+          (p) => ProductModel.fromEntity(
+            p,
             likesCount: p.likesCount,
             commentsCount: p.commentsCount,
-            repostsCount: repostCounts[p.id] ?? 0,
-            sellerName: p.sellerName,
-            sellerAvatarUrl: p.sellerAvatarUrl,
-            createdAt: p.createdAt,
+            repostsCount: repostCounts[p.id] ?? p.repostsCount,
             isLikedByMe: likedIds.contains(p.id),
             isRepostedByMe: repostedIds.contains(p.id),
             isFollowingSeller: followingIds.contains(p.sellerId),
-            sellerIsVerified: p.sellerIsVerified,
-            city: p.city,
-            condition: p.condition,
-            isUrgent: p.isUrgent,
-            isTop: p.isTop,
-            latitude: p.latitude,
-            longitude: p.longitude,
-            contactPhone: p.contactPhone,
           ),
         )
         .toList();

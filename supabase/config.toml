@@ -1,0 +1,16 @@
+# Конфигурация Supabase CLI (деплой Edge Functions).
+# Документация: https://supabase.com/docs/guides/cli/config
+
+[api]
+enabled = true
+
+[functions]
+# По умолчанию JWT проверяется (пользователь должен быть залогинен).
+
+# Webhook Stripe вызывается без JWT — только подпись Stripe.
+[functions.stripe-webhook]
+verify_jwt = false
+
+# Оплата из приложения — только с валидной сессией Supabase Auth.
+[functions.create-product-promotion]
+verify_jwt = true

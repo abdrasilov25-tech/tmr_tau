@@ -95,26 +95,10 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       final fromLocalLike = likedIds.contains(p.id);
       final fromLocalRepost = repostedIds.contains(p.id);
       if (!fromLocalLike && !fromLocalRepost) return p;
-      return ProductModel(
-        id: p.id,
-        title: p.title,
-        description: p.description,
-        price: p.price,
-        imageUrls: p.imageUrls,
-        sellerId: p.sellerId,
-        category: p.category,
-        categoryId: p.categoryId,
-        likesCount: p.likesCount,
-        commentsCount: p.commentsCount,
-        repostsCount: p.repostsCount,
-        sellerName: p.sellerName,
-        sellerAvatarUrl: p.sellerAvatarUrl,
-        createdAt: p.createdAt,
+      return ProductModel.fromEntity(
+        p,
         isLikedByMe: p.isLikedByMe || fromLocalLike,
-        isFollowingSeller: p.isFollowingSeller,
         isRepostedByMe: p.isRepostedByMe || fromLocalRepost,
-        sellerIsVerified: p.sellerIsVerified,
-        contactPhone: p.contactPhone,
       );
     }).toList();
   }
@@ -128,24 +112,10 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     await _localReactions.setLiked(event.productId, isNowLiked);
     final updated = current.products.map((p) {
       if (p.id != event.productId) return p;
-      return ProductModel(
-        id: p.id,
-        title: p.title,
-        description: p.description,
-        price: p.price,
-        imageUrls: p.imageUrls,
-        sellerId: p.sellerId,
-        category: p.category,
+      return ProductModel.fromEntity(
+        p,
         likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
-        commentsCount: p.commentsCount,
-        repostsCount: p.repostsCount,
-        sellerName: p.sellerName,
-        sellerAvatarUrl: p.sellerAvatarUrl,
-        createdAt: p.createdAt,
         isLikedByMe: isNowLiked,
-        isFollowingSeller: p.isFollowingSeller,
-        isRepostedByMe: p.isRepostedByMe,
-        sellerIsVerified: p.sellerIsVerified,
       );
     }).toList();
     if (!isClosed) emit(current.copyWith(products: updated));
@@ -168,25 +138,9 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     // Оптимистично обновляем UI, запрос в БД выполняем "в фоне".
     final updated = current.products.map((p) {
       if (p.sellerId != event.followingId) return p;
-      return ProductModel(
-        id: p.id,
-        title: p.title,
-        description: p.description,
-        price: p.price,
-        imageUrls: p.imageUrls,
-        sellerId: p.sellerId,
-        category: p.category,
-        likesCount: p.likesCount,
-        commentsCount: p.commentsCount,
-        repostsCount: p.repostsCount,
-        sellerName: p.sellerName,
-        sellerAvatarUrl: p.sellerAvatarUrl,
-        createdAt: p.createdAt,
-        isLikedByMe: p.isLikedByMe,
+      return ProductModel.fromEntity(
+        p,
         isFollowingSeller: !p.isFollowingSeller,
-        isRepostedByMe: p.isRepostedByMe,
-        sellerIsVerified: p.sellerIsVerified,
-        contactPhone: p.contactPhone,
       );
     }).toList();
     if (!isClosed) emit(current.copyWith(products: updated));
@@ -207,25 +161,10 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       final newCount = isNowReposted
           ? p.repostsCount + 1
           : (p.repostsCount > 0 ? p.repostsCount - 1 : 0);
-      return ProductModel(
-        id: p.id,
-        title: p.title,
-        description: p.description,
-        price: p.price,
-        imageUrls: p.imageUrls,
-        sellerId: p.sellerId,
-        category: p.category,
-        likesCount: p.likesCount,
-        commentsCount: p.commentsCount,
+      return ProductModel.fromEntity(
+        p,
         repostsCount: newCount,
-        sellerName: p.sellerName,
-        sellerAvatarUrl: p.sellerAvatarUrl,
-        createdAt: p.createdAt,
-        isLikedByMe: p.isLikedByMe,
-        isFollowingSeller: p.isFollowingSeller,
         isRepostedByMe: isNowReposted,
-        sellerIsVerified: p.sellerIsVerified,
-        contactPhone: p.contactPhone,
       );
     }).toList();
     if (!isClosed) emit(current.copyWith(products: updated));
