@@ -6,35 +6,32 @@
 
 **https://abdrasilov25-tech.github.io/tmr_tau/**
 
-(имя организации в URL — **`abdrasilov25-tech`**, с дефисом)
+---
+
+## Почему был Error: Get Pages site failed (404)
+
+Старый вариант с **`actions/configure-pages` + `deploy-pages`** обращается к API GitHub Pages. Пока в репозитории **ни разу не выбран источник публикации**, этого «сайта» в API нет → **404**.
+
+Сейчас используется деплой в ветку **`gh-pages`** (`peaceiris/actions-gh-pages`) — обычный push ветки, **без** этого API.
 
 ---
 
-## Где искать настройки (если не видишь «Deploy from a branch»)
+## Что сделать (один раз)
 
-1. Открой репозиторий: **https://github.com/abdrasilov25-tech/tmr_tau**
-2. Вверху вкладка **Settings** (Параметры). Если её нет — у аккаунта нет прав администратора на репозиторий.
-3. В **левом меню** прокрути вниз до раздела **Code and automation** → пункт **Pages**.
-4. Блок **Build and deployment**:
-   - в новом интерфейсе чаще сначала предлагают **GitHub Actions** — это нормально;
-   - выбери **GitHub Actions** (не «None»).
+1. Дождись зелёного workflow **Deploy GitHub Pages** на вкладке **Actions** (или запусти **Run workflow** вручную).
 
-В репозитории уже есть workflow **`.github/workflows/deploy-github-pages.yml`**: после включения **Source: GitHub Actions** сделай пуш в `main` или открой **Actions → Deploy GitHub Pages → Run workflow**.
+2. Открой: **https://github.com/abdrasilov25-tech/tmr_tau/settings/pages**
 
-Через 1–3 минуты сайт откроется по ссылке выше. Там же GitHub покажет зелёный статус деплоя.
+3. В **Build and deployment** → **Source** выбери **Deploy from a branch** (не GitHub Actions).
 
-### Вариант без Actions (классический)
+4. **Branch:** `gh-pages`, папка **`/ (root)`** → **Save**.
 
-Если в **Source** есть **Deploy from a branch**:
+5. Через минуту открой: **https://abdrasilov25-tech.github.io/tmr_tau/**
 
-- Branch: **main**
-- Folder: **/ (root)**  
-  Тогда сайт будет по адресу **`.../tmr_tau/site/`** (потому что файлы лежат в папке `site/` в репозитории). В приложении тогда нужен URL с `/site/` — сейчас в коде указан корень **`.../tmr_tau/`** под деплой через Actions.
+Если пункта **Deploy from a branch** нет — обнови страницу или зайди с аккаунта **владельца** репозитория.
 
 ---
 
 ## Обновление контента
 
-Правь **`site/index.html`** и **`site/styles.css`**, коммит в `main` — workflow пересоберёт сайт (если включены GitHub Actions).
-
-В корне репозитория есть **`.nojekyll`** (для классического деплоя из ветки).
+Правь **`site/`**, пуш в `main` — workflow снова обновит ветку `gh-pages`.
