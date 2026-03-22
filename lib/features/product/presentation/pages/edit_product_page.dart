@@ -233,6 +233,46 @@ class _EditProductPageState extends State<EditProductPage> {
     }
   }
 
+  /// Данные с формы, если после UPDATE не удалось снова прочитать строку из БД.
+  ProductEntity _buildLocalProductFromForm(double price, String imageUrl) {
+    final categoryLabel = _categoriesLoading
+        ? widget.product.category
+        : (_selectedSubcategory?.name ??
+            _selectedMain?.name ??
+            widget.product.category);
+    final categoryIdForDb = _categoriesLoading
+        ? widget.product.categoryId
+        : _selectedSubcategory?.id;
+    return ProductEntity(
+      id: widget.productId,
+      title: _titleController.text.trim(),
+      description: _descriptionController.text.trim(),
+      price: price,
+      imageUrl: imageUrl,
+      sellerId: widget.product.sellerId,
+      category: categoryLabel,
+      categoryId: categoryIdForDb,
+      likesCount: widget.product.likesCount,
+      commentsCount: widget.product.commentsCount,
+      repostsCount: widget.product.repostsCount,
+      sellerName: widget.product.sellerName,
+      sellerAvatarUrl: widget.product.sellerAvatarUrl,
+      createdAt: widget.product.createdAt,
+      isLikedByMe: widget.product.isLikedByMe,
+      isFollowingSeller: widget.product.isFollowingSeller,
+      sellerIsVerified: widget.product.sellerIsVerified,
+      isRepostedByMe: widget.product.isRepostedByMe,
+      city: _cityController.text.trim().isEmpty
+          ? null
+          : _cityController.text.trim(),
+      condition: _condition,
+      isUrgent: _isUrgent,
+      isTop: _isTop,
+      latitude: _latitude,
+      longitude: _longitude,
+    );
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -265,14 +305,23 @@ class _EditProductPageState extends State<EditProductPage> {
             .from(SupabaseConstants.bucketProducts)
             .getPublicUrl(path);
       }
+      final categoryLabel = _categoriesLoading
+          ? widget.product.category
+          : (_selectedSubcategory?.name ??
+              _selectedMain?.name ??
+              widget.product.category);
+      final categoryIdForDb = _categoriesLoading
+          ? widget.product.categoryId
+          : _selectedSubcategory?.id;
+
       await productRepository.updateProduct(
         productId: widget.productId,
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         price: price,
         imageUrl: imageUrl,
-        category: _selectedSubcategory?.name ?? widget.product.category,
-        categoryId: _selectedSubcategory?.id ?? widget.product.categoryId,
+        category: categoryLabel,
+        categoryId: categoryIdForDb,
         city: _cityController.text.trim().isEmpty
             ? null
             : _cityController.text.trim(),
@@ -292,10 +341,12 @@ class _EditProductPageState extends State<EditProductPage> {
         currentUserId: currentUserId,
       );
       if (!mounted) return;
+      // Если повторный SELECT недоступен (RLS/сеть), всё равно отдаём экрану актуальные поля.
+      final out = updated ?? _buildLocalProductFromForm(price, imageUrl);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Товар обновлён')));
-      context.pop(updated);
+      context.pop(out);
     } catch (e, st) {
       if (!mounted) return;
       String message = 'Ошибка при сохранении';

@@ -9,6 +9,14 @@
       "deviceId": "iPhone 16e"
     },
     {
+      "name": "tmr_tau (iOS — сначала симулятор)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "iPhone 16e",
+      "preLaunchTask": "Boot iOS Simulator"
+    },
+    {
       "name": "tmr_tau (Flutter macOS)",
       "request": "launch",
       "type": "dart",

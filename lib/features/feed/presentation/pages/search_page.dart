@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../../../core/data/kazakhstan_regions.dart';
 import '../../../../core/models/search_filters.dart';
 import '../../../../core/models/search_view_mode.dart';
 import '../../../../core/storage/search_preferences_storage.dart';
@@ -17,6 +18,7 @@ import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/categories_repository.dart';
 import '../../../product/domain/repositories/product_repository.dart';
 import '../controllers/search_paging_controller.dart';
+import '../widgets/kazakhstan_location_sheet.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, required this.productRepository});
@@ -161,45 +163,14 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _showLocationDialog() async {
-    final ctrl = TextEditingController(text: _pagingController.filters.city ?? '');
-    String? result;
-    try {
-      result = await showDialog<String?>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Местоположение'),
-          content: TextField(
-            controller: ctrl,
-            decoration: const InputDecoration(
-              hintText: 'Город или регион',
-              border: OutlineInputBorder(),
-            ),
-            textCapitalization: TextCapitalization.words,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, ''),
-              child: const Text('Везде'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Отмена'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-              child: const Text('Применить'),
-            ),
-          ],
-        ),
-      );
-    } finally {
-      ctrl.dispose();
-    }
-    if (!mounted || result == null) return;
-    final f = _pagingController.filters;
-    final next = result.isEmpty
-        ? f.copyWith(clearCity: true)
-        : f.copyWith(city: result);
+    final outcome = await showModalBottomSheet<KazakhstanLocationOutcome?>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => const KazakhstanLocationSheet(),
+    );
+    if (!mounted || outcome == null) return;
+    final next = mergeLocationOutcome(_pagingController.filters, outcome);
     await _pagingController.loadInitial(_queryController.text, filters: next);
     setState(() {});
   }
@@ -415,7 +386,11 @@ class _SearchPageState extends State<SearchPage> {
                 );
                 break;
               case _QuickFilterType.city:
-                updated = filters.copyWith(clearCity: true);
+                updated = filters.copyWith(
+                  clearCity: true,
+                  clearKzLocation: true,
+                  clearNearby: true,
+                );
                 break;
               case _QuickFilterType.nearby:
                 updated = filters.copyWith(clearNearby: true);
@@ -610,9 +585,13 @@ class _OlxSearchFilterBar extends StatelessWidget {
     final categoryLabel = filters.categoryName?.trim().isNotEmpty == true
         ? filters.categoryName!
         : 'Категория';
-    final locationLabel = filters.city?.trim().isNotEmpty == true
-        ? filters.city!
-        : 'Везде';
+    final locationLabel = KazakhstanRegions.toolbarLabel(
+      kzRegionId: filters.kzRegionId,
+      kzLocalityName: filters.kzLocalityName,
+      legacyCity: filters.city,
+      radiusKm: filters.radiusKm,
+      centerLatitude: filters.centerLatitude,
+    );
 
     return Material(
       color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
@@ -1115,12 +1094,22 @@ class _QuickFilterRow extends StatelessWidget {
       ),
       _quickChip(
         context,
-        label: (filters.city?.trim().isNotEmpty ?? false)
-            ? filters.city!
-            : 'Город',
-        active: filters.city?.trim().isNotEmpty ?? false,
+        label: KazakhstanRegions.toolbarLabel(
+          kzRegionId: filters.kzRegionId,
+          kzLocalityName: filters.kzLocalityName,
+          legacyCity: filters.city,
+          radiusKm: filters.radiusKm,
+          centerLatitude: filters.centerLatitude,
+        ),
+        active: (filters.city?.trim().isNotEmpty ?? false) ||
+            (filters.kzRegionId != null &&
+                filters.kzRegionId!.trim().isNotEmpty) ||
+            (filters.radiusKm != null && filters.centerLatitude != null),
         onTap: onFilterTap,
-        onDelete: (filters.city?.trim().isNotEmpty ?? false)
+        onDelete: ((filters.city?.trim().isNotEmpty ?? false) ||
+                (filters.kzRegionId != null &&
+                    filters.kzRegionId!.trim().isNotEmpty) ||
+                (filters.radiusKm != null && filters.centerLatitude != null))
             ? () => onClearOne(_QuickFilterType.city)
             : null,
       ),
@@ -1327,7 +1316,19 @@ class _FiltersSheetState extends State<_FiltersSheet> {
   @override
   void initState() {
     super.initState();
-    _filters = widget.initial;
+    var initial = widget.initial;
+    final cid = initial.categoryId;
+    // Иначе DropdownButtonFormField падает: «нет ровно одного элемента с таким value».
+    if (widget.categories.isEmpty) {
+      if (cid != null && cid.isNotEmpty) {
+        initial = initial.copyWith(clearCategory: true);
+      }
+    } else if (cid != null &&
+        cid.isNotEmpty &&
+        !widget.categories.any((c) => c.id == cid)) {
+      initial = initial.copyWith(clearCategory: true);
+    }
+    _filters = initial;
     _minCtrl = TextEditingController(
       text: widget.initial.minPrice?.toStringAsFixed(0) ?? '',
     );
@@ -1337,8 +1338,18 @@ class _FiltersSheetState extends State<_FiltersSheet> {
     _cityCtrl = TextEditingController(text: widget.initial.city ?? '');
     _nearbyEnabled = widget.initial.radiusKm != null;
     _radiusKm = widget.initial.radiusKm ?? 5;
+    if (!_radiusOptions.contains(_radiusKm)) {
+      _radiusKm = 5;
+    }
     _centerLat = widget.initial.centerLatitude;
     _centerLng = widget.initial.centerLongitude;
+  }
+
+  /// Значение из фильтра должно совпадать с одним из items, иначе Dropdown падает.
+  String? get _safeCategoryDropdownValue {
+    final id = _filters.categoryId;
+    if (id == null || id.isEmpty) return null;
+    return widget.categories.any((c) => c.id == id) ? id : null;
   }
 
   @override
@@ -1366,7 +1377,8 @@ class _FiltersSheetState extends State<_FiltersSheet> {
             Text('Фильтры', style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 12),
             DropdownButtonFormField<String?>(
-              initialValue: _filters.categoryId,
+              key: ValueKey<String?>(_safeCategoryDropdownValue),
+              initialValue: _safeCategoryDropdownValue,
               decoration: const InputDecoration(labelText: 'Категория'),
               items: [
                 const DropdownMenuItem<String?>(
@@ -1442,6 +1454,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<double>(
+                      key: ValueKey<double>(_radiusKm),
                       initialValue: _radiusKm,
                       decoration: const InputDecoration(labelText: 'Радиус'),
                       items: _radiusOptions
@@ -1548,6 +1561,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
                         centerLatitude: canApplyNearby ? _centerLat : null,
                         centerLongitude: canApplyNearby ? _centerLng : null,
                         clearCity: _cityCtrl.text.trim().isEmpty,
+                        clearKzLocation: _cityCtrl.text.trim().isNotEmpty,
                         clearMinPrice: _minCtrl.text.trim().isEmpty,
                         clearMaxPrice: _maxCtrl.text.trim().isEmpty,
                         clearNearby: !canApplyNearby,

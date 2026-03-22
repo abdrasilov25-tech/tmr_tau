@@ -234,6 +234,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                 : null,
             flexibleSpace: FlexibleSpaceBar(
               background: CachedProductImage(
+                key: ValueKey<String>(_product.imageUrl),
                 imageUrl: _product.imageUrl,
                 width: double.infinity,
                 height: 320,

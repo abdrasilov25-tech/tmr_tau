@@ -9,6 +9,10 @@ class SearchFilters {
     this.minPrice,
     this.maxPrice,
     this.city,
+    /// Идентификатор области из справочника `kazakhstan_regions.dart`.
+    this.kzRegionId,
+    /// Населённый пункт внутри области; `null` = «вся область».
+    this.kzLocalityName,
     this.radiusKm,
     this.centerLatitude,
     this.centerLongitude,
@@ -21,6 +25,10 @@ class SearchFilters {
   final double? minPrice;
   final double? maxPrice;
   final String? city;
+
+  /// См. `lib/core/data/kazakhstan_regions.dart`
+  final String? kzRegionId;
+  final String? kzLocalityName;
   final double? radiusKm;
   final double? centerLatitude;
   final double? centerLongitude;
@@ -32,6 +40,7 @@ class SearchFilters {
       minPrice != null ||
       maxPrice != null ||
       (city != null && city!.trim().isNotEmpty) ||
+      (kzRegionId != null && kzRegionId!.trim().isNotEmpty) ||
       radiusKm != null ||
       condition != ProductCondition.any ||
       sort != SearchSort.newest;
@@ -42,6 +51,8 @@ class SearchFilters {
     double? minPrice,
     double? maxPrice,
     String? city,
+    String? kzRegionId,
+    String? kzLocalityName,
     double? radiusKm,
     double? centerLatitude,
     double? centerLongitude,
@@ -51,6 +62,7 @@ class SearchFilters {
     bool clearMinPrice = false,
     bool clearMaxPrice = false,
     bool clearCity = false,
+    bool clearKzLocation = false,
     bool clearNearby = false,
   }) {
     return SearchFilters(
@@ -59,6 +71,9 @@ class SearchFilters {
       minPrice: clearMinPrice ? null : (minPrice ?? this.minPrice),
       maxPrice: clearMaxPrice ? null : (maxPrice ?? this.maxPrice),
       city: clearCity ? null : (city ?? this.city),
+      kzRegionId: clearKzLocation ? null : (kzRegionId ?? this.kzRegionId),
+      kzLocalityName:
+          clearKzLocation ? null : (kzLocalityName ?? this.kzLocalityName),
       radiusKm: clearNearby ? null : (radiusKm ?? this.radiusKm),
       centerLatitude: clearNearby ? null : (centerLatitude ?? this.centerLatitude),
       centerLongitude:
@@ -75,6 +90,8 @@ class SearchFilters {
       'minPrice': minPrice,
       'maxPrice': maxPrice,
       'city': city,
+      'kzRegionId': kzRegionId,
+      'kzLocalityName': kzLocalityName,
       'radiusKm': radiusKm,
       'centerLatitude': centerLatitude,
       'centerLongitude': centerLongitude,
@@ -104,6 +121,8 @@ class SearchFilters {
       minPrice: (json['minPrice'] as num?)?.toDouble(),
       maxPrice: (json['maxPrice'] as num?)?.toDouble(),
       city: json['city'] as String?,
+      kzRegionId: json['kzRegionId'] as String?,
+      kzLocalityName: json['kzLocalityName'] as String?,
       radiusKm: (json['radiusKm'] as num?)?.toDouble(),
       centerLatitude: (json['centerLatitude'] as num?)?.toDouble(),
       centerLongitude: (json['centerLongitude'] as num?)?.toDouble(),

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/data/kazakhstan_regions.dart';
 import '../../../../core/models/search_filters.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
@@ -109,7 +110,28 @@ class ProductRepositoryImpl implements ProductRepository {
       if (filters?.maxPrice != null) {
         queryBuilder = queryBuilder.lte('price', filters!.maxPrice);
       }
-      if (filters?.city != null && filters!.city!.trim().isNotEmpty) {
+      final hasKz = filters?.kzRegionId != null &&
+          filters!.kzRegionId!.trim().isNotEmpty;
+      if (hasKz) {
+        final region = KazakhstanRegions.byId(filters.kzRegionId);
+        if (region != null) {
+          final loc = filters.kzLocalityName?.trim();
+          if (loc != null && loc.isNotEmpty) {
+            final t = loc.replaceAll(r"'", r"''");
+            queryBuilder = queryBuilder.ilike('city', '%$t%');
+          } else {
+            final orParts = region.settlements
+                .map((s) {
+                  final e = s.replaceAll(r"'", r"''");
+                  return 'city.ilike.%$e%';
+                })
+                .join(',');
+            if (orParts.isNotEmpty) {
+              queryBuilder = queryBuilder.or(orParts);
+            }
+          }
+        }
+      } else if (filters?.city != null && filters!.city!.trim().isNotEmpty) {
         final city = filters.city!.trim().replaceAll(r"'", r"''");
         queryBuilder = queryBuilder.ilike('city', '%$city%');
       }
@@ -253,6 +275,8 @@ class ProductRepositoryImpl implements ProductRepository {
       'price': price,
       'image_url': imageUrl,
       'category': category,
+      // Явно передаём null, чтобы сбросить FK при очистке подкатегории.
+      'category_id': categoryId,
       'city': city,
       'condition': condition,
       'is_urgent': isUrgent,
@@ -260,7 +284,6 @@ class ProductRepositoryImpl implements ProductRepository {
       'latitude': latitude,
       'longitude': longitude,
     };
-    if (categoryId != null) data['category_id'] = categoryId;
     await _client
         .from(SupabaseConstants.productsTable)
         .update(data)
