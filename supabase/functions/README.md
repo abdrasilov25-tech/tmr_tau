@@ -38,3 +38,5 @@
 | `PUBLIC_APP_URL` | Редирект после оплаты (можно deep link приложения). |
 | `STRIPE_SECRET_KEY` | Секрет Stripe. |
 | `STRIPE_WEBHOOK_SECRET` | Подпись webhook. |
+
+_(Триггер CI: push в `main` с изменениями в `supabase/functions/` запускает деплой.)_
