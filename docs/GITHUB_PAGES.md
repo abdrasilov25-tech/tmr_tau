@@ -1,37 +1,43 @@
 # Сайт tmrtau App на GitHub Pages
 
-Файлы лендинга: **`site/index.html`**, **`site/styles.css`**.
+Целевой URL: **https://abdrasilov25-tech.github.io/tmr_tau/**
 
-Публичный URL после настройки:
-
-**https://abdrasilov25-tech.github.io/tmr_tau/**
-
----
-
-## Почему был Error: Get Pages site failed (404)
-
-Старый вариант с **`actions/configure-pages` + `deploy-pages`** обращается к API GitHub Pages. Пока в репозитории **ни разу не выбран источник публикации**, этого «сайта» в API нет → **404**.
-
-Сейчас используется деплой в ветку **`gh-pages`** (`peaceiris/actions-gh-pages`) — обычный push ветки, **без** этого API.
+Файлы лендинга: **`site/index.html`**, **`site/styles.css`** (деплой в ветку **`gh-pages`** через Actions).  
+В **корне** репозитория тоже есть **`index.html`** — запасной вариант без ветки `gh-pages`.
 
 ---
 
-## Что сделать (один раз)
+## Если открывается 404
 
-1. Дождись зелёного workflow **Deploy GitHub Pages** на вкладке **Actions** (или запусти **Run workflow** вручную).
+Значит GitHub **ещё не отдаёт** ни одну опубликованную папку. Сделай **один** из вариантов.
 
-2. Открой: **https://github.com/abdrasilov25-tech/tmr_tau/settings/pages**
+### Вариант A (проще всего): публикация из ветки `main`, папка корень
 
-3. В **Build and deployment** → **Source** выбери **Deploy from a branch** (не GitHub Actions).
+Подходит, потому что в корне уже лежат **`index.html`** и **`styles.css`**.
 
-4. **Branch:** `gh-pages`, папка **`/ (root)`** → **Save**.
+1. Открой: **https://github.com/abdrasilov25-tech/tmr_tau/settings/pages**
+2. **Build and deployment** → **Source** → **Deploy from a branch**
+3. **Branch:** `main` → **Folder:** `/ (root)` → **Save**
+4. Подожди 1–2 минуты и снова открой:  
+   **https://abdrasilov25-tech.github.io/tmr_tau/**
 
-5. Через минуту открой: **https://abdrasilov25-tech.github.io/tmr_tau/**
+В корне есть **`.nojekyll`**, чтобы GitHub не ломал раздачу через Jekyll.
 
-Если пункта **Deploy from a branch** нет — обнови страницу или зайди с аккаунта **владельца** репозитория.
+### Вариант B: только папка `site/` через ветку `gh-pages`
+
+1. Вкладка **Actions** → workflow **Deploy GitHub Pages** → **Run workflow** (чтобы создалась/обновилась ветка `gh-pages`).
+2. Дождись **зелёного** статуса.
+3. **Settings** → **Pages** → **Branch:** `gh-pages` → **Folder:** `/ (root)` → **Save**
+
+---
+
+## Организация и права
+
+Если репозиторий в **организации**, владелец org может запретить Actions или Pages — тогда в **Settings** репозитория проверь, что **Actions** включены, а **Pages** разрешены.
 
 ---
 
 ## Обновление контента
 
-Правь **`site/`**, пуш в `main` — workflow снова обновит ветку `gh-pages`.
+- При варианте **A** правь **`index.html`** / **`styles.css`** в **корне** (или синхронно с `site/`).
+- При варианте **B** правь **`site/`** и жди деплоя workflow.
