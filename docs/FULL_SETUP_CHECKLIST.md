@@ -113,5 +113,6 @@ APK: `build/app/outputs/flutter-apk/app-release.apk`
 | Тема | Файл |
 |------|------|
 | Оплата Stripe + CLI | `docs/PAYMENT_SETUP.md` |
+| Ошибки 401 / Stripe / webhook | `docs/TROUBLESHOOTING_PAYMENTS.md` |
 | Секреты GitHub Actions | `.github/SECRETS.md` |
 | GitHub Pages | `docs/GITHUB_PAGES.md` |

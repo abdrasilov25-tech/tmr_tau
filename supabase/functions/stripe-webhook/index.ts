@@ -15,7 +15,16 @@ serve(async (req) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL");
 
   if (!stripeSecret || !webhookSecret || !serviceKey || !supabaseUrl) {
-    return new Response("Missing secrets", { status: 500 });
+    const missing = [
+      !stripeSecret && "STRIPE_SECRET_KEY",
+      !webhookSecret && "STRIPE_WEBHOOK_SECRET",
+      !serviceKey && "SUPABASE_SERVICE_ROLE_KEY",
+      !supabaseUrl && "SUPABASE_URL",
+    ].filter(Boolean);
+    return new Response(
+      JSON.stringify({ error: "Missing secrets", missing }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
   }
 
   const stripe = new Stripe(stripeSecret, {
