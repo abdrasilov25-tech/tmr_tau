@@ -6,10 +6,10 @@ import '../../../../core/theme/themed_content_surface.dart';
 class PrivacyPolicyPage extends StatefulWidget {
   const PrivacyPolicyPage({super.key});
 
-  /// Лендинг в репозитории: `site/index.html` → GitHub Pages.
+  /// Лендинг: папка `site/` → GitHub Actions → Pages (корень сайта без `/site/`).
   /// Репозиторий: `github.com/abdrasilov25-tech/tmr_tau`
   static const String privacyPolicyUrl =
-      'https://abdrasilov25-tech.github.io/tmr_tau/site/';
+      'https://abdrasilov25-tech.github.io/tmr_tau/';
 
   @override
   State<PrivacyPolicyPage> createState() => _PrivacyPolicyPageState();
