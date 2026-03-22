@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/search_filters.dart';
+import '../models/search_view_mode.dart';
 
 class SavedSearchFilter {
   const SavedSearchFilter({
@@ -39,6 +40,7 @@ class SearchPreferencesStorage {
 
   static const _historyKey = 'tmr_tau_search_history';
   static const _savedFiltersKey = 'tmr_tau_saved_search_filters';
+  static const _viewModeKey = 'tmr_tau_search_view_mode';
   static const int _maxHistory = 15;
   static const int _maxSavedFilters = 10;
 
@@ -87,6 +89,14 @@ class SearchPreferencesStorage {
       _savedFiltersKey,
       list.map((e) => jsonEncode(e.toJson())).toList(growable: false),
     );
+  }
+
+  SearchViewMode getSearchViewMode() {
+    return parseSearchViewMode(_prefs.getString(_viewModeKey));
+  }
+
+  Future<void> setSearchViewMode(SearchViewMode mode) async {
+    await _prefs.setString(_viewModeKey, mode.name);
   }
 
   Future<void> removeSavedFilter(String title) async {
