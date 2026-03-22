@@ -15,18 +15,19 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     env:
-      # GitHub: JS actions на Node 20 устарели — явно просим Node 24 для checkout/setup-cli и др.
-      # https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
     steps:
       - uses: actions/checkout@v6
 
-      # Официальный action; вместе с FORCE_JAVASCRIPT_ACTIONS_TO_NODE24 — без warning Node 20.
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
+      # Бинарник с GitHub — без supabase/setup-cli (он на Node 20 и даёт deprecation warning).
+      - name: Install Supabase CLI
+        run: |
+          set -e
+          curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz -o supabase.tgz
+          tar -xzf supabase.tgz
+          sudo install -m 755 supabase /usr/local/bin/supabase
+          supabase --version
 
       - name: Deploy Edge Functions
         run: |
