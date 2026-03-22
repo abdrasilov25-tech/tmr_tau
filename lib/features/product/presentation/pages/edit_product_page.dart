@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -15,6 +16,8 @@ import '../../domain/entities/category_entity.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/categories_repository.dart';
 import '../../domain/repositories/product_repository.dart';
+import '../constants/product_photos.dart';
+import '../widgets/draft_photos_viewer.dart';
 
 class EditProductPage extends StatefulWidget {
   const EditProductPage({
@@ -36,9 +39,11 @@ class _EditProductPageState extends State<EditProductPage> {
   late final TextEditingController _priceController;
   late final TextEditingController _descriptionController;
   late final TextEditingController _cityController;
+  late final TextEditingController _phoneController;
   bool _loading = false;
   bool _gettingLocation = false;
-  File? _image;
+  final List<String> _remoteImageUrls = [];
+  final List<File> _newImageFiles = [];
   List<CategoryEntity> _mainCategories = [];
   List<CategoryEntity> _subcategories = [];
   CategoryEntity? _selectedMain;
@@ -58,7 +63,12 @@ class _EditProductPageState extends State<EditProductPage> {
     _priceController = TextEditingController(text: p.price.toStringAsFixed(0));
     _descriptionController = TextEditingController(text: p.description);
     _cityController = TextEditingController(text: p.city ?? '');
-    _condition = p.condition;
+    _phoneController = TextEditingController(text: p.contactPhone ?? '');
+    _remoteImageUrls.addAll(p.imageUrls);
+    if (_remoteImageUrls.isEmpty && p.imageUrl.isNotEmpty) {
+      _remoteImageUrls.add(p.imageUrl);
+    }
+    _condition = p.condition == 'any' ? 'used' : p.condition;
     _isUrgent = p.isUrgent;
     _isTop = p.isTop;
     _latitude = p.latitude;
@@ -128,6 +138,7 @@ class _EditProductPageState extends State<EditProductPage> {
     _priceController.dispose();
     _descriptionController.dispose();
     _cityController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -233,8 +244,45 @@ class _EditProductPageState extends State<EditProductPage> {
     }
   }
 
+  int get _totalPhotoCount => _remoteImageUrls.length + _newImageFiles.length;
+
+  List<ImageProvider> _draftImageProviders() => [
+        ..._remoteImageUrls.map((u) => CachedNetworkImageProvider(u)),
+        ..._newImageFiles.map((f) => FileImage(f)),
+      ];
+
+  Future<void> _pickMorePhotos() async {
+    final space = kMaxProductPhotos - _totalPhotoCount;
+    if (space <= 0) return;
+    final picker = ImagePicker();
+    final list = await picker.pickMultiImage(imageQuality: 85);
+    if (!mounted || list.isEmpty) return;
+    setState(() {
+      for (final x in list) {
+        if (_totalPhotoCount >= kMaxProductPhotos) break;
+        _newImageFiles.add(File(x.path));
+      }
+    });
+  }
+
+  Future<String> _uploadToStorage(File file) async {
+    const uuid = Uuid();
+    final ext = file.path.split('.').last;
+    final path = '${uuid.v4()}.$ext';
+    await Supabase.instance.client.storage
+        .from(SupabaseConstants.bucketProducts)
+        .upload(
+          path,
+          file,
+          fileOptions: const FileOptions(upsert: true),
+        );
+    return Supabase.instance.client.storage
+        .from(SupabaseConstants.bucketProducts)
+        .getPublicUrl(path);
+  }
+
   /// Данные с формы, если после UPDATE не удалось снова прочитать строку из БД.
-  ProductEntity _buildLocalProductFromForm(double price, String imageUrl) {
+  ProductEntity _buildLocalProductFromForm(double price, List<String> imageUrls) {
     final categoryLabel = _categoriesLoading
         ? widget.product.category
         : (_selectedSubcategory?.name ??
@@ -248,7 +296,7 @@ class _EditProductPageState extends State<EditProductPage> {
       title: _titleController.text.trim(),
       description: _descriptionController.text.trim(),
       price: price,
-      imageUrl: imageUrl,
+      imageUrls: imageUrls,
       sellerId: widget.product.sellerId,
       category: categoryLabel,
       categoryId: categoryIdForDb,
@@ -270,40 +318,56 @@ class _EditProductPageState extends State<EditProductPage> {
       isTop: _isTop,
       latitude: _latitude,
       longitude: _longitude,
+      contactPhone: _phoneController.text.trim().isEmpty
+          ? null
+          : _phoneController.text.trim(),
     );
   }
 
   Future<void> _submit() async {
+    if (_categoriesLoading) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Подождите загрузки категорий')),
+      );
+      return;
+    }
     if (!_formKey.currentState!.validate()) return;
+    if (_selectedMain == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выберите категорию')),
+      );
+      return;
+    }
+    if (_subcategories.isNotEmpty && _selectedSubcategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Выберите подкатегорию')),
+      );
+      return;
+    }
 
     final price = double.tryParse(
       _priceController.text.replaceAll(' ', '').replaceAll(',', '.'),
     );
-    if (price == null || price < 0) {
+    if (price == null || price <= 0) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Введите корректную цену')));
+      ).showSnackBar(const SnackBar(content: Text('Укажите цену больше нуля')));
+      return;
+    }
+
+    if (_totalPhotoCount == 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Добавьте хотя бы одно фото')),
+      );
       return;
     }
 
     setState(() => _loading = true);
     final productRepository = context.read<ProductRepository>();
     try {
-      String imageUrl = widget.product.imageUrl;
-      if (_image != null) {
-        const uuid = Uuid();
-        final ext = _image!.path.split('.').last;
-        final path = '${uuid.v4()}.$ext';
-        await Supabase.instance.client.storage
-            .from(SupabaseConstants.bucketProducts)
-            .upload(
-              path,
-              _image!,
-              fileOptions: const FileOptions(upsert: true),
-            );
-        imageUrl = Supabase.instance.client.storage
-            .from(SupabaseConstants.bucketProducts)
-            .getPublicUrl(path);
+      final imageUrls = <String>[..._remoteImageUrls];
+      for (final f in _newImageFiles) {
+        imageUrls.add(await _uploadToStorage(f));
       }
       final categoryLabel = _categoriesLoading
           ? widget.product.category
@@ -314,12 +378,13 @@ class _EditProductPageState extends State<EditProductPage> {
           ? widget.product.categoryId
           : _selectedSubcategory?.id;
 
+      final phoneTrim = _phoneController.text.trim();
       await productRepository.updateProduct(
         productId: widget.productId,
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         price: price,
-        imageUrl: imageUrl,
+        imageUrls: imageUrls,
         category: categoryLabel,
         categoryId: categoryIdForDb,
         city: _cityController.text.trim().isEmpty
@@ -330,6 +395,7 @@ class _EditProductPageState extends State<EditProductPage> {
         isTop: _isTop,
         latitude: _latitude,
         longitude: _longitude,
+        contactPhone: phoneTrim.isEmpty ? null : phoneTrim,
       );
       if (!mounted) return;
       final authState = context.read<AuthBloc>().state;
@@ -342,7 +408,7 @@ class _EditProductPageState extends State<EditProductPage> {
       );
       if (!mounted) return;
       // Если повторный SELECT недоступен (RLS/сеть), всё равно отдаём экрану актуальные поля.
-      final out = updated ?? _buildLocalProductFromForm(price, imageUrl);
+      final out = updated ?? _buildLocalProductFromForm(price, imageUrls);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Товар обновлён')));
@@ -382,59 +448,165 @@ class _EditProductPageState extends State<EditProductPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            GestureDetector(
-              onTap: () async {
-                final picker = ImagePicker();
-                final x = await picker.pickImage(source: ImageSource.gallery);
-                if (x != null && mounted) setState(() => _image = File(x.path));
-              },
-              child: Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: _image != null
-                    ? ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: Image.file(
-                          _image!,
-                          width: double.infinity,
-                          height: double.infinity,
-                          fit: BoxFit.cover,
-                        ),
-                      )
-                    : ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: widget.product.imageUrl.isNotEmpty
-                            ? CachedProductImage(
-                                imageUrl: widget.product.imageUrl,
-                                width: double.infinity,
-                                height: double.infinity,
-                                fit: BoxFit.cover,
-                              )
-                            : Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    Icons.add_photo_alternate_outlined,
-                                    size: 48,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.outline,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Изменить фото',
-                                    style: TextStyle(
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.outline,
-                                    ),
-                                  ),
-                                ],
+            Text(
+              'Фотографии *',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'До $kMaxProductPhotos шт. Первое фото — обложка. Нажмите на фото — просмотр и зум.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              height: 112,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (var i = 0; i < _remoteImageUrls.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Stack(
+                        children: [
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                DraftPhotosViewer.show(
+                                  context,
+                                  imageProviders: _draftImageProviders(),
+                                  initialIndex: i,
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: CachedProductImage(
+                                  imageUrl: _remoteImageUrls[i],
+                                  width: 112,
+                                  height: 112,
+                                  fit: BoxFit.cover,
+                                ),
                               ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Material(
+                              color: Colors.black54,
+                              shape: const CircleBorder(),
+                              child: IconButton(
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                                onPressed: () =>
+                                    setState(() => _remoteImageUrls.removeAt(i)),
+                              ),
+                            ),
+                          ),
+                          if (i == 0)
+                            Positioned(
+                              bottom: 4,
+                              left: 4,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  'Обложка',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(color: Colors.white),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
+                  for (var j = 0; j < _newImageFiles.length; j++)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: Stack(
+                        children: [
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: () {
+                                DraftPhotosViewer.show(
+                                  context,
+                                  imageProviders: _draftImageProviders(),
+                                  initialIndex: _remoteImageUrls.length + j,
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(12),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.file(
+                                  _newImageFiles[j],
+                                  width: 112,
+                                  height: 112,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            top: 4,
+                            right: 4,
+                            child: Material(
+                              color: Colors.black54,
+                              shape: const CircleBorder(),
+                              child: IconButton(
+                                visualDensity: VisualDensity.compact,
+                                icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                                onPressed: () =>
+                                    setState(() => _newImageFiles.removeAt(j)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_totalPhotoCount < kMaxProductPhotos)
+                    Material(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
+                        onTap: _pickMorePhotos,
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: 112,
+                          height: 112,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.add_photo_alternate_outlined,
+                                size: 36,
+                                color: Theme.of(context).colorScheme.outline,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Добавить',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Theme.of(context).colorScheme.outline,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             const SizedBox(height: 24),
@@ -447,23 +619,29 @@ class _EditProductPageState extends State<EditProductPage> {
               )
             else ...[
               DropdownButtonFormField<CategoryEntity>(
+                key: ValueKey<Object?>(_selectedMain?.id),
                 initialValue: _selectedMain,
-                decoration: const InputDecoration(labelText: 'Категория'),
-                items: [
-                  const DropdownMenuItem<CategoryEntity>(
-                    value: null,
-                    child: Text('— Выберите категорию —'),
-                  ),
-                  ..._mainCategories.map(
-                    (c) => DropdownMenuItem(value: c, child: Text(c.name)),
-                  ),
-                ],
+                decoration: const InputDecoration(labelText: 'Категория *'),
+                items: _mainCategories
+                    .map(
+                      (c) => DropdownMenuItem(value: c, child: Text(c.name)),
+                    )
+                    .toList(),
+                validator: (v) =>
+                    v == null ? 'Выберите категорию' : null,
                 onChanged: (v) => _onMainCategorySelected(v),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<CategoryEntity>(
+                key: ValueKey<String>(
+                  '${_selectedMain?.id}_${_subcategories.length}_${_selectedSubcategory?.id}',
+                ),
                 initialValue: _selectedSubcategory,
-                decoration: const InputDecoration(labelText: 'Подкатегория'),
+                decoration: InputDecoration(
+                  labelText: _subcategories.isEmpty
+                      ? 'Подкатегория'
+                      : 'Подкатегория *',
+                ),
                 items: [
                   const DropdownMenuItem<CategoryEntity>(
                     value: null,
@@ -473,6 +651,10 @@ class _EditProductPageState extends State<EditProductPage> {
                     (c) => DropdownMenuItem(value: c, child: Text(c.name)),
                   ),
                 ],
+                validator: (v) {
+                  if (_subcategories.isEmpty) return null;
+                  return v == null ? 'Выберите подкатегорию' : null;
+                },
                 onChanged: _selectedMain == null
                     ? null
                     : (v) => setState(() => _selectedSubcategory = v),
@@ -482,7 +664,7 @@ class _EditProductPageState extends State<EditProductPage> {
             TextFormField(
               controller: _titleController,
               decoration: const InputDecoration(
-                labelText: 'Название',
+                labelText: 'Название *',
                 hintText: 'Краткое название товара',
               ),
               validator: (v) =>
@@ -493,31 +675,56 @@ class _EditProductPageState extends State<EditProductPage> {
               controller: _priceController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'Цена (₸)',
+                labelText: 'Цена (₸) *',
                 hintText: '0',
               ),
               validator: (v) {
                 if (v == null || v.trim().isEmpty) return 'Введите цену';
-                if (double.tryParse(v.replaceAll(' ', '')) == null) {
-                  return 'Некорректная цена';
-                }
+                final p = double.tryParse(
+                  v.replaceAll(' ', '').replaceAll(',', '.'),
+                );
+                if (p == null) return 'Некорректная цена';
+                if (p <= 0) return 'Цена должна быть больше нуля';
                 return null;
               },
             ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _cityController,
+              textCapitalization: TextCapitalization.words,
               decoration: const InputDecoration(
-                labelText: 'Город',
+                labelText: 'Город *',
                 hintText: 'Например, Алматы',
               ),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Укажите город' : null,
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Телефон для звонков *',
+                hintText: '+7 707 123 45 67',
+                helperText:
+                    'Покупатели увидят номер после «Позвонить»',
+              ),
+              validator: (v) {
+                final t = v?.trim() ?? '';
+                if (t.isEmpty) return 'Укажите номер телефона';
+                final digits = t.replaceAll(RegExp(r'\D'), '');
+                if (digits.length < 9) {
+                  return 'Введите номер полностью';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
-              initialValue: _condition,
-              decoration: const InputDecoration(labelText: 'Состояние'),
+              key: ValueKey<String>(_condition == 'any' ? 'used' : _condition),
+              initialValue: _condition == 'any' ? 'used' : _condition,
+              decoration: const InputDecoration(labelText: 'Состояние *'),
               items: const [
-                DropdownMenuItem(value: 'any', child: Text('Любое')),
                 DropdownMenuItem(value: 'new', child: Text('Новый')),
                 DropdownMenuItem(value: 'used', child: Text('Б/у')),
               ],
@@ -559,11 +766,21 @@ class _EditProductPageState extends State<EditProductPage> {
             TextFormField(
               controller: _descriptionController,
               decoration: const InputDecoration(
-                labelText: 'Описание',
-                hintText: 'Необязательно',
+                labelText: 'Описание *',
+                hintText:
+                    'Опишите товар: состояние, комплектация, причина продажи…',
                 alignLabelWithHint: true,
               ),
-              maxLines: 3,
+              maxLines: 5,
+              minLines: 3,
+              validator: (v) {
+                final t = v?.trim() ?? '';
+                if (t.isEmpty) return 'Введите описание';
+                if (t.length < 20) {
+                  return 'Минимум 20 символов в описании';
+                }
+                return null;
+              },
             ),
             const SizedBox(height: 32),
             FilledButton(

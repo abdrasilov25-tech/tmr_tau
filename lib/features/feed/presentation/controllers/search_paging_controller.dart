@@ -71,6 +71,16 @@ class SearchPagingController extends ChangeNotifier {
     await _fetchPage(reset: false, requestVersion: _requestVersion);
   }
 
+  /// Убрать товар из текущей выдачи (после удаления объявления).
+  void removeProductById(String productId) {
+    _products.removeWhere((p) => p.id == productId);
+    _items
+      ..clear()
+      ..addAll(_products.map(SearchProductResultItem.new))
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    notifyListeners();
+  }
+
   Future<void> _fetchPage({
     required bool reset,
     required int requestVersion,

@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import '../../../../core/products/deleted_product_bus.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../product/domain/entities/product_entity.dart';
@@ -22,11 +25,24 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
   List<ProductEntity> _items = [];
   bool _loading = true;
   String? _error;
+  StreamSubscription<String>? _deletedProductSub;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _deletedProductSub = deletedProductIdsStream.listen((id) {
+      if (!mounted) return;
+      setState(() {
+        _items = _items.where((p) => p.id != id).toList();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _deletedProductSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {

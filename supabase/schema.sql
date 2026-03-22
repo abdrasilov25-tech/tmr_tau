@@ -119,6 +119,9 @@ alter table public.products add column if not exists is_urgent boolean default f
 alter table public.products add column if not exists is_top boolean default false;
 alter table public.products add column if not exists latitude double precision;
 alter table public.products add column if not exists longitude double precision;
+alter table public.products add column if not exists contact_phone text;
+-- Массив URL фото (обложка дублируется в image_url для совместимости).
+alter table public.products add column if not exists image_urls jsonb default '[]'::jsonb;
 
 do $$
 begin

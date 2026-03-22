@@ -29,7 +29,6 @@ void main() {
         title: title,
         description: '',
         price: price,
-        imageUrl: '',
         sellerId: sellerId,
         likesCount: likesCount,
         isLikedByMe: isLikedByMe,

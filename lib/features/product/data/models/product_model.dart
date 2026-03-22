@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../domain/entities/product_entity.dart';
 
 String _categoryNameFromJson(Map<String, dynamic> json) {
@@ -9,14 +11,40 @@ String _categoryNameFromJson(Map<String, dynamic> json) {
   return 'general';
 }
 
+List<String> _imageUrlsFromJson(Map<String, dynamic> json) {
+  final rawUrlsCol = json['image_urls'];
+  if (rawUrlsCol is List && rawUrlsCol.isNotEmpty) {
+    return rawUrlsCol
+        .map((e) => e.toString())
+        .where((s) => s.trim().isNotEmpty)
+        .toList();
+  }
+  final legacy = json['image_url'] as String? ?? '';
+  final t = legacy.trim();
+  if (t.isEmpty) return <String>[];
+  // Несколько фото в одном text-поле `image_url` как JSON: ["url1","url2"]
+  if (t.startsWith('[')) {
+    try {
+      final decoded = jsonDecode(t);
+      if (decoded is List) {
+        return decoded
+            .map((e) => e.toString())
+            .where((s) => s.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
+  }
+  return <String>[t];
+}
+
 class ProductModel extends ProductEntity {
   const ProductModel({
     required super.id,
     required super.title,
     required super.description,
     required super.price,
-    required super.imageUrl,
     required super.sellerId,
+    super.imageUrls = const [],
     super.category = 'general',
     super.categoryId,
     super.likesCount = 0,
@@ -35,6 +63,7 @@ class ProductModel extends ProductEntity {
     super.isTop = false,
     super.latitude,
     super.longitude,
+    super.contactPhone,
   });
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
@@ -43,7 +72,7 @@ class ProductModel extends ProductEntity {
       title: json['title'] as String,
       description: json['description'] as String? ?? '',
       price: (json['price'] as num).toDouble(),
-      imageUrl: json['image_url'] as String? ?? '',
+      imageUrls: _imageUrlsFromJson(json),
       sellerId: json['seller_id'] as String,
       category: json['category'] as String? ?? _categoryNameFromJson(json),
       categoryId: json['category_id'] as String?,
@@ -64,6 +93,7 @@ class ProductModel extends ProductEntity {
       isTop: json['is_top'] as bool? ?? false,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
+      contactPhone: json['contact_phone'] as String?,
     );
   }
 }
