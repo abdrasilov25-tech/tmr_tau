@@ -2,7 +2,11 @@
 
 ## `401` / `Invalid JWT`
 
-Не про Stripe-ключ. Шлюз Supabase не принял **JWT пользователя**.
+Чаще всего это **проверка JWT на шлюзе Edge Functions** (`verify_jwt`), а не Stripe.
+
+В проекте для `create-product-promotion` в **`supabase/config.toml`** задано **`verify_jwt = false`**: доступ режется **внутри функции** через `auth.getUser()` + проверка `seller_id`. После смены конфига **обязательно задеплой** функцию заново.
+
+Если ошибка остаётся:
 
 1. Выйти из аккаунта в приложении и войти снова.
 2. Проверить **`.env`**: `SUPABASE_URL` и `SUPABASE_ANON_KEY` именно **этого** проекта (Settings → API), без пробелов и кавычек.
