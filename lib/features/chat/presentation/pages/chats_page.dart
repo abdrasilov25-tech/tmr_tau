@@ -1089,6 +1089,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   groups: data.visibleStoryGroups,
                   newStoriesByUserId: data.newStoriesByUserId,
                   currentUserId: _currentUserId,
+                  currentUserAvatarUrl: authState.user.avatarUrl,
                   onAddStoryTap: () async {
                     await context.push('/add-story');
                     if (!mounted) return;

@@ -9,6 +9,7 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
     required this.groups,
     required this.newStoriesByUserId,
     required this.currentUserId,
+    this.currentUserAvatarUrl,
     required this.onAddStoryTap,
     required this.onStoryTap,
   });
@@ -18,6 +19,9 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
   /// `userId -> true` means show red “new” ring.
   final Map<String, bool> newStoriesByUserId;
   final String? currentUserId;
+
+  /// Аватар из профиля (AuthBloc): для «Ваша история», когда нет группы сторис или в ней нет URL.
+  final String? currentUserAvatarUrl;
   final VoidCallback onAddStoryTap;
 
   /// Called when user taps a friend's story.
@@ -25,8 +29,29 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Нет сторис у других — всё равно показываем «Ваша история» + плюс (добавить).
     if (groups.isEmpty) {
-      return const SizedBox.shrink();
+      if (currentUserId == null) {
+        return const SizedBox.shrink();
+      }
+      return SizedBox(
+        height: 102,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          children: [
+            _FriendStoryCircle(
+              group: null,
+              profileAvatarUrl: currentUserAvatarUrl,
+              fallbackLabel: 'Ваша история',
+              ringState: _StoryRingState.seen,
+              showPlusBadge: true,
+              onTap: onAddStoryTap,
+              onPlusTap: onAddStoryTap,
+            ),
+          ],
+        ),
+      );
     }
     final ownGroup = currentUserId == null
         ? null
@@ -47,6 +72,7 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
           if (currentUserId != null)
             _FriendStoryCircle(
               group: ownGroup,
+              profileAvatarUrl: currentUserAvatarUrl,
               fallbackLabel: 'Ваша история',
               ringState: ownGroup == null
                   ? _StoryRingState.seen
@@ -76,6 +102,7 @@ enum _StoryRingState { unseen, seen }
 class _FriendStoryCircle extends StatelessWidget {
   const _FriendStoryCircle({
     this.group,
+    this.profileAvatarUrl,
     this.fallbackLabel,
     required this.ringState,
     this.showPlusBadge = false,
@@ -84,6 +111,9 @@ class _FriendStoryCircle extends StatelessWidget {
   });
 
   final StoryGroupEntity? group;
+
+  /// Только для своего слота: если в [group] нет аватара — берём из профиля.
+  final String? profileAvatarUrl;
   final String? fallbackLabel;
   final _StoryRingState ringState;
   final bool showPlusBadge;
@@ -93,6 +123,10 @@ class _FriendStoryCircle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final label = fallbackLabel ?? group?.userName ?? 'Пользователь';
+    final fromGroup = group?.userAvatarUrl;
+    final imageUrl = (fromGroup != null && fromGroup.isNotEmpty)
+        ? fromGroup
+        : profileAvatarUrl;
     const outerSize = 56.0;
     const ringWidth = 2.8;
     final innerRadius = (outerSize - ringWidth * 2) / 2;
@@ -144,7 +178,7 @@ class _FriendStoryCircle extends StatelessWidget {
                             width: innerDiameter,
                             height: innerDiameter,
                             child: _StoryAvatarImage(
-                              imageUrl: group?.userAvatarUrl,
+                              imageUrl: imageUrl,
                               fallbackText: label,
                               diameter: innerDiameter,
                             ),

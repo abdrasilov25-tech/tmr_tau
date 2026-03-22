@@ -67,8 +67,6 @@ class _MainHomePageState extends State<MainHomePage> {
 
   bool _initialLoading = true;
   bool _isLoadingMore = false;
-  bool _storiesLoading = true;
-  bool _storyRetryScheduled = false;
 
   _FeedTab _feedTab = _FeedTab.recommendations;
 
@@ -470,7 +468,6 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   Future<void> _loadStories() async {
-    setState(() => _storiesLoading = true);
     try {
       final storiesRepo = context.read<StoriesRepository>();
       final allGroups = (await storiesRepo.getStoriesGroupedByUser())
@@ -488,20 +485,14 @@ class _MainHomePageState extends State<MainHomePage> {
       setState(() {
         _storyGroups = groups;
         _newStoriesByUserId = nextMap;
-        _storiesLoading = false;
-        _storyRetryScheduled = false;
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _precacheStoryStripMedia();
       });
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        // Не очищаем уже загруженные сторис при временной ошибке,
-        // чтобы блок сторис в ленте не становился пустым.
-        _storiesLoading = false;
-      });
+      // Не очищаем уже загруженные сторис при временной ошибке,
+      // чтобы блок сторис в ленте не становился пустым.
     }
   }
 
@@ -839,6 +830,8 @@ class _MainHomePageState extends State<MainHomePage> {
     final authState = context.read<AuthBloc>().state;
     final activeUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
+    final currentUserAvatarUrl =
+        authState is AuthAuthenticated ? authState.user.avatarUrl : null;
     if (activeUserId != _loadedUserId && !_initialLoading) {
       _currentUserId = activeUserId;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -847,14 +840,6 @@ class _MainHomePageState extends State<MainHomePage> {
         _loadStories();
       });
     }
-    if (!_storiesLoading && _storyGroups.isEmpty && !_storyRetryScheduled) {
-      _storyRetryScheduled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _loadStories();
-      });
-    }
-
     return Scaffold(
       appBar: AppBar(
         elevation: 0,
@@ -885,35 +870,25 @@ class _MainHomePageState extends State<MainHomePage> {
             ? const Center(child: AppLoading())
             : Column(
                 children: [
-                  _storiesLoading
-                      ? const SizedBox(
-                          height: 102,
-                          child: Center(
-                            child: SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            ),
-                          ),
-                        )
-                      : ChatStoriesFriendsStrip(
-                          groups: _storyGroups,
-                          newStoriesByUserId: _newStoriesByUserId,
-                          currentUserId: _currentUserId,
-                          onAddStoryTap: _openAddStoryAndRefresh,
-                          onStoryTap: (group) async {
-                            if (group.stories.isEmpty) return;
-                            await context.push(
-                              '/stories',
-                              extra: StoryViewerArgs(
-                                groups: [group],
-                                initialGroupIndex: 0,
-                              ),
-                            );
-                            if (!mounted) return;
-                            await _loadStories();
-                          },
+                  ChatStoriesFriendsStrip(
+                    groups: _storyGroups,
+                    newStoriesByUserId: _newStoriesByUserId,
+                    currentUserId: _currentUserId,
+                    currentUserAvatarUrl: currentUserAvatarUrl,
+                    onAddStoryTap: _openAddStoryAndRefresh,
+                    onStoryTap: (group) async {
+                      if (group.stories.isEmpty) return;
+                      await context.push(
+                        '/stories',
+                        extra: StoryViewerArgs(
+                          groups: [group],
+                          initialGroupIndex: 0,
                         ),
+                      );
+                      if (!mounted) return;
+                      await _loadStories();
+                    },
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
                     child: SegmentedButton<_FeedTab>(
