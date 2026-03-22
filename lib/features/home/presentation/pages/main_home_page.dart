@@ -21,7 +21,8 @@ import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 
 /// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
-/// **Рекомендации** и **Подписки** (без своих постов — они в профиле).
+/// **Рекомендации** и **Подписки** — отдельные вертикальные ленты (свайп вверх/вниз),
+/// у каждой вкладки свой [PageController], контент не смешивается.
 ///
 /// Подключение:
 /// - Для показа медиа используются поля `imageUrl/videoUrl` у `PostEntity`.
@@ -29,6 +30,7 @@ import '../../../post/domain/repositories/post_repository.dart';
 /// - Комментарии открывают `PostDetailPage` по маршруту `/post/:id`.
 /// - Репост в требованиях заменён на реальные "repost" из базы (`toggleRepost`).
 /// - Share: открывает список пользователей, затем отправляет в чат с выбранным.
+/// - Precache: первые карточки ленты, соседние при скролле (фото+аватар), превью сторис.
 class MainHomePage extends StatefulWidget {
   const MainHomePage({super.key});
 
@@ -46,9 +48,19 @@ enum _FeedTab {
 class _MainHomePageState extends State<MainHomePage> {
   static const int _pageSize = 10;
 
-  final _scrollController = ScrollController();
+  /// Отдельный вертикальный «экран» на вкладку — свайп как в TikTok.
+  late final PageController _pageRecommendationsController;
+  late final PageController _pageSubscriptionsController;
 
-  /// Высота одной карточки ленты (для расчёта видимого индекса и просмотров).
+  /// Индекс текущей «карточки» в вертикальной ленте (отдельно для каждой вкладки).
+  int _pageIndexRecommendations = 0;
+  int _pageIndexSubscriptions = 0;
+
+  int get _activeFeedPageIndex => _feedTab == _FeedTab.recommendations
+      ? _pageIndexRecommendations
+      : _pageIndexSubscriptions;
+
+  /// Высота одной карточки ленты (viewport [PageView]).
   double? _feedItemHeight;
   String? _impressionActivePostId;
   Timer? _impressionTimer;
@@ -83,10 +95,14 @@ class _MainHomePageState extends State<MainHomePage> {
   String? _currentUserId;
   String? _loadedUserId;
 
+  /// Последний индекс, для которого уже вызывали precache соседей (избегаем лишней работы при скролле).
+  int? _lastPrecachedFeedIndex;
+
   @override
   void initState() {
     super.initState();
-    _scrollController.addListener(_onScroll);
+    _pageRecommendationsController = PageController();
+    _pageSubscriptionsController = PageController();
 
     // Текущий userId берём из AuthBloc (в проекте так принято).
     final authState = context.read<AuthBloc>().state;
@@ -100,9 +116,8 @@ class _MainHomePageState extends State<MainHomePage> {
   @override
   void dispose() {
     _cancelImpressionTimer();
-    _scrollController
-      ..removeListener(_onScroll)
-      ..dispose();
+    _pageRecommendationsController.dispose();
+    _pageSubscriptionsController.dispose();
     super.dispose();
   }
 
@@ -136,30 +151,170 @@ class _MainHomePageState extends State<MainHomePage> {
 
   void _syncVisiblePostForImpression() {
     if (_feedTab != _FeedTab.recommendations) return;
-    final h = _feedItemHeight;
-    if (h == null || h <= 0) return;
     if (_postsRecommendations.isEmpty) return;
-    if (!_scrollController.hasClients) return;
-    final idx = (_scrollController.offset / h)
-        .floor()
-        .clamp(0, _postsRecommendations.length - 1);
+    final idx = _pageIndexRecommendations.clamp(
+      0,
+      _postsRecommendations.length - 1,
+    );
     final post = _postsRecommendations[idx];
     if (post.id != _impressionActivePostId) {
       _impressionActivePostId = post.id;
     }
   }
 
-  void _onScroll() {
-    if (!_hasMore) return;
-    if (_isLoadingMore) return;
-    if (!_scrollController.hasClients) return;
+  bool _hasMoreForTab(_FeedTab tab) => tab == _FeedTab.recommendations
+      ? _hasMoreRecommendations
+      : _hasMoreSubscriptions;
 
-    final max = _scrollController.position.maxScrollExtent;
-    final current = _scrollController.position.pixels;
-    if (max - current <= 450) {
+  void _onFeedPageChanged(_FeedTab tab, int index) {
+    if (!mounted) return;
+    final posts = tab == _FeedTab.recommendations
+        ? _postsRecommendations
+        : _postsSubscriptions;
+    if (posts.isEmpty) return;
+
+    // Хвост со спиннером при подгрузке.
+    if (index >= posts.length) {
+      if (_feedTab == tab &&
+          _hasMoreForTab(tab) &&
+          !_isLoadingMore) {
+        _loadMore();
+      }
+      return;
+    }
+
+    if (tab == _FeedTab.recommendations) {
+      _pageIndexRecommendations = index;
+    } else {
+      _pageIndexSubscriptions = index;
+    }
+
+    if (tab == _FeedTab.recommendations &&
+        _feedTab == _FeedTab.recommendations) {
+      _impressionActivePostId = posts[index].id;
+    }
+
+    if (_feedTab != tab) return;
+
+    final hasMore = _hasMoreForTab(tab);
+    if (hasMore && !_isLoadingMore && posts.length >= 2) {
+      if (index >= posts.length - 2) {
+        _loadMore();
+      }
+    } else if (hasMore && !_isLoadingMore && posts.length == 1 && index == 0) {
       _loadMore();
     }
-    _syncVisiblePostForImpression();
+    _precacheNeighborsForCurrentFeedPost();
+  }
+
+  /// После полного сброса ленты (например первый заход): обе вкладки с начала.
+  void _resetAllFeedPagesAfterFullReload() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      void jump(PageController c) {
+        if (c.hasClients) c.jumpToPage(0);
+      }
+      jump(_pageRecommendationsController);
+      jump(_pageSubscriptionsController);
+      _pageIndexRecommendations = 0;
+      _pageIndexSubscriptions = 0;
+      _lastPrecachedFeedIndex = null;
+      if (_postsRecommendations.isNotEmpty) {
+        _impressionActivePostId = _postsRecommendations.first.id;
+      } else {
+        _impressionActivePostId = null;
+      }
+      _precacheFeedHead(_postsRecommendations);
+      _precacheFeedHead(_postsSubscriptions);
+      _precacheNeighborsForCurrentFeedPost();
+    });
+  }
+
+  /// Картинки поста + аватар (как в [CachedAvatar] на карточке).
+  void _precachePostImages(BuildContext context, PostEntity p) {
+    if (p.imageUrl.trim().isNotEmpty) {
+      unawaited(
+        precacheImage(CachedNetworkImageProvider(p.imageUrl), context),
+      );
+    }
+    final av = p.userAvatarUrl;
+    if (av != null && av.isNotEmpty) {
+      unawaited(
+        precacheImage(
+          CachedNetworkImageProvider('$av?uid=${p.userId}'),
+          context,
+        ),
+      );
+    }
+  }
+
+  /// Первые карточки после загрузки страницы.
+  void _precacheFeedHead(List<PostEntity> posts) {
+    if (!mounted || posts.isEmpty) return;
+    final ctx = context;
+    final n = posts.length < 3 ? posts.length : 3;
+    for (var i = 0; i < n; i++) {
+      _precachePostImages(ctx, posts[i]);
+    }
+  }
+
+  /// Следующие 1–2 поста относительно текущего скролла (TikTok-лента).
+  void _precacheNeighborsForCurrentFeedPost() {
+    if (!mounted) return;
+    final posts = _posts;
+    if (posts.isEmpty) return;
+    final h = _feedItemHeight;
+    if (h == null || h <= 0) return;
+    final idx = _activeFeedPageIndex.clamp(0, posts.length - 1);
+    if (_lastPrecachedFeedIndex == idx) return;
+    _lastPrecachedFeedIndex = idx;
+    final ctx = context;
+    for (final off in [1, 2]) {
+      final j = idx + off;
+      if (j < posts.length) {
+        _precachePostImages(ctx, posts[j]);
+      }
+    }
+  }
+
+  void _schedulePrecacheAfterFeedUpdate(_FeedTab loadedTab) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_feedTab != loadedTab) return;
+      final posts =
+          loadedTab == _FeedTab.recommendations
+              ? _postsRecommendations
+              : _postsSubscriptions;
+      _lastPrecachedFeedIndex = null;
+      _precacheFeedHead(posts);
+      _precacheNeighborsForCurrentFeedPost();
+    });
+  }
+
+  /// Аватары и превью картинок сторис в полосе над лентой.
+  void _precacheStoryStripMedia() {
+    if (!mounted || _storyGroups.isEmpty) return;
+    final ctx = context;
+    for (final g in _storyGroups.take(16)) {
+      final av = g.userAvatarUrl;
+      if (av != null && av.isNotEmpty) {
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider('$av?uid=${g.userId}'),
+            ctx,
+          ),
+        );
+      }
+      final story = g.firstStory;
+      if (story.imageUrl.trim().isNotEmpty) {
+        unawaited(
+          precacheImage(
+            CachedNetworkImageProvider(story.imageUrl),
+            ctx,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _loadInitial() async {
@@ -180,6 +335,7 @@ class _MainHomePageState extends State<MainHomePage> {
       await _fetchPageForTab(_feedTab, reset: true);
       if (!mounted) return;
       setState(() => _initialLoading = false);
+      _resetAllFeedPagesAfterFullReload();
       debugPrint(
         '[MainHomePage] loaded tab=$_feedTab count=${_posts.length}',
       );
@@ -234,6 +390,7 @@ class _MainHomePageState extends State<MainHomePage> {
         _syncVisiblePostForImpression();
         _ensureImpressionTimer();
       });
+      _schedulePrecacheAfterFeedUpdate(_FeedTab.recommendations);
       return;
     }
 
@@ -265,6 +422,7 @@ class _MainHomePageState extends State<MainHomePage> {
       _hasMoreSubscriptions =
           page.posts.isNotEmpty && page.posts.length >= _pageSize;
     });
+    _schedulePrecacheAfterFeedUpdate(_FeedTab.subscriptions);
   }
 
   void _onFeedTabChanged(_FeedTab tab) {
@@ -272,10 +430,8 @@ class _MainHomePageState extends State<MainHomePage> {
     if (tab == _FeedTab.subscriptions) {
       _cancelImpressionTimer();
     }
+    _lastPrecachedFeedIndex = null;
     setState(() => _feedTab = tab);
-    if (_scrollController.hasClients) {
-      _scrollController.jumpTo(0);
-    }
     if (tab == _FeedTab.recommendations) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -283,6 +439,15 @@ class _MainHomePageState extends State<MainHomePage> {
         _ensureImpressionTimer();
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_feedTab != tab) return;
+      final posts = tab == _FeedTab.recommendations
+          ? _postsRecommendations
+          : _postsSubscriptions;
+      _precacheFeedHead(posts);
+      _precacheNeighborsForCurrentFeedPost();
+    });
     final tabEmpty = tab == _FeedTab.recommendations
         ? _postsRecommendations.isEmpty
         : _postsSubscriptions.isEmpty;
@@ -325,6 +490,10 @@ class _MainHomePageState extends State<MainHomePage> {
         _newStoriesByUserId = nextMap;
         _storiesLoading = false;
         _storyRetryScheduled = false;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _precacheStoryStripMedia();
       });
     } catch (_) {
       if (!mounted) return;
@@ -522,6 +691,77 @@ class _MainHomePageState extends State<MainHomePage> {
     );
   }
 
+  /// Вертикальная лента «как в TikTok»: одна публикация на экран, свайп вверх/вниз.
+  Widget _buildVerticalFeed({
+    required _FeedTab tab,
+    required List<PostEntity> posts,
+    required PageController controller,
+    required double itemHeight,
+  }) {
+    if (posts.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            tab == _FeedTab.subscriptions
+                ? (_currentUserId == null
+                    ? 'Войдите, чтобы видеть публикации подписок.'
+                    : 'Нет публикаций от подписок. Подпишитесь на авторов или откройте вкладку «Рекомендации».')
+                : 'Пока нет публикаций в рекомендациях.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 15,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final trailingLoader =
+        _isLoadingMore && _feedTab == tab && _hasMoreForTab(tab) ? 1 : 0;
+
+    return PageView.builder(
+      controller: controller,
+      scrollDirection: Axis.vertical,
+      onPageChanged: (i) => _onFeedPageChanged(tab, i),
+      itemCount: posts.length + trailingLoader,
+      itemBuilder: (context, index) {
+        if (index >= posts.length) {
+          return SizedBox(
+            height: itemHeight,
+            width: double.infinity,
+            child: const Center(
+              child: SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(),
+              ),
+            ),
+          );
+        }
+        final post = posts[index];
+        return SizedBox(
+          height: itemHeight,
+          width: double.infinity,
+          child: _InstagramPostItem(
+            height: itemHeight,
+            post: post,
+            currentUserId: _currentUserId,
+            onLike: () => _toggleLike(post),
+            onRepost: () => _toggleRepost(post),
+            onSave: () => _toggleSave(post),
+            onComment: () async {
+              await context.push('/post/${post.id}', extra: post);
+              await _refreshPost(post.id);
+            },
+            onShare: () => _shareToUser(post),
+          ),
+        );
+      },
+    );
+  }
+
   void _showQuickCreateMenu() {
     final state = context.read<AuthBloc>().state;
     if (state is! AuthAuthenticated) {
@@ -704,61 +944,23 @@ class _MainHomePageState extends State<MainHomePage> {
                             : h;
                         _feedItemHeight = itemHeight;
 
-                        if (_posts.isEmpty) {
-                          return Center(
-                            child: Padding(
-                              padding: const EdgeInsets.all(24),
-                              child: Text(
-                                _feedTab == _FeedTab.subscriptions
-                                    ? (_currentUserId == null
-                                        ? 'Войдите, чтобы видеть публикации подписок.'
-                                        : 'Нет публикаций от подписок. Подпишитесь на авторов или откройте вкладку «Рекомендации».')
-                                    : 'Пока нет публикаций в рекомендациях.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.grey.shade600,
-                                  fontSize: 15,
-                                ),
-                              ),
+                        return IndexedStack(
+                          index: _feedTab == _FeedTab.recommendations ? 0 : 1,
+                          sizing: StackFit.expand,
+                          children: [
+                            _buildVerticalFeed(
+                              tab: _FeedTab.recommendations,
+                              posts: _postsRecommendations,
+                              controller: _pageRecommendationsController,
+                              itemHeight: itemHeight,
                             ),
-                          );
-                        }
-
-                        return ListView.builder(
-                          key: ValueKey(_feedTab),
-                          controller: _scrollController,
-                          padding: EdgeInsets.zero,
-                          itemExtent: itemHeight,
-                          itemCount: _posts.length + (_isLoadingMore ? 1 : 0),
-                          itemBuilder: (context, index) {
-                            if (index >= _posts.length) {
-                              return SizedBox(
-                                height: itemHeight,
-                                child: const Center(
-                                  child: SizedBox(
-                                    width: 22,
-                                    height: 22,
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                ),
-                              );
-                            }
-
-                            final post = _posts[index];
-                            return _InstagramPostItem(
-                              height: itemHeight,
-                              post: post,
-                              currentUserId: _currentUserId,
-                              onLike: () => _toggleLike(post),
-                              onRepost: () => _toggleRepost(post),
-                              onSave: () => _toggleSave(post),
-                              onComment: () async {
-                                await context.push('/post/${post.id}', extra: post);
-                                await _refreshPost(post.id);
-                              },
-                              onShare: () => _shareToUser(post),
-                            );
-                          },
+                            _buildVerticalFeed(
+                              tab: _FeedTab.subscriptions,
+                              posts: _postsSubscriptions,
+                              controller: _pageSubscriptionsController,
+                              itemHeight: itemHeight,
+                            ),
+                          ],
                         );
                       },
                     ),
