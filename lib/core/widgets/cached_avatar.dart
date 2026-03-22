@@ -63,6 +63,10 @@ class CachedAvatar extends StatelessWidget {
             width: radius * 2,
             height: radius * 2,
             fit: BoxFit.cover,
+            memCacheWidth: (radius * 2 * MediaQuery.devicePixelRatioOf(context))
+                .round(),
+            memCacheHeight: (radius * 2 * MediaQuery.devicePixelRatioOf(context))
+                .round(),
             placeholder: (context, url) => Center(
               child: Text(
                 fallback,

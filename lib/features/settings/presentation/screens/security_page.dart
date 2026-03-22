@@ -8,8 +8,8 @@ import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../data/repositories/settings_repository_impl.dart';
-import '../../domain/entities/login_history_entity.dart';
 import '../../state/settings_cubit.dart';
+import '../widgets/login_history_block.dart';
 
 class SecurityPage extends StatefulWidget {
   const SecurityPage({super.key});
@@ -112,43 +112,7 @@ class _SecurityPageState extends State<SecurityPage> {
                             ),
                           ),
                           const SizedBox(height: 10),
-                          FutureBuilder(
-                            future: repo.getMyLoginHistory(
-                              userId: userId,
-                              limit: 10,
-                            ),
-                            builder: (context,
-                                AsyncSnapshot<List<LoginHistoryEntity>> snapshot) {
-                              if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
-                                return const Center(child: AppLoading());
-                              }
-                              if (snapshot.hasError) {
-                                return AppErrorView(
-                                  message: snapshot.error.toString(),
-                                  onRetry: () => setState(() {}),
-                                );
-                              }
-                              final items =
-                                  snapshot.data ?? const <LoginHistoryEntity>[];
-                              if (items.isEmpty) {
-                                return const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 12),
-                                  child: Text(
-                                    'Пока нет сохраненных данных о входах.',
-                                  ),
-                                );
-                              }
-                              return Column(
-                                children: items
-                                    .map((e) => _LoginHistoryRow(
-                                          loggedInAt: e.loggedInAt,
-                                          ipAddress: e.ipAddress,
-                                        ))
-                                    .toList(growable: false),
-                              );
-                            },
-                          ),
+                          LoginHistoryBlock(userId: userId),
                         ],
                       ),
                     ),
@@ -193,29 +157,6 @@ class _SecurityPageState extends State<SecurityPage> {
           },
         ),
       ),
-    );
-  }
-}
-
-class _LoginHistoryRow extends StatelessWidget {
-  const _LoginHistoryRow({
-    required this.loggedInAt,
-    this.ipAddress,
-  });
-
-  final DateTime loggedInAt;
-  final String? ipAddress;
-
-  @override
-  Widget build(BuildContext context) {
-    final dt = '${loggedInAt.day.toString().padLeft(2, '0')}.${loggedInAt.month.toString().padLeft(2, '0')}.${loggedInAt.year}';
-    final hasIp = ipAddress != null && ipAddress!.isNotEmpty;
-    final ip = hasIp ? ' • ${ipAddress!}' : '';
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      dense: true,
-      title: Text('Вход: $dt'),
-      subtitle: ip.isEmpty ? null : Text(ip),
     );
   }
 }

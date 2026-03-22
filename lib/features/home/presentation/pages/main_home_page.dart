@@ -947,7 +947,35 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 }
 
-class _FeedNotificationsButton extends StatelessWidget {
+class _FeedNotificationsButton extends StatefulWidget {
+  @override
+  State<_FeedNotificationsButton> createState() =>
+      _FeedNotificationsButtonState();
+}
+
+class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
+  int _unread = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadUnread());
+  }
+
+  Future<void> _loadUnread() async {
+    final authState = context.read<AuthBloc>().state;
+    final userId = authState is AuthAuthenticated ? authState.user.id : null;
+    if (userId == null || !mounted) return;
+    try {
+      final n = await context
+          .read<NotificationsRepository>()
+          .getUnreadCount(userId);
+      if (mounted) setState(() => _unread = n);
+    } catch (_) {
+      if (mounted) setState(() => _unread = 0);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.read<AuthBloc>().state;
@@ -959,33 +987,30 @@ class _FeedNotificationsButton extends StatelessWidget {
       );
     }
 
-    return FutureBuilder<int>(
-      future: context.read<NotificationsRepository>().getUnreadCount(userId),
-      builder: (context, snapshot) {
-        final unread = snapshot.data ?? 0;
-        return IconButton(
-          onPressed: () => context.push('/notifications'),
-          icon: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              const Icon(Icons.favorite_border_rounded),
-              if (unread > 0)
-                Positioned(
-                  right: -1,
-                  top: -1,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        );
+    return IconButton(
+      onPressed: () async {
+        await context.push('/notifications');
+        if (mounted) await _loadUnread();
       },
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.favorite_border_rounded),
+          if (_unread > 0)
+            Positioned(
+              right: -1,
+              top: -1,
+              child: Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

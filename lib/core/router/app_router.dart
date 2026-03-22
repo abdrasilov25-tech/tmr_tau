@@ -20,6 +20,7 @@ import '../../features/product/domain/entities/product_entity.dart';
 import '../../features/post/presentation/pages/add_post_page.dart';
 import '../../features/post/presentation/pages/edit_post_page.dart';
 import '../../features/post/presentation/pages/post_detail_page.dart';
+import '../../features/post/presentation/widgets/post_detail_route_page.dart';
 import '../../features/post/presentation/pages/saved_publications_page.dart';
 import '../../features/post_reports/presentation/screens/my_reports_page.dart';
 import '../../features/post_reports/presentation/screens/report_post_page.dart';
@@ -187,25 +188,9 @@ class AppRouter {
             return PostDetailPage(post: post, postRepository: postRepository);
           }
           final id = state.pathParameters['id']!;
-          return FutureBuilder<PostEntity?>(
-            future: postRepository.getPostById(id),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Scaffold(
-                  body: Center(child: CircularProgressIndicator()),
-                );
-              }
-              final fetched = snapshot.data;
-              if (fetched == null) {
-                return const Scaffold(
-                  body: Center(child: Text('Новость не найдена')),
-                );
-              }
-              return PostDetailPage(
-                post: fetched,
-                postRepository: postRepository,
-              );
-            },
+          return PostDetailRoutePage(
+            postId: id,
+            postRepository: postRepository,
           );
         },
         routes: [
