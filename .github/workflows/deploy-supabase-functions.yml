@@ -20,6 +20,31 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # Убираем пробелы/переносы из Secrets (частая причина «Invalid project ref format»).
+      # Если случайно вставили URL — вытаскиваем id после /project/.
+      - name: Sanitize Supabase env
+        run: |
+          set -e
+          RAW="$(printf '%s' "$SUPABASE_PROJECT_REF" | tr -d '[:space:]')"
+          if printf '%s' "$RAW" | grep -qE 'supabase\.com/.*project/'; then
+            REF="$(printf '%s' "$RAW" | sed -n 's|.*/project/\([^/?#]*\).*|\1|p')"
+          else
+            REF="$(printf '%s' "$RAW" | tr -d '"' | tr -d "'")"
+          fi
+          REF="$(printf '%s' "$REF" | tr '[:upper:]' '[:lower:]')"
+          TOK="$(printf '%s' "$SUPABASE_ACCESS_TOKEN" | tr -d '[:space:]')"
+          if [ -z "$REF" ] || [ -z "$TOK" ]; then
+            echo "::error::Проверь Secrets: SUPABASE_PROJECT_REF и SUPABASE_ACCESS_TOKEN не должны быть пустыми."
+            exit 1
+          fi
+          if ! printf '%s' "$REF" | grep -qE '^[a-z0-9]{15,}$'; then
+            echo "::error::SUPABASE_PROJECT_REF: только id проекта из URL (латиница/цифры), без https. Длина сейчас: ${#REF}"
+            exit 1
+          fi
+          echo "SUPABASE_PROJECT_REF=$REF" >> "$GITHUB_ENV"
+          echo "SUPABASE_ACCESS_TOKEN=$TOK" >> "$GITHUB_ENV"
+          echo "OK: project ref length ${#REF}"
+
       # Бинарник с GitHub — без supabase/setup-cli. Распаковка в /tmp: в репо уже есть папка `supabase/`,
       # иначе tar пытается создать файл `supabase` в корне и падает с "File exists".
       - name: Install Supabase CLI
