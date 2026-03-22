@@ -22,11 +22,22 @@ class ProductMonetizationRepositoryImpl implements ProductMonetizationRepository
     required ProductPromotionKind kind,
   }) async {
     try {
+      // Edge Function с verify_jwt=true — без валидного access token шлюз отвечает 401 Invalid JWT.
+      await _ensureFreshSession();
+      final session = _client.auth.currentSession;
+      if (session == null) {
+        throw MonetizationException(
+          'Войдите в аккаунт снова (сессия недействительна).',
+        );
+      }
       final res = await _client.functions.invoke(
         _fnCreateCheckout,
         body: <String, dynamic>{
           'product_id': productId,
           'kind': kind.apiValue,
+        },
+        headers: {
+          'Authorization': 'Bearer ${session.accessToken}',
         },
       );
       final data = res.data;
@@ -49,10 +60,22 @@ class ProductMonetizationRepositoryImpl implements ProductMonetizationRepository
         amountMinor: map['amount_minor'] as int?,
         currency: map['currency'] as String? ?? 'KZT',
       );
+    } on MonetizationException {
+      rethrow;
     } on FunctionException catch (e) {
       throw MonetizationException(_formatFunctionError(e));
     } catch (e) {
       throw MonetizationException(e.toString());
+    }
+  }
+
+  /// Пытается обновить access token (иначе шлюз Edge Functions может ответить 401 Invalid JWT).
+  Future<void> _ensureFreshSession() async {
+    if (_client.auth.currentSession == null) return;
+    try {
+      await _client.auth.refreshSession();
+    } catch (_) {
+      // Нет refresh token или сессия недействительна — ниже проверим currentSession
     }
   }
 
