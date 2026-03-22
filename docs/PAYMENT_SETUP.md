@@ -1,5 +1,7 @@
 # Подключение оплаты (Stripe + Supabase Edge Functions)
 
+**Всё по шагам в одном файле:** [`docs/FULL_SETUP_CHECKLIST.md`](FULL_SETUP_CHECKLIST.md)
+
 Код в приложении уже вызывает функцию `create-product-promotion` и опрашивает таблицу `product_promotion_orders`. Осталось привязать проект Supabase и задеплоить функции.
 
 ## Автодеплой через GitHub (рекомендуется)
