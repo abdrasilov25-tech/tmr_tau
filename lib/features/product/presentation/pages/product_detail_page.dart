@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +9,8 @@ import '../../../../core/utils/phone_launch.dart';
 import '../../../feed/presentation/bloc/feed_bloc.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../widgets/product_image_gallery.dart';
+import '../widgets/product_promo_badges.dart';
+import '../widgets/product_promotion_sheet.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../comments/domain/entities/product_comment_entity.dart';
@@ -46,6 +50,34 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     _product = widget.product;
     _loadComments();
     _loadIsInFavorites();
+    // Счётчик просмотров — один запрос после первого кадра (не в build).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _bumpViewCount());
+  }
+
+  /// RPC `increment_product_view` + обновление модели (число просмотров для статистики).
+  Future<void> _bumpViewCount() async {
+    final repo = widget.productRepository;
+    if (repo == null) return;
+    try {
+      await repo.incrementProductView(_product.id);
+      if (!mounted) return;
+      final authState = context.read<AuthBloc>().state;
+      final uid = authState is AuthAuthenticated ? authState.user.id : null;
+      final refreshed =
+          await repo.getProductById(_product.id, currentUserId: uid);
+      if (refreshed != null && mounted) {
+        setState(() => _product = refreshed);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _refreshAfterPromo() async {
+    final repo = widget.productRepository;
+    if (repo == null) return;
+    final authState = context.read<AuthBloc>().state;
+    final uid = authState is AuthAuthenticated ? authState.user.id : null;
+    final p = await repo.getProductById(_product.id, currentUserId: uid);
+    if (p != null && mounted) setState(() => _product = p);
   }
 
   @override
@@ -268,6 +300,37 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                           color: Theme.of(context).colorScheme.primary,
                         ),
                   ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: ProductPromoBadges(product: _product),
+                  ),
+                  if (isOwner) ...[
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        await ProductPromotionSheet.show(
+                          context,
+                          product: _product,
+                          onPromotionActivated: _refreshAfterPromo,
+                        );
+                      },
+                      icon: const Icon(Icons.workspace_premium_outlined),
+                      label: const Text('Продвижение и статистика'),
+                    ),
+                  ],
+                  if (isOwner && _product.hasActiveStatsAccess) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.visibility_outlined),
+                        title: Text('Просмотров: ${_product.viewCount}'),
+                        subtitle: const Text(
+                          'Доступ к статистике по платной подписке',
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   InkWell(
                     onTap: () => context.push('/profile/${_product.sellerId}'),

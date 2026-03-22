@@ -6,6 +6,7 @@ import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/feed_product_card_skeleton.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
+import '../../../product/presentation/widgets/product_promo_badges.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -539,6 +540,9 @@ class _ProductCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
+        side: product.showHighlightBadge
+            ? const BorderSide(color: Color(0xFFFFC107), width: 2)
+            : BorderSide.none,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -604,12 +608,22 @@ class _ProductCard extends StatelessWidget {
                 final w = constraints.maxWidth;
                 return AspectRatio(
                   aspectRatio: 1,
-                  child: CachedProductImage(
-                    imageUrl: product.imageUrl,
-                    width: double.infinity,
-                    height: double.infinity,
-                    memCacheWidth: (w * dpr).round(),
-                    compactPlaceholder: true,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CachedProductImage(
+                        imageUrl: product.imageUrl,
+                        width: double.infinity,
+                        height: double.infinity,
+                        memCacheWidth: (w * dpr).round(),
+                        compactPlaceholder: true,
+                      ),
+                      Positioned(
+                        top: 10,
+                        left: 10,
+                        child: ProductPromoBadges(product: product),
+                      ),
+                    ],
                   ),
                 );
               },

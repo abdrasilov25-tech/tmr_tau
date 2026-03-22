@@ -66,4 +66,7 @@ abstract class ProductRepository {
   Future<void> toggleProductRepost(String productId, String userId);
   Future<List<ProductEntity>> getFavorites(String userId);
   Future<void> toggleFavorite(String productId, String userId);
+
+  /// Счётчик просмотров (RPC `increment_product_view` в Supabase).
+  Future<void> incrementProductView(String productId);
 }

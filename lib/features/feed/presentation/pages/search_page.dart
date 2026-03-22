@@ -18,6 +18,7 @@ import '../../../product/domain/entities/category_entity.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/categories_repository.dart';
 import '../../../product/domain/repositories/product_repository.dart';
+import '../../../product/presentation/widgets/product_promo_badges.dart';
 import '../controllers/search_paging_controller.dart';
 import '../widgets/kazakhstan_location_sheet.dart';
 
@@ -822,8 +823,6 @@ class _ProductSearchGalleryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isTop = product.isTop;
-    final isUrgent = product.isUrgent;
     final dist = _searchDistanceKmLabel(
       product,
       centerLatitude,
@@ -835,7 +834,12 @@ class _ProductSearchGalleryCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: product.showHighlightBadge
+            ? const BorderSide(color: Color(0xFFFFC107), width: 2)
+            : BorderSide.none,
+      ),
       child: InkWell(
         onTap: () => context.push('/product/${product.id}', extra: product),
         child: Column(
@@ -863,22 +867,11 @@ class _ProductSearchGalleryCard extends StatelessWidget {
                             ),
                           ),
                   ),
-                  if (isTop || isUrgent)
-                    Positioned(
-                      top: 10,
-                      left: 10,
-                      child: Wrap(
-                        spacing: 6,
-                        children: [
-                          if (isTop) const _Badge(label: 'ТОП'),
-                          if (isUrgent)
-                            const _Badge(
-                              label: 'СРОЧНО',
-                              color: Color(0xFFE53935),
-                            ),
-                        ],
-                      ),
-                    ),
+                  Positioned(
+                    top: 10,
+                    left: 10,
+                    child: ProductPromoBadges(product: product),
+                  ),
                   Positioned(
                     left: 0,
                     right: 0,
@@ -1034,30 +1027,6 @@ class _InitialLoading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Center(child: CircularProgressIndicator());
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.label, this.color = const Color(0xFF1565C0)});
-  final String label;
-  final Color color;
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
   }
 }
 

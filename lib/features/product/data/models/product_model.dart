@@ -37,6 +37,12 @@ List<String> _imageUrlsFromJson(Map<String, dynamic> json) {
   return <String>[t];
 }
 
+DateTime? _ts(dynamic v) {
+  if (v == null) return null;
+  if (v is String) return DateTime.tryParse(v);
+  return null;
+}
+
 class ProductModel extends ProductEntity {
   const ProductModel({
     required super.id,
@@ -64,7 +70,61 @@ class ProductModel extends ProductEntity {
     super.latitude,
     super.longitude,
     super.contactPhone,
+    super.promoTopUntil,
+    super.promoUrgentUntil,
+    super.promoHighlightUntil,
+    super.statsAccessUntil,
+    super.viewCount = 0,
   });
+
+  /// Копия сущности с точечными переопределениями (лента / оптимистичные обновления).
+  factory ProductModel.fromEntity(
+    ProductEntity e, {
+    bool? isLikedByMe,
+    bool? isFollowingSeller,
+    bool? isRepostedByMe,
+    int? likesCount,
+    int? repostsCount,
+    int? commentsCount,
+    int? viewCount,
+    DateTime? promoTopUntil,
+    DateTime? promoUrgentUntil,
+    DateTime? promoHighlightUntil,
+    DateTime? statsAccessUntil,
+  }) {
+    return ProductModel(
+      id: e.id,
+      title: e.title,
+      description: e.description,
+      price: e.price,
+      imageUrls: e.imageUrls,
+      sellerId: e.sellerId,
+      category: e.category,
+      categoryId: e.categoryId,
+      likesCount: likesCount ?? e.likesCount,
+      commentsCount: commentsCount ?? e.commentsCount,
+      repostsCount: repostsCount ?? e.repostsCount,
+      sellerName: e.sellerName,
+      sellerAvatarUrl: e.sellerAvatarUrl,
+      createdAt: e.createdAt,
+      isLikedByMe: isLikedByMe ?? e.isLikedByMe,
+      isFollowingSeller: isFollowingSeller ?? e.isFollowingSeller,
+      sellerIsVerified: e.sellerIsVerified,
+      isRepostedByMe: isRepostedByMe ?? e.isRepostedByMe,
+      city: e.city,
+      condition: e.condition,
+      isUrgent: e.isUrgent,
+      isTop: e.isTop,
+      latitude: e.latitude,
+      longitude: e.longitude,
+      contactPhone: e.contactPhone,
+      promoTopUntil: promoTopUntil ?? e.promoTopUntil,
+      promoUrgentUntil: promoUrgentUntil ?? e.promoUrgentUntil,
+      promoHighlightUntil: promoHighlightUntil ?? e.promoHighlightUntil,
+      statsAccessUntil: statsAccessUntil ?? e.statsAccessUntil,
+      viewCount: viewCount ?? e.viewCount,
+    );
+  }
 
   factory ProductModel.fromJson(Map<String, dynamic> json) {
     return ProductModel(
@@ -94,6 +154,11 @@ class ProductModel extends ProductEntity {
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
       contactPhone: json['contact_phone'] as String?,
+      promoTopUntil: _ts(json['promo_top_until']),
+      promoUrgentUntil: _ts(json['promo_urgent_until']),
+      promoHighlightUntil: _ts(json['promo_highlight_until']),
+      statsAccessUntil: _ts(json['stats_access_until']),
+      viewCount: json['view_count'] as int? ?? 0,
     );
   }
 }

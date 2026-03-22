@@ -746,6 +746,12 @@ class _EditProductPageState extends State<EditProductPage> {
               value: _isTop,
               onChanged: (v) => setState(() => _isTop = v),
             ),
+            Text(
+              'Платное продвижение на 24 ч и статистика — кнопка «Продвижение» в объявлении.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.outline,
+                  ),
+            ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _gettingLocation ? null : _pickCurrentLocation,
