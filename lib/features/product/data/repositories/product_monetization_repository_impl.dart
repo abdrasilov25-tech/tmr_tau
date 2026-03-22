@@ -79,16 +79,22 @@ class ProductMonetizationRepositoryImpl implements ProductMonetizationRepository
     }
   }
 
-  /// Текст ошибки из ответа Edge Function (JSON `{ "error": "..." }`).
+  /// Текст ошибки из ответа Edge Function (JSON `{ "error": "..." }` и шлюз Supabase).
   static String _formatFunctionError(FunctionException e) {
     final d = e.details;
-    if (d is Map && d['error'] != null) {
-      return d['error'].toString();
+    if (d is Map) {
+      if (d['error'] != null) return d['error'].toString();
+      if (d['message'] != null) return d['message'].toString();
+      if (d['msg'] != null) return d['msg'].toString();
+    }
+    if (e.status == 401) {
+      return 'Сессия недействительна (401). Выйдите из аккаунта и войдите снова. '
+          'Проверь, что в .env верные SUPABASE_URL и SUPABASE_ANON_KEY этого проекта.';
     }
     if (d != null && '$d'.isNotEmpty) return d.toString();
     final rp = e.reasonPhrase;
     if (rp != null && rp.isNotEmpty) return rp;
-    return 'Ошибка Edge Function';
+    return 'Ошибка Edge Function (HTTP ${e.status})';
   }
 
   @override

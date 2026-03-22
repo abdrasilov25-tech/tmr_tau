@@ -105,9 +105,12 @@ serve(async (req) => {
       httpClient: Stripe.createFetchHttpClient(),
     });
 
-    const publicAppUrl = Deno.env.get("PUBLIC_APP_URL") ?? "https://example.com";
+    const rawBase = Deno.env.get("PUBLIC_APP_URL") ?? "https://example.com";
+    const publicAppUrl = rawBase.replace(/\/+$/, "");
 
-    const session = await stripe.checkout.sessions.create({
+    let session: Stripe.Checkout.Session;
+    try {
+      session = await stripe.checkout.sessions.create({
       mode: "payment",
       success_url: `${publicAppUrl}/?payment=ok&order_id=${order.id}`,
       cancel_url: `${publicAppUrl}/?payment=cancel`,
@@ -130,6 +133,19 @@ serve(async (req) => {
         },
       ],
     });
+    } catch (stripeErr: unknown) {
+      const msg = stripeErr instanceof Error
+        ? stripeErr.message
+        : String(stripeErr);
+      console.error("Stripe checkout.sessions.create failed:", msg);
+      return json(
+        {
+          error:
+            `Stripe: ${msg}. Проверь STRIPE_SECRET_KEY (Test/Live), валюту KZT и Dashboard Stripe.`,
+        },
+        500,
+      );
+    }
 
     await admin
       .from("product_promotion_orders")
