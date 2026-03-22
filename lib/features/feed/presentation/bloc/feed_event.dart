@@ -46,3 +46,11 @@ final class FeedToggleFollow extends FeedEvent {
   @override
   List<Object?> get props => [followerId, followingId];
 }
+
+/// Товар удалён — убрать из кэша ленты (поиск/профиль обновляются отдельно).
+final class FeedProductRemoved extends FeedEvent {
+  const FeedProductRemoved({required this.productId});
+  final String productId;
+  @override
+  List<Object?> get props => [productId];
+}

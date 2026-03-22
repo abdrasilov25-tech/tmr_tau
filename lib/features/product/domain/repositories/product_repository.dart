@@ -33,7 +33,7 @@ abstract class ProductRepository {
     required String title,
     required String description,
     required double price,
-    String imageUrl = '',
+    List<String> imageUrls = const [],
     String category = 'general',
     String? categoryId,
     String? city,
@@ -42,6 +42,7 @@ abstract class ProductRepository {
     bool isTop = false,
     double? latitude,
     double? longitude,
+    String? contactPhone,
     required String sellerId,
   });
   Future<void> updateProduct({
@@ -49,7 +50,7 @@ abstract class ProductRepository {
     required String title,
     required String description,
     required double price,
-    required String imageUrl,
+    required List<String> imageUrls,
     String category = 'general',
     String? categoryId,
     String? city,
@@ -58,6 +59,7 @@ abstract class ProductRepository {
     bool isTop = false,
     double? latitude,
     double? longitude,
+    String? contactPhone,
   });
   Future<void> deleteProduct(String productId);
   Future<void> toggleProductLike(String productId, String userId);

@@ -6,8 +6,8 @@ class ProductEntity extends Equatable {
     required this.title,
     required this.description,
     required this.price,
-    required this.imageUrl,
     required this.sellerId,
+    this.imageUrls = const [],
     this.category = 'general',
     this.categoryId,
     this.likesCount = 0,
@@ -26,14 +26,16 @@ class ProductEntity extends Equatable {
     this.isTop = false,
     this.latitude,
     this.longitude,
+    this.contactPhone,
   });
 
   final String id;
   final String title;
   final String description;
   final double price;
-  final String imageUrl;
   final String sellerId;
+  /// Все фото объявления (первая — обложка в ленте).
+  final List<String> imageUrls;
   final String category;
   final String? categoryId;
   final int likesCount;
@@ -52,6 +54,11 @@ class ProductEntity extends Equatable {
   final bool isTop;
   final double? latitude;
   final double? longitude;
+  /// Телефон для звонка покупателю (как в OLX), опционально.
+  final String? contactPhone;
+
+  /// Обложка (совместимость со старым полем `image_url`).
+  String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
 
   String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
 
@@ -61,8 +68,8 @@ class ProductEntity extends Equatable {
     title,
     description,
     price,
-    imageUrl,
     sellerId,
+    imageUrls,
     category,
     categoryId,
     likesCount,
@@ -81,5 +88,6 @@ class ProductEntity extends Equatable {
     isTop,
     latitude,
     longitude,
+    contactPhone,
   ];
 }

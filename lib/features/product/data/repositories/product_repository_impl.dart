@@ -11,8 +11,9 @@ import '../models/product_model.dart';
 class ProductRepositoryImpl implements ProductRepository {
   ProductRepositoryImpl(this._client);
   final SupabaseClient _client;
+
   static const String _productSelect =
-      'id, title, description, price, image_url, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, users!seller_id(name, avatar), categories!category_id(name)';
+      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, contact_phone, users!seller_id(name, avatar), categories!category_id(name)';
 
   @override
   Future<List<ProductEntity>> getFeedProducts({
@@ -224,7 +225,7 @@ class ProductRepositoryImpl implements ProductRepository {
     required String title,
     required String description,
     required double price,
-    String imageUrl = '',
+    List<String> imageUrls = const [],
     String category = 'general',
     String? categoryId,
     String? city,
@@ -233,13 +234,17 @@ class ProductRepositoryImpl implements ProductRepository {
     bool isTop = false,
     double? latitude,
     double? longitude,
+    String? contactPhone,
     required String sellerId,
   }) async {
+    final phoneDb = contactPhone?.trim();
+    final urls = imageUrls.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     final data = <String, dynamic>{
       'title': title,
       'description': description,
       'price': price,
-      'image_url': imageUrl,
+      'image_url': urls.isNotEmpty ? urls.first : '',
+      'image_urls': urls,
       'category': category,
       'seller_id': sellerId,
       'city': city,
@@ -248,6 +253,7 @@ class ProductRepositoryImpl implements ProductRepository {
       'is_top': isTop,
       'latitude': latitude,
       'longitude': longitude,
+      'contact_phone': (phoneDb == null || phoneDb.isEmpty) ? null : phoneDb,
     };
     if (categoryId != null) data['category_id'] = categoryId;
     await _client.from(SupabaseConstants.productsTable).insert(data);
@@ -259,7 +265,7 @@ class ProductRepositoryImpl implements ProductRepository {
     required String title,
     required String description,
     required double price,
-    required String imageUrl,
+    required List<String> imageUrls,
     String category = 'general',
     String? categoryId,
     String? city,
@@ -268,12 +274,16 @@ class ProductRepositoryImpl implements ProductRepository {
     bool isTop = false,
     double? latitude,
     double? longitude,
+    String? contactPhone,
   }) async {
+    final phoneDb = contactPhone?.trim();
+    final urls = imageUrls.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     final data = <String, dynamic>{
       'title': title,
       'description': description,
       'price': price,
-      'image_url': imageUrl,
+      'image_url': urls.isNotEmpty ? urls.first : '',
+      'image_urls': urls,
       'category': category,
       // Явно передаём null, чтобы сбросить FK при очистке подкатегории.
       'category_id': categoryId,
@@ -283,6 +293,7 @@ class ProductRepositoryImpl implements ProductRepository {
       'is_top': isTop,
       'latitude': latitude,
       'longitude': longitude,
+      'contact_phone': (phoneDb == null || phoneDb.isEmpty) ? null : phoneDb,
     };
     await _client
         .from(SupabaseConstants.productsTable)
@@ -469,7 +480,7 @@ class ProductRepositoryImpl implements ProductRepository {
             title: p.title,
             description: p.description,
             price: p.price,
-            imageUrl: p.imageUrl,
+            imageUrls: p.imageUrls,
             sellerId: p.sellerId,
             category: p.category,
             categoryId: p.categoryId,
@@ -489,6 +500,7 @@ class ProductRepositoryImpl implements ProductRepository {
             isTop: p.isTop,
             latitude: p.latitude,
             longitude: p.longitude,
+            contactPhone: p.contactPhone,
           ),
         )
         .toList();

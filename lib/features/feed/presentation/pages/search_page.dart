@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import '../../../../core/products/deleted_product_bus.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
@@ -45,6 +46,7 @@ class _SearchPageState extends State<SearchPage> {
     'Велосипед',
   ];
   Timer? _debounce;
+  StreamSubscription<String>? _deletedProductSub;
 
   /// Локально сохраняется (как вид отображения в OLX).
   SearchViewMode _viewMode = SearchViewMode.list;
@@ -62,10 +64,15 @@ class _SearchPageState extends State<SearchPage> {
       _pagingController.loadInitial('');
       _bootstrapSearchUx();
     });
+    _deletedProductSub = deletedProductIdsStream.listen((id) {
+      if (!mounted) return;
+      _pagingController.removeProductById(id);
+    });
   }
 
   @override
   void dispose() {
+    _deletedProductSub?.cancel();
     _debounce?.cancel();
     _queryController.dispose();
     _scrollController

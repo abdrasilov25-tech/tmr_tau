@@ -18,6 +18,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     on<FeedToggleLike>(_onToggleLike);
     on<FeedToggleFollow>(_onToggleFollow);
     on<FeedToggleRepost>(_onToggleRepost);
+    on<FeedProductRemoved>(_onProductRemoved);
   }
 
   final FeedRepository _repository;
@@ -74,6 +75,18 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
     }
   }
 
+  void _onProductRemoved(
+    FeedProductRemoved event,
+    Emitter<FeedState> emit,
+  ) {
+    final current = state;
+    if (current is! FeedSuccess) return;
+    final filtered = current.products
+        .where((p) => p.id != event.productId)
+        .toList(growable: false);
+    emit(current.copyWith(products: filtered));
+  }
+
   List<ProductEntity> _mergeLocalReactions(List<ProductEntity> list) {
     final likedIds = _localReactions.getLikedIds();
     final repostedIds = _localReactions.getRepostedIds();
@@ -87,7 +100,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         title: p.title,
         description: p.description,
         price: p.price,
-        imageUrl: p.imageUrl,
+        imageUrls: p.imageUrls,
         sellerId: p.sellerId,
         category: p.category,
         categoryId: p.categoryId,
@@ -101,6 +114,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         isFollowingSeller: p.isFollowingSeller,
         isRepostedByMe: p.isRepostedByMe || fromLocalRepost,
         sellerIsVerified: p.sellerIsVerified,
+        contactPhone: p.contactPhone,
       );
     }).toList();
   }
@@ -119,7 +133,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         title: p.title,
         description: p.description,
         price: p.price,
-        imageUrl: p.imageUrl,
+        imageUrls: p.imageUrls,
         sellerId: p.sellerId,
         category: p.category,
         likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
@@ -159,7 +173,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         title: p.title,
         description: p.description,
         price: p.price,
-        imageUrl: p.imageUrl,
+        imageUrls: p.imageUrls,
         sellerId: p.sellerId,
         category: p.category,
         likesCount: p.likesCount,
@@ -172,6 +186,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         isFollowingSeller: !p.isFollowingSeller,
         isRepostedByMe: p.isRepostedByMe,
         sellerIsVerified: p.sellerIsVerified,
+        contactPhone: p.contactPhone,
       );
     }).toList();
     if (!isClosed) emit(current.copyWith(products: updated));
@@ -197,7 +212,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         title: p.title,
         description: p.description,
         price: p.price,
-        imageUrl: p.imageUrl,
+        imageUrls: p.imageUrls,
         sellerId: p.sellerId,
         category: p.category,
         likesCount: p.likesCount,
@@ -210,6 +225,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         isFollowingSeller: p.isFollowingSeller,
         isRepostedByMe: isNowReposted,
         sellerIsVerified: p.sellerIsVerified,
+        contactPhone: p.contactPhone,
       );
     }).toList();
     if (!isClosed) emit(current.copyWith(products: updated));

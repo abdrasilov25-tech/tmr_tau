@@ -44,6 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Apple Push / APNs keys (never commit)
+*.p8
+AuthKey_*.p8
+
 # Local environment files (keys must never be committed)
 .env
 .env.*

@@ -9,7 +9,6 @@ void main() {
         title: 'Товар',
         description: '',
         price: 15000,
-        imageUrl: '',
         sellerId: 's1',
       );
       expect(product.priceFormatted, '15000 ₸');
@@ -21,7 +20,6 @@ void main() {
         title: 'Товар',
         description: '',
         price: 9999.99,
-        imageUrl: '',
         sellerId: 's1',
       );
       expect(product.priceFormatted, '10000 ₸');

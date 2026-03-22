@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../../core/products/deleted_product_bus.dart';
+import '../../../../core/utils/phone_launch.dart';
+import '../../../feed/presentation/bloc/feed_bloc.dart';
 import '../../../../core/widgets/cached_avatar.dart';
-import '../../../../core/widgets/cached_product_image.dart';
+import '../widgets/product_image_gallery.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../comments/domain/entities/product_comment_entity.dart';
@@ -185,6 +188,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     if (ok != true || !context.mounted) return;
     try {
       await context.read<ProductRepository>().deleteProduct(_product.id);
+      notifyProductDeleted(_product.id);
+      if (context.mounted) {
+        context.read<FeedBloc>().add(FeedProductRemoved(productId: _product.id));
+      }
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Товар удалён')),
@@ -233,12 +240,14 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   ]
                 : null,
             flexibleSpace: FlexibleSpaceBar(
-              background: CachedProductImage(
-                key: ValueKey<String>(_product.imageUrl),
-                imageUrl: _product.imageUrl,
-                width: double.infinity,
+              background: ProductImageGallery(
+                key: ValueKey<String>(_product.imageUrls.join('|')),
+                imageUrls: _product.imageUrls.isNotEmpty
+                    ? _product.imageUrls
+                    : (_product.imageUrl.isNotEmpty
+                        ? <String>[_product.imageUrl]
+                        : <String>[]),
                 height: 320,
-                fit: BoxFit.cover,
               ),
             ),
           ),
@@ -311,6 +320,14 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     _product.description,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
+                  if (_product.contactPhone != null &&
+                      _product.contactPhone!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 20),
+                    _ProductContactPhoneSection(
+                      phone: _product.contactPhone!.trim(),
+                      isOwner: isOwner,
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   StartChatButton(
                     peerId: _product.sellerId,
@@ -399,6 +416,104 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Телефон как в OLX: покупатель сначала нажимает «Позвонить», затем видит номер.
+class _ProductContactPhoneSection extends StatefulWidget {
+  const _ProductContactPhoneSection({
+    required this.phone,
+    required this.isOwner,
+  });
+
+  final String phone;
+  final bool isOwner;
+
+  @override
+  State<_ProductContactPhoneSection> createState() =>
+      _ProductContactPhoneSectionState();
+}
+
+class _ProductContactPhoneSectionState extends State<_ProductContactPhoneSection> {
+  bool _revealed = false;
+
+  Future<void> _dial() async {
+    final ok = await launchPhoneCall(widget.phone);
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Не удалось открыть набор номера'),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (widget.isOwner) {
+      return Card(
+        elevation: 0,
+        color: scheme.surfaceContainerHighest,
+        child: ListTile(
+          leading: Icon(Icons.phone_in_talk_outlined, color: scheme.primary),
+          title: const Text('Телефон в объявлении'),
+          subtitle: Text(
+            widget.phone,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+          ),
+        ),
+      );
+    }
+
+    if (_revealed) {
+      return Card(
+        elevation: 0,
+        color: scheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Номер продавца',
+                style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              SelectableText(
+                widget.phone,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      letterSpacing: 0.5,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _dial,
+                icon: const Icon(Icons.phone),
+                label: const Text('Позвонить'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return OutlinedButton.icon(
+      onPressed: () => setState(() => _revealed = true),
+      icon: const Icon(Icons.phone_callback_outlined),
+      label: const Text('Позвонить'),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
       ),
     );
   }

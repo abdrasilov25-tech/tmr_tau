@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import '../../../../core/products/deleted_product_bus.dart';
 import '../../../../core/accounts/account_manager.dart';
 import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/multi_account_storage.dart';
@@ -49,12 +51,22 @@ class _MyProfilePageState extends State<MyProfilePage> {
   bool _autoReloadTriggeredForPublications = false;
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
+  StreamSubscription<String>? _deletedProductSub;
 
   @override
   void initState() {
     super.initState();
     _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 2);
     _load();
+    _deletedProductSub = deletedProductIdsStream.listen((_) {
+      if (mounted) _load();
+    });
+  }
+
+  @override
+  void dispose() {
+    _deletedProductSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _changeAvatar() async {
