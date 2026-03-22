@@ -1,5 +1,10 @@
-# Публикация лендинга из папки `site/` на GitHub Pages.
-# В репозитории: Settings → Pages → Source: GitHub Actions (после первого успешного запуска).
+# Публикует содержимое `site/` в ветку `gh-pages`.
+# Не использует Actions Pages API (из‑за него бывает 404, пока Pages не включены вручную).
+#
+# После первого успешного запуска:
+# Settings → Pages → Build and deployment → Source: Deploy from a branch
+# → Branch: gh-pages, Folder: / (root) → Save
+#
 name: Deploy GitHub Pages
 
 on:
@@ -11,25 +16,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+
+      - name: Publish site to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: site
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./site
+          force_orphan: true
