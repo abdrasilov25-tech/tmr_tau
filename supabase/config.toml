@@ -11,6 +11,7 @@ enabled = true
 [functions.stripe-webhook]
 verify_jwt = false
 
-# Оплата из приложения — только с валидной сессией Supabase Auth.
+# Оплата из приложения: проверка JWT на шлюзе отключена — иначе часто «Invalid JWT»
+# из клиента при рабочей сессии. Авторизация обязательна внутри функции (auth.getUser()).
 [functions.create-product-promotion]
-verify_jwt = true
+verify_jwt = false
