@@ -53,3 +53,6 @@ AuthKey_*.p8
 .env.*
 !.env.example
 *.env
+
+# Firebase iOS local config (avoid committing project keys)
+ios/Runner/GoogleService-Info.plist
