@@ -14,7 +14,7 @@ enum ProductPromotionKind {
 }
 
 extension ProductPromotionKindApi on ProductPromotionKind {
-  /// Значение для Edge Function / Stripe metadata.
+  /// Значение для Cloud Code metadata.
   String get apiValue {
     switch (this) {
       case ProductPromotionKind.top:

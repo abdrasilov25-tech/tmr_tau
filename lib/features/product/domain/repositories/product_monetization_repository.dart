@@ -3,7 +3,7 @@ import '../entities/promotion_checkout_session.dart';
 import '../entities/promotion_order_status.dart';
 import '../entities/promotion_stats.dart';
 
-/// Оплата продвижения объявления (Stripe / Halyk / Caspipay через Supabase Edge Functions).
+/// Оплата продвижения объявления через Cloud Code.
 ///
 /// Реализация не вызывает платёжные API напрямую из Flutter — только `functions.invoke`.
 abstract class ProductMonetizationRepository {
@@ -20,7 +20,7 @@ abstract class ProductMonetizationRepository {
     required String productId,
   });
 
-  /// Создаёт заказ и возвращает URL оплаты. Деньги списывает провайдер на стороне сервера.
+  /// Legacy-метод совместимости.
   Future<PromotionCheckoutSession> createCheckoutSession({
     required String productId,
     required ProductPromotionKind kind,

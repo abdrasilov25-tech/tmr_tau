@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Деплой Edge Functions для оплаты (Stripe).
+# Деплой Edge Functions для In-App Purchase.
 # Локально: Supabase CLI + `supabase login` и `supabase link`, либо переменные:
 #   export SUPABASE_ACCESS_TOKEN=...
 #   export SUPABASE_PROJECT_REF=abcdefgh
@@ -7,18 +7,26 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-REF_ARGS=()
-if [ -n "${SUPABASE_PROJECT_REF:-}" ]; then
-  REF_ARGS=(--project-ref "$SUPABASE_PROJECT_REF")
+if command -v supabase >/dev/null 2>&1; then
+  SUPABASE_BIN=(supabase)
+else
+  SUPABASE_BIN=(npx --yes supabase@latest)
 fi
 
-echo "==> Deploy create-product-promotion"
-supabase functions deploy create-product-promotion "${REF_ARGS[@]}"
+deploy_fn() {
+  local fn_name="$1"
+  echo "==> Deploy ${fn_name}"
+  if [ -n "${SUPABASE_PROJECT_REF:-}" ]; then
+    "${SUPABASE_BIN[@]}" functions deploy "${fn_name}" --project-ref "$SUPABASE_PROJECT_REF"
+  else
+    "${SUPABASE_BIN[@]}" functions deploy "${fn_name}"
+  fi
+}
 
-echo "==> Deploy stripe-webhook (JWT отключён в supabase/config.toml)"
-supabase functions deploy stripe-webhook "${REF_ARGS[@]}"
+deploy_fn "verifyPurchase"
+deploy_fn "updateUserPremium"
+deploy_fn "updateBoostStatus"
 
 echo "Готово."
-echo "Секреты Stripe: Supabase Dashboard → Edge Functions → Secrets, или:"
-echo "  supabase secrets set STRIPE_SECRET_KEY=sk_test_... ${REF_ARGS[*]}"
+echo "Готово. Для server-side валидации чеков добавь секреты Apple/Google (если используешь)."
 echo "Полный чеклист: docs/PAYMENT_SETUP.md и .github/SECRETS.md"

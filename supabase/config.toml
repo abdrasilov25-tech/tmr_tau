@@ -7,18 +7,12 @@ enabled = true
 [functions]
 # По умолчанию JWT проверяется (пользователь должен быть залогинен).
 
-# Webhook Stripe вызывается без JWT — только подпись Stripe.
-[functions.stripe-webhook]
-verify_jwt = false
+# Cloud Code функции валидации IAP.
+[functions.verifyPurchase]
+verify_jwt = true
 
-# Оплата из приложения: проверка JWT на шлюзе отключена — иначе часто «Invalid JWT»
-# из клиента при рабочей сессии. Авторизация обязательна внутри функции (auth.getUser()).
-[functions.create-product-promotion]
-verify_jwt = false
+[functions.updateUserPremium]
+verify_jwt = true
 
-# Cloud Code для реальной монетизации в приложении.
-[functions.activatePromotion]
-verify_jwt = false
-
-[functions.getPromotionStats]
-verify_jwt = false
+[functions.updateBoostStatus]
+verify_jwt = true

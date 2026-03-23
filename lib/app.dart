@@ -33,6 +33,7 @@ import 'features/product/domain/repositories/categories_repository.dart';
 import 'features/product/domain/repositories/product_repository.dart';
 import 'features/product/domain/repositories/product_monetization_repository.dart';
 import 'features/product/data/repositories/product_monetization_repository_impl.dart';
+import 'features/product/data/services/payment_service.dart';
 import 'features/profile/data/repositories/profile_repository_impl.dart';
 import 'features/profile/domain/repositories/profile_repository.dart';
 import 'features/stories/data/repositories/stories_repository_impl.dart';
@@ -69,6 +70,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final AuthRepository _authRepository;
   late final ProductRepository _productRepository;
   late final ProductMonetizationRepository _productMonetizationRepository;
+  late final PaymentService _paymentService;
   late final CategoriesRepository _categoriesRepository;
   late final FeedRepository _feedRepository;
   late final ProfileRepository _profileRepository;
@@ -94,6 +96,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _authRepository = AuthRepositoryImpl(authDataSource, _client);
     _productRepository = ProductRepositoryImpl(_client);
     _productMonetizationRepository = ProductMonetizationRepositoryImpl(_client);
+    _paymentService = PaymentService(_client);
     _categoriesRepository = CategoriesRepositoryImpl(_client);
     _profileRepository = ProfileRepositoryImpl(_client);
     _feedRepository = FeedRepositoryImpl(_productRepository, _profileRepository);
@@ -167,6 +170,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<ProductMonetizationRepository>.value(
           value: _productMonetizationRepository,
         ),
+        RepositoryProvider<PaymentService>.value(value: _paymentService),
         RepositoryProvider<CategoriesRepository>.value(
             value: _categoriesRepository),
         RepositoryProvider<ProfileRepository>.value(value: _profileRepository),

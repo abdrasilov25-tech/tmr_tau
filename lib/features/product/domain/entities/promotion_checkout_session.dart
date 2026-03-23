@@ -1,6 +1,6 @@
 import 'package:equatable/equatable.dart';
 
-/// Результат вызова бэкенда: ссылка на оплату (Stripe / Halyk / Caspipay) и id заказа.
+/// Результат вызова бэкенда: ссылка на оплату и id заказа.
 ///
 /// **Платёж:** URL открывается во внешнем браузере / WebView; секреты карт не в приложении.
 class PromotionCheckoutSession extends Equatable {
@@ -15,7 +15,7 @@ class PromotionCheckoutSession extends Equatable {
   final String checkoutUrl;
   final String orderId;
 
-  /// `stripe` | `halyk` | `caspipay` — см. Edge Function.
+  /// Идентификатор провайдера оплаты.
   final String provider;
   final int? amountMinor;
   final String currency;
