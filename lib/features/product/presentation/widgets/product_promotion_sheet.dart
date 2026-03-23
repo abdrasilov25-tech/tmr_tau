@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -10,6 +13,7 @@ import '../../domain/exceptions/monetization_exception.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/entities/product_promotion_kind.dart';
 import '../../domain/entities/promotion_order_status.dart';
+import '../../domain/entities/promotion_stats.dart';
 import '../../domain/repositories/product_monetization_repository.dart';
 
 /// Тарифы (₸) — можно вынести в Remote Config / Edge Function позже.
@@ -62,6 +66,25 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
 
   /// Future статуса создаётся **один раз** на нажатие «Проверить» — не в build().
   Future<PromotionOrderStatus>? _statusFuture;
+  PromotionStats? _stats;
+  bool _statsLoading = false;
+  String? _statsError;
+  GoogleMapController? _mapController;
+  late final String _statsCacheKey;
+
+  @override
+  void initState() {
+    super.initState();
+    _statsCacheKey = 'promo_stats_${widget.product.id}';
+    unawaited(_loadCachedStats());
+    unawaited(_loadStats());
+  }
+
+  @override
+  void dispose() {
+    _mapController?.dispose();
+    super.dispose();
+  }
 
   Future<void> _pay(ProductPromotionKind kind) async {
     final auth = context.read<AuthBloc>().state;
@@ -81,9 +104,10 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
     setState(() => _paying = true);
     try {
       final repo = context.read<ProductMonetizationRepository>();
-      final session = await repo.createCheckoutSession(
+      final session = await repo.activatePromotion(
+        userId: auth.user.id,
         productId: widget.product.id,
-        kind: kind,
+        promoType: kind,
       );
       _pendingOrderId = session.orderId;
       final uri = Uri.parse(session.checkoutUrl);
@@ -116,6 +140,77 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
     setState(() {
       _statusFuture = context.read<ProductMonetizationRepository>().getOrderStatus(id);
     });
+  }
+
+  Future<void> _loadStats() async {
+    final auth = context.read<AuthBloc>().state;
+    if (auth is! AuthAuthenticated) return;
+    setState(() {
+      _statsLoading = true;
+      _statsError = null;
+    });
+    try {
+      final data = await context.read<ProductMonetizationRepository>().getPromotionStats(
+            userId: auth.user.id,
+            productId: widget.product.id,
+          );
+      if (!mounted) return;
+      setState(() {
+        _stats = data;
+      });
+      await _saveStats(data);
+      _moveMapToMarker(data);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statsError = e.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _statsLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadCachedStats() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_statsCacheKey);
+    if (raw == null || raw.isEmpty || !mounted) return;
+    try {
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      setState(() => _stats = PromotionStats.fromJson(map));
+    } catch (_) {}
+  }
+
+  Future<void> _saveStats(PromotionStats stats) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_statsCacheKey, jsonEncode(stats.toJson()));
+  }
+
+  void _moveMapToMarker(PromotionStats stats) {
+    final lat = stats.latitude;
+    final lng = stats.longitude;
+    if (lat == null || lng == null || _mapController == null) return;
+    _mapController!.animateCamera(
+      CameraUpdate.newLatLngZoom(LatLng(lat, lng), 13),
+    );
+  }
+
+  Set<Marker> _buildMarkers() {
+    final stats = _stats;
+    final lat = stats?.latitude;
+    final lng = stats?.longitude;
+    if (lat == null || lng == null) return <Marker>{};
+    return <Marker>{
+      Marker(
+        markerId: const MarkerId('promotion_product_marker'),
+        position: LatLng(lat, lng),
+        infoWindow: InfoWindow(
+          title: widget.product.title,
+          snippet: 'Просмотров: ${stats?.totalViews ?? 0}',
+        ),
+      ),
+    };
   }
 
   @override
@@ -197,6 +292,8 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
                               kind: ProductPromotionKind.stats,
                               enabled: !_paying,
                             ),
+                            const SizedBox(height: 12),
+                            _buildStatsSection(),
                             if (_pendingOrderId != null) ...[
                               const SizedBox(height: 16),
                               FilledButton(
@@ -225,10 +322,8 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
                                     if (st.status ==
                                         PromotionPaymentStatus.paid) {
                                       scheduleMicrotask(() {
+                                        unawaited(_loadStats());
                                         widget.onPromotionActivated?.call();
-                                        if (context.mounted) {
-                                          Navigator.of(context).pop();
-                                        }
                                       });
                                       return const Text(
                                         'Оплата успешна!',
@@ -290,6 +385,92 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
         subtitle: Text(subtitle),
         trailing: const Icon(Icons.payment_rounded),
         onTap: enabled ? () => _pay(kind) : null,
+      ),
+    );
+  }
+
+  Widget _buildStatsSection() {
+    if (_statsLoading && _stats == null) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(16),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    if (_statsError != null && _stats == null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _statsError!,
+                style: const TextStyle(color: Colors.red),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: _statsLoading ? null : _loadStats,
+                child: const Text('Повторить'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    final stats = _stats;
+    if (stats == null) {
+      return const SizedBox.shrink();
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.insights_outlined),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Реальная статистика',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                IconButton(
+                  onPressed: _statsLoading ? null : _loadStats,
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Обновить',
+                ),
+              ],
+            ),
+            Text('Просмотров: ${stats.totalViews}'),
+            if (stats.hasCoords) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  height: 180,
+                  child: GoogleMap(
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(stats.latitude!, stats.longitude!),
+                      zoom: 13,
+                    ),
+                    markers: _buildMarkers(),
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: false,
+                    onMapCreated: (controller) {
+                      _mapController = controller;
+                      _moveMapToMarker(stats);
+                    },
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

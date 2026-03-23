@@ -7,12 +7,14 @@
 ## Безопасность
 
 - **Секреты** `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `SUPABASE_SERVICE_ROLE_KEY` задаются в **Supabase Dashboard → Edge Functions → Secrets**, не в Flutter и не в git.
-- Приложение вызывает только `create-product-promotion` с JWT пользователя; деньги и обновление строк в БД — на сервере.
+- Приложение вызывает Cloud Code функции `activatePromotion` и `getPromotionStats`; деньги и обновление строк в БД — на сервере.
 
 ## Stripe (рекомендуется для старта)
 
 1. Создайте продукт в [Stripe](https://stripe.com) (тестовый режим).
 2. Разверните функции:
+   - `supabase functions deploy activatePromotion`
+   - `supabase functions deploy getPromotionStats`
    - `supabase functions deploy create-product-promotion`
    - `supabase functions deploy stripe-webhook`
 3. В Stripe Dashboard → Webhooks добавьте URL вида  
