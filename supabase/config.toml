@@ -15,3 +15,10 @@ verify_jwt = false
 # из клиента при рабочей сессии. Авторизация обязательна внутри функции (auth.getUser()).
 [functions.create-product-promotion]
 verify_jwt = false
+
+# Cloud Code для реальной монетизации в приложении.
+[functions.activatePromotion]
+verify_jwt = false
+
+[functions.getPromotionStats]
+verify_jwt = false

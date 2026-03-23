@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/entities/product_promotion_kind.dart';
 import '../../domain/entities/promotion_checkout_session.dart';
 import '../../domain/entities/promotion_order_status.dart';
+import '../../domain/entities/promotion_stats.dart';
 import '../../domain/exceptions/monetization_exception.dart';
 import '../../domain/repositories/product_monetization_repository.dart';
 
@@ -15,6 +16,80 @@ class ProductMonetizationRepositoryImpl implements ProductMonetizationRepository
   final SupabaseClient _client;
 
   static const String _fnCreateCheckout = 'create-product-promotion';
+  static const String _fnActivatePromotion = 'activatePromotion';
+  static const String _fnGetPromotionStats = 'getPromotionStats';
+
+  @override
+  Future<PromotionCheckoutSession> activatePromotion({
+    required String userId,
+    required String productId,
+    required ProductPromotionKind promoType,
+  }) async {
+    try {
+      await _ensureFreshSession();
+      final session = _client.auth.currentSession;
+      if (session == null) {
+        throw MonetizationException(
+          'Войдите в аккаунт снова (сессия недействительна).',
+        );
+      }
+      final res = await _client.functions.invoke(
+        _fnActivatePromotion,
+        body: <String, dynamic>{
+          'userId': userId,
+          'productId': productId,
+          'promoType': promoType.apiValue,
+        },
+        headers: <String, String>{
+          'Authorization': 'Bearer ${session.accessToken}',
+        },
+      );
+      return _parseCheckoutResponse(res.data);
+    } on FunctionException catch (e) {
+      throw MonetizationException(_formatFunctionError(e));
+    } on MonetizationException {
+      rethrow;
+    } catch (e) {
+      throw MonetizationException(e.toString());
+    }
+  }
+
+  @override
+  Future<PromotionStats> getPromotionStats({
+    required String userId,
+    required String productId,
+  }) async {
+    try {
+      await _ensureFreshSession();
+      final session = _client.auth.currentSession;
+      if (session == null) {
+        throw MonetizationException(
+          'Войдите в аккаунт снова (сессия недействительна).',
+        );
+      }
+      final res = await _client.functions.invoke(
+        _fnGetPromotionStats,
+        body: <String, dynamic>{
+          'userId': userId,
+          'productId': productId,
+        },
+        headers: <String, String>{
+          'Authorization': 'Bearer ${session.accessToken}',
+        },
+      );
+      final data = res.data;
+      if (data is! Map) {
+        throw MonetizationException('Некорректный ответ Cloud Code статистики');
+      }
+      return PromotionStats.fromJson(Map<String, dynamic>.from(data));
+    } on FunctionException catch (e) {
+      throw MonetizationException(_formatFunctionError(e));
+    } on MonetizationException {
+      rethrow;
+    } catch (e) {
+      throw MonetizationException(e.toString());
+    }
+  }
 
   @override
   Future<PromotionCheckoutSession> createCheckoutSession({
@@ -40,26 +115,7 @@ class ProductMonetizationRepositoryImpl implements ProductMonetizationRepository
           'Authorization': 'Bearer ${session.accessToken}',
         },
       );
-      final data = res.data;
-      if (data is! Map) {
-        throw MonetizationException('Некорректный ответ сервера оплаты');
-      }
-      final map = Map<String, dynamic>.from(data);
-      final url = map['checkout_url'] as String?;
-      final orderId = map['order_id'] as String?;
-      final provider = map['provider'] as String? ?? 'stripe';
-      if (url == null || url.isEmpty || orderId == null || orderId.isEmpty) {
-        throw MonetizationException(
-          'Не настроена Edge Function $_fnCreateCheckout. См. supabase/functions/README.md',
-        );
-      }
-      return PromotionCheckoutSession(
-        checkoutUrl: url,
-        orderId: orderId,
-        provider: provider,
-        amountMinor: map['amount_minor'] as int?,
-        currency: map['currency'] as String? ?? 'KZT',
-      );
+      return _parseCheckoutResponse(res.data);
     } on MonetizationException {
       rethrow;
     } on FunctionException catch (e) {
@@ -77,6 +133,28 @@ class ProductMonetizationRepositoryImpl implements ProductMonetizationRepository
     } catch (_) {
       // Нет refresh token или сессия недействительна — ниже проверим currentSession
     }
+  }
+
+  PromotionCheckoutSession _parseCheckoutResponse(dynamic data) {
+    if (data is! Map) {
+      throw MonetizationException('Некорректный ответ сервера оплаты');
+    }
+    final map = Map<String, dynamic>.from(data);
+    final url = map['checkout_url'] as String?;
+    final orderId = map['order_id'] as String?;
+    final provider = map['provider'] as String? ?? 'stripe';
+    if (url == null || url.isEmpty || orderId == null || orderId.isEmpty) {
+      throw MonetizationException(
+        'Не настроена Edge Function $_fnCreateCheckout. См. supabase/functions/README.md',
+      );
+    }
+    return PromotionCheckoutSession(
+      checkoutUrl: url,
+      orderId: orderId,
+      provider: provider,
+      amountMinor: map['amount_minor'] as int?,
+      currency: map['currency'] as String? ?? 'KZT',
+    );
   }
 
   /// Текст ошибки из ответа Edge Function (JSON `{ "error": "..." }` и шлюз Supabase).
