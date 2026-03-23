@@ -6,8 +6,8 @@
 |--------|-------------|-----------|
 | `SUPABASE_ACCESS_TOKEN` | Да | [Supabase Dashboard](https://supabase.com/dashboard/account/tokens) → **Access Tokens** → Generate new token |
 | `SUPABASE_PROJECT_REF` | Да | Только **id** из URL: `https://supabase.com/dashboard/project/`**`abcdefghijklmnopqrst`** — **одна строка**, без пробелов, кавычек и переносов. Не вставляй весь URL (workflow сам вырежет id, если вставишь URL). |
-| `STRIPE_SECRET_KEY` | Нет* | Stripe → Developers → API keys → Secret key (`sk_test_...`) |
-| `STRIPE_WEBHOOK_SECRET` | Нет* | После создания webhook в Stripe → Signing secret (`whsec_...`) |
+| `APPLE_SHARED_SECRET` | Нет* | App Store Connect → In-App Purchases |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Нет* | Google Play Console service account JSON |
 | `PUBLIC_APP_URL` | Нет* | HTTPS после оплаты, например лендинг: `https://abdrasilov25-tech.github.io/tmr_tau/` |
 
 \*Если заданы, workflow шаг **Sync payment secrets** выполнит `supabase secrets set` за тебя. Иначе задай секреты вручную: **Supabase → Edge Functions → Secrets** или локально `supabase secrets set ...`.

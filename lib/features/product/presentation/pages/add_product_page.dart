@@ -591,7 +591,7 @@ class _AddProductPageState extends State<AddProductPage> {
               value: _isTop,
               onChanged: (v) => setState(() => _isTop = v),
             ),
-            // Бесплатные флаги выше не удаляем. Платные сроки (Stripe / банк) — в карточке товара.
+            // Бесплатные флаги выше не удаляем. Платные сроки — в карточке товара.
             Text(
               'Платное продвижение на 24 ч и статистика — кнопка «Продвижение» в объявлении.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
