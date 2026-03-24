@@ -58,6 +58,7 @@ dependencies:
   google_maps_flutter: ^2.16.0
   in_app_purchase: ^3.2.3
   connectivity_plus: ^7.0.0
+  video_trimmer: ^5.0.0
 
 dev_dependencies:
   flutter_test:

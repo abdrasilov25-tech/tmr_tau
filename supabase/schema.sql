@@ -217,6 +217,7 @@ alter table public.posts add column if not exists kind text not null default 'ne
 alter table public.posts add column if not exists comments_count int default 0;
 alter table public.posts add column if not exists dislikes_count int default 0;
 alter table public.posts add column if not exists reposts_count int default 0;
+alter table public.posts add column if not exists image_urls jsonb default '[]'::jsonb;
 
 -- Нормализация старых данных:
 -- всё, что не `news` и не `publication`, считаем публикацией

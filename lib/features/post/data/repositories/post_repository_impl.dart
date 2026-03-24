@@ -76,6 +76,7 @@ class PostRepositoryImpl implements PostRepository {
             userId: p.userId,
             kind: p.kind,
             imageUrl: p.imageUrl,
+            imageUrls: p.imageUrls,
             caption: p.caption,
             videoUrl: p.videoUrl,
             videoDurationSeconds: p.videoDurationSeconds,
@@ -499,6 +500,7 @@ class PostRepositoryImpl implements PostRepository {
             id: p.id,
             userId: p.userId,
             imageUrl: p.imageUrl,
+            imageUrls: p.imageUrls,
             caption: p.caption,
             videoUrl: p.videoUrl,
             videoDurationSeconds: p.videoDurationSeconds,
@@ -557,6 +559,7 @@ class PostRepositoryImpl implements PostRepository {
                 userId: p.userId,
                 kind: p.kind,
                 imageUrl: p.imageUrl,
+                imageUrls: p.imageUrls,
                 caption: p.caption,
                 videoUrl: p.videoUrl,
                 videoDurationSeconds: p.videoDurationSeconds,
@@ -594,6 +597,7 @@ class PostRepositoryImpl implements PostRepository {
   Future<PostEntity> createPost({
     required String userId,
     String imageUrl = '',
+    List<String> imageUrls = const [],
     String caption = '',
     String? videoUrl,
     int videoDurationSeconds = 0,
@@ -602,11 +606,16 @@ class PostRepositoryImpl implements PostRepository {
     final normalizedKind = kind.trim().toLowerCase() == 'news'
         ? 'news'
         : 'publication';
+    final urls = imageUrls.isNotEmpty
+        ? imageUrls
+        : (imageUrl.isNotEmpty ? <String>[imageUrl] : <String>[]);
+    final primaryImage = urls.isNotEmpty ? urls.first : '';
     final data = <String, dynamic>{
       'user_id': userId,
-      'image_url': imageUrl,
+      'image_url': primaryImage,
       'caption': caption,
       'kind': normalizedKind,
+      'image_urls': urls.length > 1 ? urls : <String>[],
     };
     if (videoUrl != null && videoUrl.isNotEmpty) {
       data['video_url'] = videoUrl;
@@ -769,6 +778,7 @@ class PostRepositoryImpl implements PostRepository {
             userId: p.userId,
             kind: p.kind,
             imageUrl: p.imageUrl,
+            imageUrls: p.imageUrls,
             caption: p.caption,
             videoUrl: p.videoUrl,
             videoDurationSeconds: p.videoDurationSeconds,
@@ -938,6 +948,7 @@ class PostRepositoryImpl implements PostRepository {
             id: p.id,
             userId: p.userId,
             imageUrl: p.imageUrl,
+            imageUrls: p.imageUrls,
             caption: p.caption,
             videoUrl: p.videoUrl,
             videoDurationSeconds: p.videoDurationSeconds,
@@ -1033,6 +1044,7 @@ class PostRepositoryImpl implements PostRepository {
               userId: p.userId,
               kind: p.kind,
               imageUrl: p.imageUrl,
+              imageUrls: p.imageUrls,
               caption: p.caption,
               videoUrl: p.videoUrl,
               videoDurationSeconds: p.videoDurationSeconds,
@@ -1088,6 +1100,7 @@ class PostRepositoryImpl implements PostRepository {
         userId: post.userId,
         kind: post.kind,
         imageUrl: post.imageUrl,
+        imageUrls: post.imageUrls,
         caption: post.caption,
         videoUrl: post.videoUrl,
         videoDurationSeconds: post.videoDurationSeconds,

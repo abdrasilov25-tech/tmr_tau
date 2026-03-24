@@ -71,23 +71,9 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     if (current is! NewsSuccess) return;
     final updated = current.posts.map((p) {
       if (p.id != event.postId) return p;
-      return PostEntity(
-        id: p.id,
-        userId: p.userId,
-        imageUrl: p.imageUrl,
-        caption: p.caption,
-        videoUrl: p.videoUrl,
-        videoDurationSeconds: p.videoDurationSeconds,
-        createdAt: p.createdAt,
+      return p.copyWith(
         likesCount: p.isLikedByMe ? p.likesCount - 1 : p.likesCount + 1,
-        dislikesCount: p.dislikesCount,
-        commentsCount: p.commentsCount,
-        repostsCount: p.repostsCount,
-        userName: p.userName,
-        userAvatarUrl: p.userAvatarUrl,
         isLikedByMe: !p.isLikedByMe,
-        isDislikedByMe: p.isDislikedByMe,
-        isRepostedByMe: p.isRepostedByMe,
       );
     }).toList();
     if (!isClosed) emit(current.copyWith(posts: updated));
@@ -106,23 +92,9 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
       final updated = current.posts.map((p) {
         if (p.id != event.postId) return p;
         final isNowReposted = !p.isRepostedByMe;
-        return PostEntity(
-          id: p.id,
-          userId: p.userId,
-          imageUrl: p.imageUrl,
-          caption: p.caption,
-          videoUrl: p.videoUrl,
-          videoDurationSeconds: p.videoDurationSeconds,
-          createdAt: p.createdAt,
-          likesCount: p.likesCount,
-          dislikesCount: p.dislikesCount,
-          commentsCount: p.commentsCount,
+        return p.copyWith(
           repostsCount:
               isNowReposted ? p.repostsCount + 1 : (p.repostsCount > 0 ? p.repostsCount - 1 : 0),
-          userName: p.userName,
-          userAvatarUrl: p.userAvatarUrl,
-          isLikedByMe: p.isLikedByMe,
-          isDislikedByMe: p.isDislikedByMe,
           isRepostedByMe: isNowReposted,
         );
       }).toList();

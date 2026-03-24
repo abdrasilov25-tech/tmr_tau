@@ -43,6 +43,7 @@ abstract class PostRepository {
   Future<PostEntity> createPost({
     required String userId,
     String imageUrl = '',
+    List<String> imageUrls = const [],
     String caption = '',
     String? videoUrl,
     int videoDurationSeconds = 0,
