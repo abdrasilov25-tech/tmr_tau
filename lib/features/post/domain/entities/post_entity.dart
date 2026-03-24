@@ -6,6 +6,7 @@ class PostEntity extends Equatable {
     required this.userId,
     this.kind = 'news',
     this.imageUrl = '',
+    this.imageUrls = const [],
     this.caption = '',
     this.videoUrl,
     this.videoDurationSeconds = 0,
@@ -26,6 +27,8 @@ class PostEntity extends Equatable {
   final String userId;
   final String kind;
   final String imageUrl;
+  /// Несколько фото (новости). Пусто = только [imageUrl].
+  final List<String> imageUrls;
   final String caption;
   final String? videoUrl;
   final int videoDurationSeconds;
@@ -41,11 +44,19 @@ class PostEntity extends Equatable {
   final bool isRepostedByMe;
   final bool isSavedByMe;
 
+  /// Все URL фото для карусели (мульти или одно из legacy `image_url`).
+  List<String> get displayImageUrls {
+    if (imageUrls.isNotEmpty) return List.unmodifiable(imageUrls);
+    if (imageUrl.isNotEmpty) return [imageUrl];
+    return const [];
+  }
+
   PostEntity copyWith({
     String? id,
     String? userId,
     String? kind,
     String? imageUrl,
+    List<String>? imageUrls,
     String? caption,
     String? videoUrl,
     int? videoDurationSeconds,
@@ -68,6 +79,7 @@ class PostEntity extends Equatable {
       userId: userId ?? this.userId,
       kind: kind ?? this.kind,
       imageUrl: clearImage ? '' : (imageUrl ?? this.imageUrl),
+      imageUrls: clearImage ? const [] : (imageUrls ?? this.imageUrls),
       caption: caption ?? this.caption,
       videoUrl: clearVideo ? null : (videoUrl ?? this.videoUrl),
       videoDurationSeconds: clearVideo ? 0 : (videoDurationSeconds ?? this.videoDurationSeconds),
@@ -91,6 +103,7 @@ class PostEntity extends Equatable {
         userId,
         kind,
         imageUrl,
+        imageUrls,
         caption,
         videoUrl,
         videoDurationSeconds,

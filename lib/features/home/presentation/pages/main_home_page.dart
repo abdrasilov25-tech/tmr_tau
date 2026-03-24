@@ -22,6 +22,7 @@ import '../../../notifications/presentation/notification_activity_peek_bus.dart'
 import '../../../notifications/presentation/widgets/notification_activity_peek_bar.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_photo_gallery.dart';
 
 /// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
 /// **Рекомендации** и **Подписки** — отдельные вертикальные ленты (свайп вверх/вниз),
@@ -233,9 +234,10 @@ class _MainHomePageState extends State<MainHomePage> {
 
   /// Картинки поста + аватар (как в [CachedAvatar] на карточке).
   void _precachePostImages(BuildContext context, PostEntity p) {
-    if (p.imageUrl.trim().isNotEmpty) {
+    for (final url in p.displayImageUrls) {
+      if (url.trim().isEmpty) continue;
       unawaited(
-        precacheImage(CachedNetworkImageProvider(p.imageUrl), context),
+        precacheImage(CachedNetworkImageProvider(url), context),
       );
     }
     final av = p.userAvatarUrl;
@@ -1081,8 +1083,9 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
         children: [
           Positioned.fill(
             child: _PostMedia(
-              imageUrl: p.imageUrl,
+              imageUrls: p.displayImageUrls,
               videoUrl: p.videoUrl,
+              fillHeight: mediaHeight,
             ),
           ),
           // Верхняя панель: автор.
@@ -1201,26 +1204,28 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
 
 class _PostMedia extends StatelessWidget {
   const _PostMedia({
-    required this.imageUrl,
+    required this.imageUrls,
     required this.videoUrl,
+    required this.fillHeight,
   });
 
-  final String imageUrl;
+  final List<String> imageUrls;
   final String? videoUrl;
+  final double fillHeight;
 
   @override
   Widget build(BuildContext context) {
-    if (imageUrl.isNotEmpty) {
-      return CachedNetworkImage(
-        imageUrl: imageUrl,
-        fit: BoxFit.cover,
-        placeholder: (context, url) => const Center(child: CircularProgressIndicator()),
-        errorWidget: (context, url, error) => _MediaPlaceholder(type: _MediaPlaceholderType.photo),
-      );
-    }
-
     if (videoUrl != null && videoUrl!.isNotEmpty) {
       return _VideoMedia(videoUrl: videoUrl!);
+    }
+
+    if (imageUrls.isNotEmpty) {
+      return PostNetworkPhotoGallery(
+        urls: imageUrls,
+        height: fillHeight,
+        borderRadius: 0,
+        viewportFraction: imageUrls.length > 1 ? 0.9 : 1,
+      );
     }
 
     return _MediaPlaceholder(type: _MediaPlaceholderType.neutral);

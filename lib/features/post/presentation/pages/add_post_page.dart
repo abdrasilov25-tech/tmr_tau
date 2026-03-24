@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' show min;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -9,8 +10,12 @@ import 'package:video_player/video_player.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/repositories/post_repository.dart';
+import '../widgets/post_photo_gallery.dart';
+import 'video_trim_page.dart';
 
 enum _MediaType { photo, video }
+
+enum _NewsPhotoSource { galleryMulti, camera }
 
 class AddPostPage extends StatefulWidget {
   const AddPostPage({
@@ -27,11 +32,20 @@ class AddPostPage extends StatefulWidget {
 }
 
 class _AddPostPageState extends State<AddPostPage> {
-  File? _image;
+  final List<File> _images = [];
   File? _video;
   final _captionController = TextEditingController();
   bool _loading = false;
-  static const int _maxVideoSeconds = 120; // 2 минуты
+  int _previewPage = 0;
+
+  static const int _maxNewsPhotos = 10;
+
+  /// Публикации — как раньше; новости — до 5 мин, как в Threads.
+  static const int _maxVideoSecondsPublication = 120;
+  static const int _maxVideoSecondsNews = 300;
+
+  int get _maxVideoSeconds =>
+      _isPublication ? _maxVideoSecondsPublication : _maxVideoSecondsNews;
 
   bool get _isPublication => widget.kind == 'publication';
   String get _pageTitle => _isPublication ? 'Новая публикация' : 'Новая новость';
@@ -80,13 +94,19 @@ class _AddPostPageState extends State<AddPostPage> {
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined, size: 28),
                 title: const Text('Фото'),
-                subtitle: const Text('Галерея или камера'),
+                subtitle: Text(
+                  _isPublication
+                      ? 'Галерея или камера'
+                      : 'До $_maxNewsPhotos фото: галерея (несколько) или камера',
+                ),
                 onTap: () => Navigator.pop(context, _MediaType.photo),
               ),
               ListTile(
                 leading: const Icon(Icons.videocam_outlined, size: 28),
                 title: const Text('Видео'),
-                subtitle: const Text('До 2 минут'),
+                subtitle: Text(
+                  _isPublication ? 'До 2 минут' : 'До 5 минут (как в Threads)',
+                ),
                 onTap: () => Navigator.pop(context, _MediaType.video),
               ),
             ],
@@ -96,13 +116,17 @@ class _AddPostPageState extends State<AddPostPage> {
     );
     if (choice == null || !mounted) return;
     if (choice == _MediaType.photo) {
-      await _pickImage();
+      if (_isPublication) {
+        await _pickPublicationSinglePhoto();
+      } else {
+        await _pickNewsPhotos();
+      }
     } else {
       await _pickVideo();
     }
   }
 
-  Future<void> _pickImage() async {
+  Future<void> _pickPublicationSinglePhoto() async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
       backgroundColor: Colors.white,
@@ -134,12 +158,105 @@ class _AddPostPageState extends State<AddPostPage> {
     );
     if (source == null || !mounted) return;
     final picker = ImagePicker();
-    final x = await picker.pickImage(source: source);
+    final x = await picker.pickImage(
+      source: source,
+      imageQuality: 100,
+    );
     if (x != null && mounted) {
       setState(() {
-        _image = File(x.path);
+        _images
+          ..clear()
+          ..add(File(x.path));
         _video = null;
+        _previewPage = 0;
       });
+    }
+  }
+
+  Future<void> _pickNewsPhotos() async {
+    final action = await showModalBottomSheet<_NewsPhotoSource>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Фото к новости',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.black87),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined, size: 28),
+                title: const Text('Несколько из галереи'),
+                subtitle: Text('До $_maxNewsPhotos шт. · можно добавлять частями'),
+                onTap: () => Navigator.pop(context, _NewsPhotoSource.galleryMulti),
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined, size: 28),
+                title: const Text('Камера'),
+                subtitle: const Text('Одно фото, можно повторить'),
+                onTap: () => Navigator.pop(context, _NewsPhotoSource.camera),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    final picker = ImagePicker();
+    if (action == _NewsPhotoSource.galleryMulti) {
+      final picked = await picker.pickMultiImage(imageQuality: 100);
+      if (!mounted || picked.isEmpty) return;
+      final room = _maxNewsPhotos - _images.length;
+      if (room <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Уже максимум $_maxNewsPhotos фото'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+      final addCount = picked.length > room ? room : picked.length;
+      if (picked.length > room && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Добавлено $addCount из ${picked.length} (лимит $_maxNewsPhotos)'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      setState(() {
+        _video = null;
+        for (var i = 0; i < addCount; i++) {
+          _images.add(File(picked[i].path));
+        }
+        _previewPage = _images.length - 1;
+      });
+    } else {
+      final x = await picker.pickImage(source: ImageSource.camera, imageQuality: 100);
+      if (x != null && mounted) {
+        if (_images.length >= _maxNewsPhotos) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Уже $_maxNewsPhotos фото — удалите лишние'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
+        setState(() {
+          _video = null;
+          _images.add(File(x.path));
+          _previewPage = _images.length - 1;
+        });
+      }
     }
   }
 
@@ -197,32 +314,76 @@ class _AddPostPageState extends State<AddPostPage> {
     if (!mounted) return;
     if (durationSeconds > _maxVideoSeconds) {
       setState(() => _loading = false);
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Видео слишком длинное'),
-          content: Text(
-            'Ваше видео — ${durationSeconds ~/ 60} мин ${durationSeconds % 60} сек. '
-            'Допускается не более 2 минут.\n\n'
-            'Рекомендуем обрезать видео в приложении «Фото» (iPhone) или «Галерея» (Android), '
-            'затем снова выберите его здесь.',
-            style: const TextStyle(height: 1.4),
+      final trimmed = await Navigator.of(context).push<File?>(
+        MaterialPageRoute<File?>(
+          fullscreenDialog: true,
+          builder: (context) => VideoTrimPage(
+            sourceFile: file,
+            maxDurationSeconds: _maxVideoSeconds,
+            contextLabel: _isPublication ? 'публикации' : 'новости',
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Понятно'),
-            ),
-          ],
         ),
       );
+      if (!mounted || trimmed == null) return;
+      setState(() {
+        _video = trimmed;
+        _images.clear();
+        _previewPage = 0;
+      });
       return;
     }
     setState(() {
       _video = file;
-      _image = null;
+      _images.clear();
+      _previewPage = 0;
       _loading = false;
     });
+  }
+
+  /// Длина ролика в секундах (не меньше 1), или `null` при ошибке.
+  Future<int?> _probeVideoDurationSeconds(File file) async {
+    try {
+      final controller = VideoPlayerController.file(file);
+      await controller.initialize();
+      final sec = (controller.value.duration.inMilliseconds / 1000)
+          .ceil()
+          .clamp(1, 1 << 20);
+      await controller.dispose();
+      return sec;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Добровольная обрезка уже выбранного видео (в пределах лимита и длины файла).
+  Future<void> _trimCurrentVideo() async {
+    final file = _video;
+    if (file == null || !mounted) return;
+    setState(() => _loading = true);
+    final durationSec = await _probeVideoDurationSeconds(file);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    if (durationSec == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть видео для обрезки')),
+        );
+      }
+      return;
+    }
+    final maxDurationSeconds = min(_maxVideoSeconds, durationSec);
+    final trimmed = await Navigator.of(context).push<File?>(
+      MaterialPageRoute<File?>(
+        fullscreenDialog: true,
+        builder: (context) => VideoTrimPage(
+          sourceFile: file,
+          maxDurationSeconds: maxDurationSeconds,
+          contextLabel: _isPublication ? 'публикации' : 'новости',
+        ),
+      ),
+    );
+    if (!mounted || trimmed == null) return;
+    setState(() => _video = trimmed);
   }
 
   Future<String> _uploadImage(File file) async {
@@ -257,7 +418,7 @@ class _AddPostPageState extends State<AddPostPage> {
       );
       return;
     }
-    if (_image == null && _video == null) {
+    if (_images.isEmpty && _video == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Добавьте фото или видео')),
       );
@@ -271,11 +432,16 @@ class _AddPostPageState extends State<AddPostPage> {
     setState(() => _loading = true);
     try {
       String imageUrl = '';
+      List<String> imageUrls = const [];
       String? videoUrl;
       int videoDurationSeconds = 0;
 
-      if (_image != null) {
-        imageUrl = await _uploadImage(_image!);
+      if (_images.isNotEmpty) {
+        imageUrls = [];
+        for (final f in _images) {
+          imageUrls.add(await _uploadImage(f));
+        }
+        imageUrl = imageUrls.first;
       } else if (_video != null) {
         videoUrl = await _uploadVideo(_video!);
         final controller = VideoPlayerController.file(_video!);
@@ -287,6 +453,7 @@ class _AddPostPageState extends State<AddPostPage> {
       final createdPost = await postRepository.createPost(
         userId: userId,
         imageUrl: imageUrl,
+        imageUrls: imageUrls,
         caption: caption,
         videoUrl: videoUrl,
         videoDurationSeconds: videoDurationSeconds,
@@ -324,7 +491,7 @@ class _AddPostPageState extends State<AddPostPage> {
     }
   }
 
-  bool get _hasMedia => _image != null || _video != null;
+  bool get _hasMedia => _images.isNotEmpty || _video != null;
 
   @override
   Widget build(BuildContext context) {
@@ -400,10 +567,36 @@ class _AddPostPageState extends State<AddPostPage> {
               onTap: _loading ? null : _showPickMediaSheet,
               child: _MediaPickerCard(
                 loading: _loading,
-                image: _image,
+                images: List<File>.unmodifiable(_images),
                 video: _video,
+                previewPage: _previewPage,
+                onPreviewPageChanged: (i) => setState(() => _previewPage = i),
+                onRemoveImageAt: (i) {
+                  setState(() {
+                    _images.removeAt(i);
+                    _previewPage = _images.isEmpty
+                        ? 0
+                        : _previewPage.clamp(0, _images.length - 1);
+                  });
+                },
+                onImageTapZoom: (i) => openLocalPhotoZoom(context, _images, i),
+                maxVideoBadge: 'Видео до ${_maxVideoSeconds ~/ 60} мин',
+                emptyPrimaryText: _isPublication
+                    ? 'Фото (макс. качество) или видео до ${_maxVideoSeconds ~/ 60} мин'
+                    : 'До $_maxNewsPhotos фото или видео до ${_maxVideoSeconds ~/ 60} мин',
               ),
             ),
+            if (_video != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: _loading ? null : _trimCurrentVideo,
+                  icon: const Icon(Icons.content_cut_outlined, size: 20),
+                  label: const Text('Обрезать видео'),
+                ),
+              ),
+            ],
             const SizedBox(height: 18),
             _CaptionField(
               controller: _captionController,
@@ -417,21 +610,85 @@ class _AddPostPageState extends State<AddPostPage> {
 }
 
 /// Карточка выбора медиа — светлый стиль для новостей и публикаций.
-class _MediaPickerCard extends StatelessWidget {
+class _MediaPickerCard extends StatefulWidget {
   const _MediaPickerCard({
     required this.loading,
-    required this.image,
+    required this.images,
     required this.video,
+    required this.previewPage,
+    required this.onPreviewPageChanged,
+    required this.onRemoveImageAt,
+    required this.onImageTapZoom,
+    required this.maxVideoBadge,
+    required this.emptyPrimaryText,
   });
 
   final bool loading;
-  final File? image;
+  final List<File> images;
   final File? video;
+  final int previewPage;
+  final ValueChanged<int> onPreviewPageChanged;
+  final ValueChanged<int> onRemoveImageAt;
+  final ValueChanged<int> onImageTapZoom;
+  final String maxVideoBadge;
+  final String emptyPrimaryText;
+
+  @override
+  State<_MediaPickerCard> createState() => _MediaPickerCardState();
+}
+
+class _MediaPickerCardState extends State<_MediaPickerCard> {
+  PageController? _pageController;
+
+  void _recreateController() {
+    _pageController?.dispose();
+    _pageController = null;
+    if (widget.images.isEmpty) return;
+    _pageController = PageController(
+      initialPage: widget.previewPage.clamp(0, widget.images.length - 1),
+    );
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.images.isNotEmpty) {
+      _pageController = PageController(
+        initialPage: widget.previewPage.clamp(0, widget.images.length - 1),
+      );
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _MediaPickerCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.images.isEmpty) {
+      _pageController?.dispose();
+      _pageController = null;
+      return;
+    }
+    if (_pageController == null) {
+      _recreateController();
+      return;
+    }
+    if (oldWidget.images.length != widget.images.length) {
+      _recreateController();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pageController?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs = theme.colorScheme;
+    final images = widget.images;
+    final previewPage = widget.previewPage;
+    final pc = _pageController;
 
     return Container(
       height: 340,
@@ -449,19 +706,75 @@ class _MediaPickerCard extends StatelessWidget {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(21),
-        child: image != null
-            ? Image.file(
-                image!,
-                width: double.infinity,
-                height: double.infinity,
-                fit: BoxFit.cover,
+        child: images.isNotEmpty && pc != null
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  GestureDetector(
+                    onTap: () => widget.onImageTapZoom(
+                      previewPage.clamp(0, images.length - 1),
+                    ),
+                    child: PageView.builder(
+                      controller: pc,
+                      itemCount: images.length,
+                      onPageChanged: widget.onPreviewPageChanged,
+                      itemBuilder: (context, index) {
+                        return Image.file(
+                          images[index],
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                        );
+                      },
+                    ),
+                  ),
+                  if (images.length > 1)
+                    Positioned(
+                      bottom: 10,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(images.length, (i) {
+                          final active = i == previewPage;
+                          return Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
+                            width: active ? 16 : 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: active ? cs.primary : Colors.black26,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          );
+                        }),
+                      ),
+                    ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Material(
+                      color: Colors.black54,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () => widget.onRemoveImageAt(
+                          previewPage.clamp(0, images.length - 1),
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.all(6),
+                          child: Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               )
-            : video != null
+            : widget.video != null
                 ? Stack(
                     alignment: Alignment.center,
                     fit: StackFit.expand,
                     children: [
-                      _VideoPreview(file: video!),
+                      _VideoPreview(file: widget.video!),
                       Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 14,
@@ -477,18 +790,18 @@ class _MediaPickerCard extends StatelessWidget {
                             ),
                           ],
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.videocam_rounded,
                               color: Colors.white,
                               size: 18,
                             ),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             Text(
-                              'Видео до 2 мин',
-                              style: TextStyle(
+                              widget.maxVideoBadge,
+                              style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600,
@@ -500,9 +813,10 @@ class _MediaPickerCard extends StatelessWidget {
                     ],
                   )
                 : _LightEmptyMediaPlaceholder(
-                    loading: loading,
+                    loading: widget.loading,
                     colorScheme: cs,
                     theme: theme,
+                    primaryText: widget.emptyPrimaryText,
                   ),
       ),
     );
@@ -514,11 +828,13 @@ class _LightEmptyMediaPlaceholder extends StatelessWidget {
     required this.loading,
     required this.colorScheme,
     required this.theme,
+    required this.primaryText,
   });
 
   final bool loading;
   final ColorScheme colorScheme;
   final ThemeData theme;
+  final String primaryText;
 
   @override
   Widget build(BuildContext context) {
@@ -561,7 +877,7 @@ class _LightEmptyMediaPlaceholder extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Text(
-              'Фото или видео до 2 минут',
+              primaryText,
               textAlign: TextAlign.center,
               style: theme.textTheme.titleMedium?.copyWith(
                 color: const Color(0xFF0F172A),

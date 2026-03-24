@@ -6,6 +6,7 @@ class PostModel extends PostEntity {
     required super.userId,
     super.kind = 'news',
     super.imageUrl = '',
+    super.imageUrls = const [],
     super.caption = '',
     super.videoUrl,
     super.videoDurationSeconds = 0,
@@ -27,11 +28,20 @@ class PostModel extends PostEntity {
     final safeKind = rawKind == 'news'
         ? 'news'
         : 'publication';
+    List<String> urls = const [];
+    final rawUrls = json['image_urls'];
+    if (rawUrls is List) {
+      urls = rawUrls
+          .map((e) => e == null ? '' : e.toString().trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    }
     return PostModel(
       id: json['id'] as String,
       userId: json['user_id'] as String,
       kind: safeKind,
       imageUrl: (json['image_url'] as String?) ?? '',
+      imageUrls: urls,
       caption: (json['caption'] as String?) ?? '',
       videoUrl: json['video_url'] as String?,
       videoDurationSeconds: (json['video_duration_seconds'] as int?) ?? 0,

@@ -26,7 +26,12 @@ class _EditPostPageState extends State<EditPostPage> {
   File? _newImage;
   File? _newVideo;
   bool _loading = false;
-  static const int _maxVideoSeconds = 120;
+
+  static const int _maxVideoSecondsPublication = 120;
+  static const int _maxVideoSecondsNews = 300;
+
+  int get _maxVideoSeconds =>
+      widget.post.kind == 'publication' ? _maxVideoSecondsPublication : _maxVideoSecondsNews;
 
   @override
   void initState() {
@@ -69,7 +74,11 @@ class _EditPostPageState extends State<EditPostPage> {
               ListTile(
                 leading: const Icon(Icons.videocam_outlined, size: 28),
                 title: const Text('Видео'),
-                subtitle: const Text('До 2 минут'),
+                subtitle: Text(
+                  widget.post.kind == 'publication'
+                      ? 'До 2 минут'
+                      : 'До 5 минут (как в Threads)',
+                ),
                 onTap: () => Navigator.pop(context, _MediaType.video),
               ),
             ],
@@ -117,7 +126,10 @@ class _EditPostPageState extends State<EditPostPage> {
     );
     if (source == null || !mounted) return;
     final picker = ImagePicker();
-    final x = await picker.pickImage(source: source);
+    final x = await picker.pickImage(
+      source: source,
+      imageQuality: 100,
+    );
     if (x != null && mounted) {
       setState(() {
         _newImage = File(x.path);
@@ -186,7 +198,7 @@ class _EditPostPageState extends State<EditPostPage> {
           title: const Text('Видео слишком длинное'),
           content: Text(
             'Ваше видео — ${durationSeconds ~/ 60} мин ${durationSeconds % 60} сек. '
-            'Для новостей допускается не более 2 минут.',
+            'Допустимо не более ${_maxVideoSeconds ~/ 60} минут.',
             style: const TextStyle(height: 1.4),
           ),
           actions: [

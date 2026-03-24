@@ -9,6 +9,7 @@ import '../../domain/entities/post_comment_entity.dart';
 import '../../domain/entities/post_entity.dart';
 import '../../domain/exceptions/post_comment_exceptions.dart';
 import '../../domain/repositories/post_repository.dart';
+import '../widgets/post_photo_gallery.dart';
 
 class PostDetailPage extends StatefulWidget {
   const PostDetailPage({
@@ -300,20 +301,13 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       borderRadius: BorderRadius.circular(12),
                       child: _PostVideoPlayer(videoUrl: _post.videoUrl!),
                     ),
-                  ] else if (_post.imageUrl.isNotEmpty) ...[
+                  ] else if (_post.displayImageUrls.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        _post.imageUrl,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          height: 200,
-                          color: Colors.grey.shade200,
-                          child: const Icon(Icons.broken_image_outlined, size: 48),
-                        ),
-                      ),
+                    PostNetworkPhotoGallery(
+                      urls: _post.displayImageUrls,
+                      height: _post.displayImageUrls.length > 1 ? 340 : 320,
+                      borderRadius: 12,
+                      viewportFraction: _post.displayImageUrls.length > 1 ? 0.94 : 1,
                     ),
                   ],
                   const SizedBox(height: 24),
