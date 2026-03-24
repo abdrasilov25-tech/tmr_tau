@@ -22,7 +22,7 @@ class NotificationsBloc extends Bloc<NotificationsEvent, NotificationsState> {
     emit(NotificationsLoading());
     try {
       final list =
-          await _repository.getNotifications(_userId, limit: 50, offset: 0);
+          await _repository.getNotifications(_userId, limit: 100, offset: 0);
       if (!isClosed) emit(NotificationsLoaded(list));
     } catch (e) {
       if (!isClosed) emit(NotificationsFailure(e.toString()));
@@ -43,9 +43,16 @@ class NotificationsBloc extends Bloc<NotificationsEvent, NotificationsState> {
                   type: n.type,
                   createdAt: n.createdAt,
                   actorId: n.actorId,
+                  actorName: n.actorName,
+                  actorAvatarUrl: n.actorAvatarUrl,
                   title: n.title,
                   body: n.body,
                   productId: n.productId,
+                  postId: n.postId,
+                  subjectImageUrl: n.subjectImageUrl,
+                  subjectVideoUrl: n.subjectVideoUrl,
+                  relatedPostKind: n.relatedPostKind,
+                  commentId: n.commentId,
                   readAt: DateTime.now(),
                 )
               : n)

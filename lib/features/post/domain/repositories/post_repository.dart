@@ -88,4 +88,6 @@ abstract class PostRepository {
   });
   Future<void> deletePost(String postId, String userId);
   Future<void> deletePostComment(String commentId, String userId);
+  Future<void> togglePostCommentLike(String commentId, String userId);
+  Future<bool> isPostCommentLikedOwn(String commentId, String userId);
 }

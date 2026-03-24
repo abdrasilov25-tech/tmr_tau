@@ -345,6 +345,13 @@ class ProductRepositoryImpl implements ProductRepository {
         'product_id': productId,
         'user_id': userId,
       });
+      await _insertProductNotification(
+        productId: productId,
+        actorId: userId,
+        type: 'product_like',
+        title: 'Лайк объявления',
+        body: 'Лайкнули ваше объявление',
+      );
     }
   }
 
@@ -367,6 +374,13 @@ class ProductRepositoryImpl implements ProductRepository {
         'product_id': productId,
         'user_id': userId,
       });
+      await _insertProductNotification(
+        productId: productId,
+        actorId: userId,
+        type: 'product_repost',
+        title: 'Репост объявления',
+        body: 'Поделились вашим объявлением',
+      );
     }
   }
 
@@ -408,6 +422,13 @@ class ProductRepositoryImpl implements ProductRepository {
         'product_id': productId,
         'user_id': userId,
       });
+      await _insertProductNotification(
+        productId: productId,
+        actorId: userId,
+        type: 'product_favorite',
+        title: 'Избранное',
+        body: 'Добавили объявление в избранное',
+      );
     }
   }
 
@@ -511,6 +532,35 @@ class ProductRepositoryImpl implements ProductRepository {
           ),
         )
         .toList();
+  }
+
+  Future<String?> _productSellerId(String productId) async {
+    final row = await _client
+        .from(SupabaseConstants.productsTable)
+        .select('seller_id')
+        .eq('id', productId)
+        .maybeSingle();
+    if (row == null) return null;
+    return row['seller_id'] as String?;
+  }
+
+  Future<void> _insertProductNotification({
+    required String productId,
+    required String actorId,
+    required String type,
+    required String title,
+    required String body,
+  }) async {
+    final sellerId = await _productSellerId(productId);
+    if (sellerId == null || sellerId == actorId) return;
+    await _client.from(SupabaseConstants.notificationsTable).insert({
+      'user_id': sellerId,
+      'actor_id': actorId,
+      'type': type,
+      'title': title,
+      'body': body,
+      'product_id': productId,
+    });
   }
 
   double _kmPerLongitudeDegree(double latitude) {

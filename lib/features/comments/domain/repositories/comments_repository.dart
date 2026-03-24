@@ -8,4 +8,6 @@ abstract class CommentsRepository {
     required String text,
   });
   Future<void> deleteComment(String commentId, String userId);
+  Future<void> toggleProductCommentLike(String commentId, String userId);
+  Future<bool> isProductCommentLikedOwn(String commentId, String userId);
 }

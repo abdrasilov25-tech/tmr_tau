@@ -7,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:video_player/video_player.dart';
 
+import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/constants/supabase_constants.dart';
@@ -17,6 +18,8 @@ import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../notifications/domain/repositories/notifications_repository.dart';
+import '../../../notifications/presentation/notification_activity_peek_bus.dart';
+import '../../../notifications/presentation/widgets/notification_activity_peek_bar.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 
@@ -850,6 +853,7 @@ class _MainHomePageState extends State<MainHomePage> {
         title: const Text('tmr_tau', style: TextStyle(fontWeight: FontWeight.w800)),
         centerTitle: true,
         actions: [
+          const NotificationActivityPeekBar(),
           _FeedNotificationsButton(),
           const SizedBox(width: 6),
         ],
@@ -955,11 +959,24 @@ class _FeedNotificationsButton extends StatefulWidget {
 
 class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
   int _unread = 0;
+  NotificationActivityPeekBus? _peekBus;
 
   @override
   void initState() {
     super.initState();
+    _peekBus = context.read<NotificationActivityPeekBus>();
+    _peekBus!.unreadInvalidateTick.addListener(_onUnreadInvalidateTick);
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadUnread());
+  }
+
+  @override
+  void dispose() {
+    _peekBus?.unreadInvalidateTick.removeListener(_onUnreadInvalidateTick);
+    super.dispose();
+  }
+
+  void _onUnreadInvalidateTick() {
+    _loadUnread();
   }
 
   Future<void> _loadUnread() async {
@@ -998,14 +1015,25 @@ class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
           const Icon(Icons.favorite_border_rounded),
           if (_unread > 0)
             Positioned(
-              right: -1,
-              top: -1,
+              right: -6,
+              top: -4,
               child: Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: Colors.red,
-                  shape: BoxShape.circle,
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 16),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade600,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.white, width: 1.5),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  formatNotificationBadgeCount(_unread),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    height: 1,
+                  ),
                 ),
               ),
             ),

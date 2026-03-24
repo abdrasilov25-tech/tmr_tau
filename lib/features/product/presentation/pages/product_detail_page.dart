@@ -25,11 +25,14 @@ class ProductDetailPage extends StatefulWidget {
     required this.product,
     required this.commentsRepository,
     this.productRepository,
+    this.mentionPrefix,
   });
 
   final ProductEntity product;
   final CommentsRepository commentsRepository;
   final ProductRepository? productRepository;
+  /// Подставить в поле комментария (например `@Имя ` из уведомления).
+  final String? mentionPrefix;
 
   @override
   State<ProductDetailPage> createState() => _ProductDetailPageState();
@@ -52,6 +55,16 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     _loadIsInFavorites();
     // Счётчик просмотров — один запрос после первого кадра (не в build).
     WidgetsBinding.instance.addPostFrameCallback((_) => _bumpViewCount());
+    final mention = widget.mentionPrefix?.trim();
+    if (mention != null && mention.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final at = mention.startsWith('@') ? mention : '@$mention';
+        _commentController.text = '$at ';
+        _commentController.selection =
+            TextSelection.collapsed(offset: _commentController.text.length);
+      });
+    }
   }
 
   /// RPC `increment_product_view` + обновление модели (число просмотров для статистики).

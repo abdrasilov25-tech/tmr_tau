@@ -333,8 +333,28 @@ create table if not exists public.notifications (
   title text,
   body text,
   product_id uuid references public.products(id) on delete set null,
+  post_id uuid references public.posts(id) on delete set null,
+  comment_id uuid,
   read_at timestamptz,
   created_at timestamptz default now()
+);
+-- Уже созданная таблица без post_id / comment_id
+alter table public.notifications
+  add column if not exists post_id uuid references public.posts(id) on delete set null;
+alter table public.notifications add column if not exists comment_id uuid;
+
+-- ============== COMMENT LIKES ==============
+create table if not exists public.post_comment_likes (
+  comment_id uuid not null references public.post_comments(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (comment_id, user_id)
+);
+create table if not exists public.product_comment_likes (
+  comment_id uuid not null references public.product_comments(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  created_at timestamptz default now(),
+  primary key (comment_id, user_id)
 );
 
 -- ============== FAVORITES ==============
@@ -373,6 +393,8 @@ alter table public.reposts enable row level security;
 alter table public.post_saves enable row level security;
 alter table public.favorites enable row level security;
 alter table public.orders enable row level security;
+alter table public.post_comment_likes enable row level security;
+alter table public.product_comment_likes enable row level security;
 
 -- Удаляем политики, если уже есть (чтобы можно было перезапускать скрипт)
 drop policy if exists "Posts select" on public.posts;
@@ -402,6 +424,16 @@ create policy "Post likes all" on public.post_likes for all using (auth.uid() = 
 create policy "Post comments select" on public.post_comments for select using (true);
 create policy "Post comments insert" on public.post_comments for insert with check (auth.uid() = user_id);
 create policy "Post comments delete own" on public.post_comments for delete using (auth.uid() = user_id);
+
+drop policy if exists "Post comment likes select" on public.post_comment_likes;
+drop policy if exists "Post comment likes all" on public.post_comment_likes;
+create policy "Post comment likes select" on public.post_comment_likes for select using (true);
+create policy "Post comment likes all" on public.post_comment_likes for all using (auth.uid() = user_id);
+
+drop policy if exists "Product comment likes select" on public.product_comment_likes;
+drop policy if exists "Product comment likes all" on public.product_comment_likes;
+create policy "Product comment likes select" on public.product_comment_likes for select using (true);
+create policy "Product comment likes all" on public.product_comment_likes for all using (auth.uid() = user_id);
 
 create policy "Post dislikes select" on public.post_dislikes for select using (true);
 create policy "Post dislikes all" on public.post_dislikes for all using (auth.uid() = user_id);
@@ -483,6 +515,10 @@ drop policy if exists "Notifications select" on public.notifications;
 drop policy if exists "Notifications update own" on public.notifications;
 create policy "Notifications select" on public.notifications for select using (auth.uid() = user_id);
 create policy "Notifications update own" on public.notifications for update using (auth.uid() = user_id);
+-- Вставка из клиента: автор действия (лайк/коммент/репост) записывает уведомление получателю.
+drop policy if exists "Notifications insert as actor" on public.notifications;
+create policy "Notifications insert as actor" on public.notifications
+  for insert with check (auth.uid() = actor_id);
 
 drop policy if exists "Favorites all" on public.favorites;
 drop policy if exists "Orders all" on public.orders;
