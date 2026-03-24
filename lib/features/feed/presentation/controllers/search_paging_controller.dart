@@ -3,6 +3,8 @@ import 'package:flutter/foundation.dart';
 import '../../../../core/models/search_filters.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/product_repository.dart';
+import '../../../settings/domain/load_all_blocked_user_ids.dart';
+import '../../../settings/domain/repositories/settings_repository.dart';
 
 sealed class SearchResultItem {
   DateTime get createdAt;
@@ -22,12 +24,16 @@ class SearchPagingController extends ChangeNotifier {
   SearchPagingController({
     required ProductRepository productRepository,
     this.currentUserId,
+    this.settingsRepository,
     this.pageSize = 10,
   }) : _productRepository = productRepository;
 
   final ProductRepository _productRepository;
   final String? currentUserId;
+  final SettingsRepository? settingsRepository;
   final int pageSize;
+
+  Set<String>? _cachedExcludeSellerIds;
 
   final List<ProductEntity> _products = [];
   final List<SearchResultItem> _items = [];
@@ -57,6 +63,7 @@ class SearchPagingController extends ChangeNotifier {
     if (filters != null) {
       _filters = filters;
     }
+    _cachedExcludeSellerIds = null;
     _products.clear();
     _items.clear();
     _productOffset = 0;
@@ -90,6 +97,7 @@ class SearchPagingController extends ChangeNotifier {
     notifyListeners();
     try {
       final shouldFetchProducts = reset || _hasMoreProducts;
+      final exclude = await _resolveExcludeSellerIds();
 
       final fetchedProducts = shouldFetchProducts
           ? await _productRepository.searchProductsWithOffset(
@@ -98,6 +106,7 @@ class SearchPagingController extends ChangeNotifier {
               offset: reset ? 0 : _productOffset,
               currentUserId: currentUserId,
               filters: _filters,
+              excludeSellerIds: exclude,
             )
           : const <ProductEntity>[];
 
@@ -124,5 +133,25 @@ class SearchPagingController extends ChangeNotifier {
         notifyListeners();
       }
     }
+  }
+
+  Future<Set<String>> _resolveExcludeSellerIds() async {
+    if (_cachedExcludeSellerIds != null) return _cachedExcludeSellerIds!;
+
+    final uid = currentUserId;
+    final settings = settingsRepository;
+    if (uid == null || uid.isEmpty || settings == null) {
+      _cachedExcludeSellerIds = {};
+      return _cachedExcludeSellerIds!;
+    }
+    try {
+      _cachedExcludeSellerIds = await loadAllBlockedUserIds(
+        repository: settings,
+        blockerId: uid,
+      );
+    } catch (_) {
+      _cachedExcludeSellerIds = {};
+    }
+    return _cachedExcludeSellerIds!;
   }
 }

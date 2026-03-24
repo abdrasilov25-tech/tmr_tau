@@ -56,3 +56,6 @@ AuthKey_*.p8
 
 # Firebase iOS local config (avoid committing project keys)
 ios/Runner/GoogleService-Info.plist
+
+# Supabase CLI cache
+supabase/.temp/

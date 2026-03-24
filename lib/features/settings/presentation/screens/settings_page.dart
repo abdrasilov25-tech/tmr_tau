@@ -80,6 +80,12 @@ class SettingsPage extends StatelessWidget {
                 onTap: () =>
                     context.push('/profile/settings/connected-accounts'),
               ),
+              SettingsItemTile(
+                title: 'Удалить аккаунт',
+                icon: Icons.person_off_outlined,
+                subtitle: 'Запрос через поддержку',
+                onTap: () => context.push('/profile/settings/delete-account'),
+              ),
             ],
           ),
           SettingsExpandableSection(

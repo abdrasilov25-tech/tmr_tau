@@ -20,9 +20,21 @@ void main() {
     name: 'Test User',
   );
 
+  setUpAll(() {
+    registerFallbackValue(
+      const SavedAccount(id: 'fallback', email: 'fallback@local'),
+    );
+  });
+
   setUp(() {
     mockAuthRepository = MockAuthRepository();
     mockMultiAccountStorage = MockMultiAccountStorage();
+    when(() => mockMultiAccountStorage.setLastActiveAccountId(any()))
+        .thenAnswer((_) async {});
+    when(() => mockMultiAccountStorage.addAccount(any()))
+        .thenAnswer((_) async {});
+    when(() => mockMultiAccountStorage.removeAccount(any()))
+        .thenAnswer((_) async {});
   });
 
   group('AuthBloc', () {
