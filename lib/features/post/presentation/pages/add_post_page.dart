@@ -328,43 +328,51 @@ class _AddPostPageState extends State<AddPostPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
+        shadowColor: Colors.black.withValues(alpha: 0.06),
         leading: IconButton(
-          icon: const Icon(Icons.close),
+          icon: Icon(Icons.close_rounded, color: cs.onSurface),
           onPressed: () => context.pop(),
         ),
         title: Text(
           _pageTitle,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 18,
-            color: Colors.white,
+            color: cs.onSurface,
           ),
         ),
         centerTitle: true,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: ElevatedButton(
+            child: FilledButton(
               onPressed: _loading || !_hasMedia ? null : _publish,
-              style: ElevatedButton.styleFrom(
+              style: FilledButton.styleFrom(
                 elevation: 0,
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                backgroundColor: cs.primary,
+                foregroundColor: cs.onPrimary,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
               child: _loading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: cs.onPrimary,
+                      ),
                     )
                   : const Text(
                       'Опубликовать',
@@ -374,14 +382,14 @@ class _AddPostPageState extends State<AddPostPage> {
           ),
         ],
       ),
-      body: Container(
+      body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF06121D),
-              Color(0xFF000000),
+              Color(0xFFFFFFFF),
+              Color(0xFFE8EEF4),
             ],
           ),
         ),
@@ -390,109 +398,10 @@ class _AddPostPageState extends State<AddPostPage> {
           children: [
             GestureDetector(
               onTap: _loading ? null : _showPickMediaSheet,
-              child: Container(
-                height: 340,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
-                  gradient: LinearGradient(
-                    colors: _hasMedia
-                        ? const [
-                            Color(0xFF00E5FF),
-                            Color(0xFFE91E8C),
-                          ]
-                        : const [
-                            Color(0xFFFFFFFF),
-                            Color(0xFFBDBDBD),
-                          ].map((c) => c.withValues(alpha: 0.08)).toList(),
-                  ),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(2),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      color: Colors.black.withValues(alpha: 0.55),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.12),
-                      ),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
-                      child: _image != null
-                          ? Image.file(
-                              _image!,
-                              width: double.infinity,
-                              height: double.infinity,
-                              fit: BoxFit.cover,
-                            )
-                          : _video != null
-                              ? Stack(
-                                  alignment: Alignment.center,
-                                  fit: StackFit.expand,
-                                  children: [
-                                    _VideoPreview(file: _video!),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 12, vertical: 7),
-                                      decoration: BoxDecoration(
-                                        color: Colors.black54,
-                                        borderRadius: BorderRadius.circular(999),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.videocam,
-                                            color: Colors.white,
-                                            size: 18,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          const Text(
-                                            'Видео до 2 мин',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Icon(
-                                      Icons.add_photo_alternate_outlined,
-                                      size: 66,
-                                      color: Colors.white.withValues(alpha: 0.5),
-                                    ),
-                                    const SizedBox(height: 14),
-                                    Text(
-                                      'Фото или видео до 2 мин',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(alpha: 0.7),
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      _loading
-                                          ? 'Подождите...'
-                                          : 'Нажмите, чтобы выбрать',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(alpha: 0.45),
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                    ),
-                  ),
-                ),
+              child: _MediaPickerCard(
+                loading: _loading,
+                image: _image,
+                video: _video,
               ),
             ),
             const SizedBox(height: 18),
@@ -502,6 +411,181 @@ class _AddPostPageState extends State<AddPostPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Карточка выбора медиа — светлый стиль для новостей и публикаций.
+class _MediaPickerCard extends StatelessWidget {
+  const _MediaPickerCard({
+    required this.loading,
+    required this.image,
+    required this.video,
+  });
+
+  final bool loading;
+  final File? image;
+  final File? video;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
+    return Container(
+      height: 340,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(22),
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 28,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(21),
+        child: image != null
+            ? Image.file(
+                image!,
+                width: double.infinity,
+                height: double.infinity,
+                fit: BoxFit.cover,
+              )
+            : video != null
+                ? Stack(
+                    alignment: Alignment.center,
+                    fit: StackFit.expand,
+                    children: [
+                      _VideoPreview(file: video!),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.55),
+                          borderRadius: BorderRadius.circular(999),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.2),
+                              blurRadius: 8,
+                            ),
+                          ],
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.videocam_rounded,
+                              color: Colors.white,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Видео до 2 мин',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : _LightEmptyMediaPlaceholder(
+                    loading: loading,
+                    colorScheme: cs,
+                    theme: theme,
+                  ),
+      ),
+    );
+  }
+}
+
+class _LightEmptyMediaPlaceholder extends StatelessWidget {
+  const _LightEmptyMediaPlaceholder({
+    required this.loading,
+    required this.colorScheme,
+    required this.theme,
+  });
+
+  final bool loading;
+  final ColorScheme colorScheme;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            colorScheme.primary.withValues(alpha: 0.08),
+            const Color(0xFFF8FAFC),
+            colorScheme.primary.withValues(alpha: 0.05),
+          ],
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: colorScheme.primary.withValues(alpha: 0.15),
+                  blurRadius: 20,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Icon(
+              Icons.add_photo_alternate_rounded,
+              size: 48,
+              color: colorScheme.primary,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Text(
+              'Фото или видео до 2 минут',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: const Color(0xFF0F172A),
+                fontWeight: FontWeight.w700,
+                height: 1.25,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              loading
+                  ? 'Подождите...'
+                  : 'Нажмите здесь — откроется выбор из галереи или камеры',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFF64748B),
+                height: 1.45,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -521,19 +605,34 @@ class _CaptionField extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.12),
-        ),
-        color: Colors.white.withValues(alpha: 0.06),
+        border: Border.all(color: const Color(0xFFCBD5E1)),
+        color: Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: TextField(
         controller: controller,
-        maxLines: 4,
-        style: const TextStyle(color: Colors.white, fontSize: 16),
+        maxLines: 5,
+        style: TextStyle(
+          color: const Color(0xFF0F172A),
+          fontSize: 16,
+          height: 1.45,
+          fontWeight: FontWeight.w500,
+        ),
         decoration: InputDecoration(
           hintText: hintText,
-          hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.45)),
+          hintStyle: TextStyle(
+            color: const Color(0xFF94A3B8),
+            fontSize: 16,
+            height: 1.45,
+            fontWeight: FontWeight.w400,
+          ),
           border: InputBorder.none,
           isDense: true,
         ),

@@ -14,6 +14,7 @@ import 'core/theme/domain/theme_repository.dart';
 import 'core/theme/data/theme_repository_impl.dart';
 import 'core/theme/theme_index_notifier.dart';
 import 'core/router/app_router.dart';
+import 'core/network/connectivity_host.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
 import 'features/auth/domain/repositories/auth_repository.dart';
@@ -38,6 +39,8 @@ import 'features/profile/data/repositories/profile_repository_impl.dart';
 import 'features/profile/domain/repositories/profile_repository.dart';
 import 'features/stories/data/repositories/stories_repository_impl.dart';
 import 'features/stories/domain/repositories/stories_repository.dart';
+import 'features/settings/data/repositories/settings_repository_impl.dart';
+import 'features/settings/domain/repositories/settings_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -78,6 +81,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final StoriesRepository _storiesRepository;
   late final NotificationsRepository _notificationsRepository;
   late final PostRepository _postRepository;
+  late final SettingsRepository _settingsRepository;
   late final AppRouter _appRouter;
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
@@ -99,7 +103,12 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _paymentService = PaymentService(_client);
     _categoriesRepository = CategoriesRepositoryImpl(_client);
     _profileRepository = ProfileRepositoryImpl(_client);
-    _feedRepository = FeedRepositoryImpl(_productRepository, _profileRepository);
+    _settingsRepository = SettingsRepositoryImpl(_client);
+    _feedRepository = FeedRepositoryImpl(
+      _productRepository,
+      _profileRepository,
+      _settingsRepository,
+    );
     _commentsRepository = CommentsRepositoryImpl(_client);
     _storiesRepository = StoriesRepositoryImpl(_client);
     _notificationsRepository = NotificationsRepositoryImpl(_client);
@@ -115,6 +124,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
       notificationsRepository: _notificationsRepository,
       postRepository: _postRepository,
       commentsRepository: _commentsRepository,
+      settingsRepository: _settingsRepository,
     );
   }
 
@@ -139,7 +149,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
                   const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
                   const SizedBox(height: 16),
                   Text(
-                    'Supabase не настроен. Укажите SUPABASE_URL и SUPABASE_ANON_KEY в main.dart',
+                    'Supabase не настроен. Создайте файл .env из .env.example '
+                    'и укажите SUPABASE_URL и SUPABASE_ANON_KEY',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyLarge,
                   ),
@@ -150,9 +161,10 @@ class _TmrTauAppState extends State<TmrTauApp> {
         ),
       );
     }
-    return MultiRepositoryProvider(
-      providers: [
-        RepositoryProvider<LocalReactionsStorage>.value(
+    return ConnectivityHost(
+      child: MultiRepositoryProvider(
+        providers: [
+          RepositoryProvider<LocalReactionsStorage>.value(
             value: widget.localReactionsStorage),
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
         RepositoryProvider<ChatStoryListStorage>.value(
@@ -180,6 +192,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
           value: _notificationsRepository,
         ),
         RepositoryProvider<PostRepository>.value(value: _postRepository),
+        RepositoryProvider<SettingsRepository>.value(
+          value: _settingsRepository,
+        ),
       ],
       child: BlocProvider(
         create: (context) => AuthBloc(
@@ -234,6 +249,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
           ),
         ),
       ),
+    ),
     );
   }
 }

@@ -15,16 +15,29 @@ class ProductRepositoryImpl implements ProductRepository {
   static const String _productSelect =
       'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, contact_phone, promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count, users!seller_id(name, avatar), categories!category_id(name)';
 
+  dynamic _excludeSellerIds(dynamic queryBuilder, Set<String> excludeSellerIds) {
+    if (excludeSellerIds.isEmpty) return queryBuilder;
+    final inList = excludeSellerIds
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .join(',');
+    if (inList.isEmpty) return queryBuilder;
+    return queryBuilder.not('seller_id', 'in', '($inList)');
+  }
+
   @override
   Future<List<ProductEntity>> getFeedProducts({
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    Set<String> excludeSellerIds = const {},
   }) async {
     final safeLimit = limit.clamp(1, 100);
-    final res = await _client
+    dynamic queryBuilder = _client
         .from(SupabaseConstants.productsTable)
-        .select(_productSelect)
+        .select(_productSelect);
+    queryBuilder = _excludeSellerIds(queryBuilder, excludeSellerIds);
+    final res = await queryBuilder
         .order('created_at', ascending: false)
         .range(offset, offset + safeLimit - 1);
     final list = _mapProducts(res as List);
@@ -67,6 +80,7 @@ class ProductRepositoryImpl implements ProductRepository {
     int limit = 20,
     String? currentUserId,
     SearchFilters? filters,
+    Set<String> excludeSellerIds = const {},
   }) async {
     return searchProductsWithOffset(
       query,
@@ -74,6 +88,7 @@ class ProductRepositoryImpl implements ProductRepository {
       offset: 0,
       currentUserId: currentUserId,
       filters: filters,
+      excludeSellerIds: excludeSellerIds,
     );
   }
 
@@ -84,6 +99,7 @@ class ProductRepositoryImpl implements ProductRepository {
     int offset = 0,
     String? currentUserId,
     SearchFilters? filters,
+    Set<String> excludeSellerIds = const {},
   }) async {
     final q = query.trim();
 
@@ -96,6 +112,7 @@ class ProductRepositoryImpl implements ProductRepository {
       dynamic queryBuilder = _client
           .from(SupabaseConstants.productsTable)
           .select(_productSelect);
+      queryBuilder = _excludeSellerIds(queryBuilder, excludeSellerIds);
 
       if (q.isNotEmpty) {
         queryBuilder = queryBuilder.or(

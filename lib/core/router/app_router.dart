@@ -58,6 +58,8 @@ import '../../features/settings/presentation/screens/report_problem_page.dart';
 import '../../features/settings/presentation/screens/faq_page.dart';
 import '../../features/settings/presentation/screens/terms_page.dart';
 import '../../features/settings/presentation/screens/privacy_policy_page.dart';
+import '../../features/settings/presentation/screens/delete_account_page.dart';
+import '../../features/settings/domain/repositories/settings_repository.dart';
 
 class AppRouter {
   AppRouter({
@@ -67,6 +69,7 @@ class AppRouter {
     required this.notificationsRepository,
     required this.postRepository,
     required this.commentsRepository,
+    required this.settingsRepository,
   });
 
   final FeedRepository feedRepository;
@@ -75,6 +78,7 @@ class AppRouter {
   final NotificationsRepository notificationsRepository;
   final PostRepository postRepository;
   final CommentsRepository commentsRepository;
+  final SettingsRepository settingsRepository;
 
   late final GoRouter router = GoRouter(
     initialLocation: '/',
@@ -273,6 +277,10 @@ class AppRouter {
             path: 'privacy-policy',
             builder: (context, state) => const PrivacyPolicyPage(),
           ),
+          GoRoute(
+            path: 'delete-account',
+            builder: (context, state) => const DeleteAccountPage(),
+          ),
         ],
       ),
       GoRoute(
@@ -379,7 +387,10 @@ class AppRouter {
                   GoRoute(
                     path: 'search',
                     builder: (context, state) =>
-                        SearchPage(productRepository: productRepository),
+                        SearchPage(
+                          productRepository: productRepository,
+                          settingsRepository: settingsRepository,
+                        ),
                   ),
                 ],
               ),

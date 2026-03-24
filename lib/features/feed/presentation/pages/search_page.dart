@@ -18,14 +18,20 @@ import '../../../product/domain/entities/category_entity.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/domain/repositories/categories_repository.dart';
 import '../../../product/domain/repositories/product_repository.dart';
+import '../../../settings/domain/repositories/settings_repository.dart';
 import '../../../product/presentation/widgets/product_promo_badges.dart';
 import '../controllers/search_paging_controller.dart';
 import '../widgets/kazakhstan_location_sheet.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, required this.productRepository});
+  const SearchPage({
+    super.key,
+    required this.productRepository,
+    required this.settingsRepository,
+  });
 
   final ProductRepository productRepository;
+  final SettingsRepository settingsRepository;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -58,6 +64,7 @@ class _SearchPageState extends State<SearchPage> {
     _pagingController = SearchPagingController(
       productRepository: widget.productRepository,
       currentUserId: _currentUserId,
+      settingsRepository: widget.settingsRepository,
     );
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
