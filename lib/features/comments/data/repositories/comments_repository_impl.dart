@@ -35,11 +35,83 @@ class CommentsRepositoryImpl implements CommentsRepository {
     required String userId,
     required String text,
   }) async {
-    await _client.from(SupabaseConstants.productCommentsTable).insert({
+    final inserted = await _client
+        .from(SupabaseConstants.productCommentsTable)
+        .insert({
+          'product_id': productId,
+          'user_id': userId,
+          'text': text,
+        })
+        .select('id')
+        .single();
+    final commentId = inserted['id'] as String;
+    await _notifySellerProductComment(
+      productId: productId,
+      actorId: userId,
+      text: text,
+      commentId: commentId,
+    );
+  }
+
+  Future<void> _notifySellerProductComment({
+    required String productId,
+    required String actorId,
+    required String text,
+    required String commentId,
+  }) async {
+    final row = await _client
+        .from(SupabaseConstants.productsTable)
+        .select('seller_id')
+        .eq('id', productId)
+        .maybeSingle();
+    if (row == null) return;
+    final sellerId = row['seller_id'] as String?;
+    if (sellerId == null || sellerId == actorId) return;
+    final body = text.trim().isEmpty
+        ? 'Новый комментарий к объявлению'
+        : 'Комментарий: ${text.trim()}';
+    await _client.from(SupabaseConstants.notificationsTable).insert({
+      'user_id': sellerId,
+      'actor_id': actorId,
+      'type': 'product_comment',
+      'title': 'Комментарий к объявлению',
+      'body': body,
       'product_id': productId,
-      'user_id': userId,
-      'text': text,
+      'comment_id': commentId,
     });
+  }
+
+  @override
+  Future<void> toggleProductCommentLike(String commentId, String userId) async {
+    final existing = await _client
+        .from(SupabaseConstants.productCommentLikesTable)
+        .select('comment_id')
+        .eq('comment_id', commentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from(SupabaseConstants.productCommentLikesTable)
+          .delete()
+          .eq('comment_id', commentId)
+          .eq('user_id', userId);
+    } else {
+      await _client.from(SupabaseConstants.productCommentLikesTable).insert({
+        'comment_id': commentId,
+        'user_id': userId,
+      });
+    }
+  }
+
+  @override
+  Future<bool> isProductCommentLikedOwn(String commentId, String userId) async {
+    final row = await _client
+        .from(SupabaseConstants.productCommentLikesTable)
+        .select('comment_id')
+        .eq('comment_id', commentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    return row != null;
   }
 
   @override

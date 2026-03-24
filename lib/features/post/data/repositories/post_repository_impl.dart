@@ -707,6 +707,7 @@ class PostRepositoryImpl implements PostRepository {
         'post_id': postId,
         'user_id': userId,
       });
+      await _createPostRepostNotification(postId: postId, actorId: userId);
     }
   }
 
@@ -830,21 +831,33 @@ class PostRepositoryImpl implements PostRepository {
       data['parent_id'] = parentCommentId;
     }
     try {
-      await _client.from(SupabaseConstants.postCommentsTable).insert(data);
+      final inserted = await _client
+          .from(SupabaseConstants.postCommentsTable)
+          .insert(data)
+          .select('id')
+          .single();
+      final commentId = inserted['id'] as String;
       await _createPostCommentNotification(
         postId: postId,
         actorId: userId,
         text: text,
+        commentId: commentId,
       );
     } catch (e) {
       final msg = e.toString().toLowerCase();
       if (data.containsKey('parent_id') && (msg.contains('parent_id') || (msg.contains('column') && msg.contains('exist')))) {
         data.remove('parent_id');
-        await _client.from(SupabaseConstants.postCommentsTable).insert(data);
+        final inserted = await _client
+            .from(SupabaseConstants.postCommentsTable)
+            .insert(data)
+            .select('id')
+            .single();
+        final commentId = inserted['id'] as String;
         await _createPostCommentNotification(
           postId: postId,
           actorId: userId,
           text: text,
+          commentId: commentId,
         );
         throw const PostCommentReplyFallbackException();
       } else {
@@ -1136,6 +1149,55 @@ class PostRepositoryImpl implements PostRepository {
         .eq('user_id', userId);
   }
 
+  @override
+  Future<void> togglePostCommentLike(String commentId, String userId) async {
+    final existing = await _client
+        .from(SupabaseConstants.postCommentLikesTable)
+        .select('comment_id')
+        .eq('comment_id', commentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    if (existing != null) {
+      await _client
+          .from(SupabaseConstants.postCommentLikesTable)
+          .delete()
+          .eq('comment_id', commentId)
+          .eq('user_id', userId);
+    } else {
+      await _client.from(SupabaseConstants.postCommentLikesTable).insert({
+        'comment_id': commentId,
+        'user_id': userId,
+      });
+    }
+  }
+
+  @override
+  Future<bool> isPostCommentLikedOwn(String commentId, String userId) async {
+    final row = await _client
+        .from(SupabaseConstants.postCommentLikesTable)
+        .select('comment_id')
+        .eq('comment_id', commentId)
+        .eq('user_id', userId)
+        .maybeSingle();
+    return row != null;
+  }
+
+  Future<void> _createPostRepostNotification({
+    required String postId,
+    required String actorId,
+  }) async {
+    final postOwnerId = await _findPostOwnerId(postId);
+    if (postOwnerId == null || postOwnerId == actorId) return;
+    await _client.from(SupabaseConstants.notificationsTable).insert({
+      'user_id': postOwnerId,
+      'actor_id': actorId,
+      'type': 'post_repost',
+      'title': 'Репост',
+      'body': 'Поделились вашей публикацией [post:$postId]',
+      'post_id': postId,
+    });
+  }
+
   Future<void> _createPostLikeNotification({
     required String postId,
     required String actorId,
@@ -1148,6 +1210,7 @@ class PostRepositoryImpl implements PostRepository {
       'type': 'post_like',
       'title': 'Новый лайк',
       'body': 'Вашу публикацию лайкнули [post:$postId]',
+      'post_id': postId,
     });
   }
 
@@ -1155,6 +1218,7 @@ class PostRepositoryImpl implements PostRepository {
     required String postId,
     required String actorId,
     required String text,
+    required String commentId,
   }) async {
     final postOwnerId = await _findPostOwnerId(postId);
     if (postOwnerId == null || postOwnerId == actorId) return;
@@ -1167,6 +1231,8 @@ class PostRepositoryImpl implements PostRepository {
       'type': 'post_comment',
       'title': 'Новый комментарий',
       'body': body,
+      'post_id': postId,
+      'comment_id': commentId,
     });
   }
 

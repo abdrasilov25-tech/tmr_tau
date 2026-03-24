@@ -13,6 +13,7 @@ import '../../features/feed/presentation/pages/search_page.dart';
 import '../../features/news/presentation/pages/news_feed_page.dart';
 import '../../features/notifications/presentation/pages/notifications_activity_page.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
+import '../../features/notifications/presentation/notification_activity_peek_bus.dart';
 import '../../features/post/domain/entities/post_entity.dart';
 import '../../features/comments/domain/repositories/comments_repository.dart';
 import '../../features/post/domain/repositories/post_repository.dart';
@@ -120,10 +121,12 @@ class AppRouter {
           if (product == null) {
             return const Scaffold(body: Center(child: Text('Товар не найден')));
           }
+          final mention = state.uri.queryParameters['mention'];
           return ProductDetailPage(
             product: product,
             commentsRepository: commentsRepository,
             productRepository: productRepository,
+            mentionPrefix: mention,
           );
         },
         routes: [
@@ -187,14 +190,20 @@ class AppRouter {
       GoRoute(
         path: '/post/:id',
         builder: (context, state) {
+          final replyTo = state.uri.queryParameters['replyTo'];
           final post = state.extra as PostEntity?;
           if (post != null) {
-            return PostDetailPage(post: post, postRepository: postRepository);
+            return PostDetailPage(
+              post: post,
+              postRepository: postRepository,
+              replyToCommentId: replyTo,
+            );
           }
           final id = state.pathParameters['id']!;
           return PostDetailRoutePage(
             postId: id,
             postRepository: postRepository,
+            replyToCommentId: replyTo,
           );
         },
         routes: [
@@ -509,8 +518,12 @@ class _MainShell extends StatelessWidget {
             child: NavigationBar(
               selectedIndex: navigationShell.currentIndex,
               onDestinationSelected: (index) {
-                // Меняем только активную ветку shell-роута.
                 navigationShell.goBranch(index);
+                if (index == 0) {
+                  context
+                      .read<NotificationActivityPeekBus>()
+                      .pulsePublicationsTab();
+                }
               },
               backgroundColor: Colors.transparent,
               elevation: 0,

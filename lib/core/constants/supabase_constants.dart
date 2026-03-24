@@ -20,6 +20,8 @@ class SupabaseConstants {
   static const String postLikesTable = 'post_likes';
   static const String postDislikesTable = 'post_dislikes';
   static const String postCommentsTable = 'post_comments';
+  static const String postCommentLikesTable = 'post_comment_likes';
+  static const String productCommentLikesTable = 'product_comment_likes';
   static const String repostsTable = 'reposts';
   static const String postSavesTable = 'post_saves';
   /// Просмотры публикаций в ленте (персональные рекомендации).

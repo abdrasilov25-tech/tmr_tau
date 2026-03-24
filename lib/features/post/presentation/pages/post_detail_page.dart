@@ -15,10 +15,13 @@ class PostDetailPage extends StatefulWidget {
     super.key,
     required this.post,
     required this.postRepository,
+    this.replyToCommentId,
   });
 
   final PostEntity post;
   final PostRepository postRepository;
+  /// Открыть поле ответа на этот комментарий (например из уведомления `?replyTo=`).
+  final String? replyToCommentId;
 
   @override
   State<PostDetailPage> createState() => _PostDetailPageState();
@@ -49,10 +52,21 @@ class _PostDetailPageState extends State<PostDetailPage> {
     try {
       final list = await widget.postRepository.getComments(_post.id);
       if (mounted) {
+        PostCommentEntity? replyTarget;
+        final rid = widget.replyToCommentId;
+        if (rid != null && rid.isNotEmpty) {
+          for (final c in list) {
+            if (c.id == rid) {
+              replyTarget = c;
+              break;
+            }
+          }
+        }
         setState(() {
-        _comments = list;
-        _commentsLoading = false;
-      });
+          _comments = list;
+          _commentsLoading = false;
+          if (replyTarget != null) _replyingToComment = replyTarget;
+        });
       }
     } catch (_) {
       if (mounted) setState(() => _commentsLoading = false);

@@ -11,10 +11,12 @@ class PostDetailRoutePage extends StatefulWidget {
     super.key,
     required this.postId,
     required this.postRepository,
+    this.replyToCommentId,
   });
 
   final String postId;
   final PostRepository postRepository;
+  final String? replyToCommentId;
 
   @override
   State<PostDetailRoutePage> createState() => _PostDetailRoutePageState();
@@ -75,6 +77,7 @@ class _PostDetailRoutePageState extends State<PostDetailRoutePage> {
         return PostDetailPage(
           post: fetched,
           postRepository: widget.postRepository,
+          replyToCommentId: widget.replyToCommentId,
         );
       },
     );

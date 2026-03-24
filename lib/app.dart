@@ -26,6 +26,7 @@ import 'features/feed/domain/repositories/feed_repository.dart';
 import 'features/feed/presentation/bloc/feed_bloc.dart';
 import 'features/notifications/data/repositories/notifications_repository_impl.dart';
 import 'features/notifications/domain/repositories/notifications_repository.dart';
+import 'features/notifications/presentation/notification_activity_peek_bus.dart';
 import 'features/post/data/repositories/post_repository_impl.dart';
 import 'features/post/domain/repositories/post_repository.dart';
 import 'features/product/data/repositories/categories_repository_impl.dart';
@@ -86,6 +87,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
   late final ThemeIndexNotifier _themeIndexNotifier;
+  late final NotificationActivityPeekBus _notificationActivityPeekBus;
 
   @override
   void initState() {
@@ -95,6 +97,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     }
     _themeRepository = ThemeRepositoryImpl(widget.localReactionsStorage);
     _themeIndexNotifier = ThemeIndexNotifier(_themeRepository);
+    _notificationActivityPeekBus = NotificationActivityPeekBus();
     _client = supa.Supabase.instance.client;
     final authDataSource = AuthRemoteDataSourceImpl(_client);
     _authRepository = AuthRepositoryImpl(authDataSource, _client);
@@ -130,6 +133,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
 
   @override
   void dispose() {
+    _notificationActivityPeekBus.dispose();
     super.dispose();
   }
 
@@ -190,6 +194,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<StoriesRepository>.value(value: _storiesRepository),
         RepositoryProvider<NotificationsRepository>.value(
           value: _notificationsRepository,
+        ),
+        RepositoryProvider<NotificationActivityPeekBus>.value(
+          value: _notificationActivityPeekBus,
         ),
         RepositoryProvider<PostRepository>.value(value: _postRepository),
         RepositoryProvider<SettingsRepository>.value(
