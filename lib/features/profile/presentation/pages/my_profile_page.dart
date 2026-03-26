@@ -182,14 +182,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
       final posts =
           await postRepo.getPostsByUser(uid, currentUserId: uid);
       final newsPosts = posts
-          .where((p) => p.kind.trim().toLowerCase() == 'news')
+          .where((p) => p.kind.trim().toLowerCase() == 'news' && !_isVideoPost(p))
           .toList(growable: false);
       var publicationPosts = posts
-          .where((p) => p.kind.trim().toLowerCase() == 'publication')
+          .where((p) => p.kind.trim().toLowerCase() == 'publication' && !_isVideoPost(p))
           .toList(growable: false);
-      final videoPosts = posts
-          .where((p) => p.videoUrl != null && p.videoUrl!.trim().isNotEmpty)
-          .toList(growable: false);
+      final videoPosts = posts.where(_isVideoPost).toList(growable: false);
       if (publicationPosts.isEmpty) {
         if (!mounted) return;
         final publicationFeed = await postRepo.searchPublicationsByCursor(
@@ -198,7 +196,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
               currentUserId: uid,
             );
         publicationPosts = publicationFeed
-            .where((p) => p.userId == uid)
+            .where((p) => p.userId == uid && !_isVideoPost(p))
             .toList(growable: false);
       }
       // Подсчитываем актуальное количество подписок через followers.
@@ -358,7 +356,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 subtitle: const Text('Фото или короткое видео в ленту новостей'),
                 onTap: () {
                   Navigator.pop(context);
-                  context.push('/add-news');
+                  unawaited(_openCreateNewsAndRefresh());
                 },
               ),
               ListTile(
@@ -367,7 +365,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 subtitle: const Text('Личный пост в публикации профиля'),
                 onTap: () {
                   Navigator.pop(context);
-                  context.push('/add-publication');
+                  unawaited(_openCreatePublicationAndRefresh(videoMode: false));
                 },
               ),
             ],
@@ -406,7 +404,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
               title: const Text('Прувнуть в ленту'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                context.push('/add-publication');
+                unawaited(_openCreatePublicationAndRefresh(videoMode: false));
               },
             ),
             ListTile(
@@ -422,7 +420,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
               title: const Text('Видео'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                context.push('/add-publication?video=1');
+                unawaited(_openCreatePublicationAndRefresh(videoMode: true));
               },
             ),
             ListTile(
@@ -430,7 +428,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
               title: const Text('Новость'),
               onTap: () {
                 Navigator.pop(sheetContext);
-                context.push('/add-news');
+                unawaited(_openCreateNewsAndRefresh());
               },
             ),
             const SizedBox(height: 8),
@@ -554,6 +552,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
             updatingAvatar: _updatingAvatar,
             ownStoryGroup: ownGroup,
             myStoryNote: _myStoryNote,
+            onCreateNews: _openCreateNewsAndRefresh,
+            onCreatePublication: () =>
+                _openCreatePublicationAndRefresh(videoMode: false),
+            onCreateVideo: () =>
+                _openCreatePublicationAndRefresh(videoMode: true),
             onOpenOwnStory: () async {
               if (ownGroup == null) {
                 await context.push('/add-story');
@@ -587,6 +590,48 @@ class _MyProfilePageState extends State<MyProfilePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _openCreateNewsAndRefresh() async {
+    await context.push('/add-news');
+    if (!mounted) return;
+    await _load(showLoading: false);
+  }
+
+  Future<void> _openCreatePublicationAndRefresh({required bool videoMode}) async {
+    final route = videoMode ? '/add-publication?video=1' : '/add-publication';
+    final result = await context.push(route);
+    if (!mounted) return;
+    if (result is PostEntity) {
+      setState(() {
+        final hasVideo = _isVideoPost(result);
+        if (hasVideo) {
+          _videoPosts = [result, ..._videoPosts];
+          _tabIndex = 3;
+        } else {
+          _publicationPosts = [result, ..._publicationPosts];
+        }
+      });
+      final authState = context.read<AuthBloc>().state;
+      if (authState is AuthAuthenticated) {
+        _storeWarmCache(authState.user.id);
+      }
+      return;
+    }
+    await _load(showLoading: false);
+  }
+
+  bool _isVideoPost(PostEntity post) {
+    final videoUrl = (post.videoUrl ?? '').trim().toLowerCase();
+    if (videoUrl.isNotEmpty) return true;
+    final imageUrl = post.imageUrl.trim().toLowerCase();
+    if (imageUrl.isEmpty) return false;
+    return imageUrl.contains('/videos/') ||
+        imageUrl.endsWith('.mp4') ||
+        imageUrl.endsWith('.mov') ||
+        imageUrl.endsWith('.m4v') ||
+        imageUrl.endsWith('.webm') ||
+        imageUrl.endsWith('.m3u8');
   }
 
   void _showAccountSwitcher(BuildContext context, AppUser currentUser) {
@@ -925,6 +970,9 @@ class _ProfileContent extends StatelessWidget {
     required this.updatingAvatar,
     required this.ownStoryGroup,
     required this.myStoryNote,
+    required this.onCreateNews,
+    required this.onCreatePublication,
+    required this.onCreateVideo,
     required this.onOpenOwnStory,
   });
 
@@ -941,6 +989,9 @@ class _ProfileContent extends StatelessWidget {
   final bool updatingAvatar;
   final StoryGroupEntity? ownStoryGroup;
   final String myStoryNote;
+  final Future<void> Function() onCreateNews;
+  final Future<void> Function() onCreatePublication;
+  final Future<void> Function() onCreateVideo;
   final Future<void> Function()? onOpenOwnStory;
 
   int get _publicationsCount =>
@@ -1238,22 +1289,20 @@ class _ProfileContent extends StatelessWidget {
                                       posts: newsPosts,
                                       emptyTitle: 'Нет новостей',
                                       emptyActionLabel: 'Опубликовать новость',
-                                      onEmptyAction: () => context.push('/add-news'),
+                                          onEmptyAction: onCreateNews,
                                     )
                                   : tabIndex == 2
                                       ? _PostsGrid(
                                           posts: publicationPosts,
                                           emptyTitle: 'Нет публикаций',
                                           emptyActionLabel: 'Создать публикацию',
-                                          onEmptyAction: () =>
-                                              context.push('/add-publication'),
+                                          onEmptyAction: onCreatePublication,
                                         )
                                       : _PostsGrid(
                                           posts: videoPosts,
                                           emptyTitle: 'Нет видео',
                                           emptyActionLabel: 'Создать видео',
-                                          onEmptyAction: () =>
-                                              context.push('/add-publication?video=1'),
+                                          onEmptyAction: onCreateVideo,
                                         ),
                         ),
                       ),
@@ -1267,6 +1316,7 @@ class _ProfileContent extends StatelessWidget {
       ),
     );
   }
+
 }
 
 Widget _statDivider() => Container(
@@ -1537,7 +1587,7 @@ class _PostsGrid extends StatelessWidget {
   final List<PostEntity> posts;
   final String emptyTitle;
   final String emptyActionLabel;
-  final VoidCallback onEmptyAction;
+  final Future<void> Function() onEmptyAction;
 
   @override
   Widget build(BuildContext context) {
@@ -1554,7 +1604,7 @@ class _PostsGrid extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             TextButton.icon(
-              onPressed: onEmptyAction,
+              onPressed: () => unawaited(onEmptyAction()),
               icon: const Icon(Icons.add),
               label: Text(emptyActionLabel),
             ),
@@ -1575,42 +1625,64 @@ class _PostsGrid extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, index) {
         final p = posts[index];
-        final hasVideo = p.videoUrl != null && p.videoUrl!.isNotEmpty;
+        final hasVideo = _isProbablyVideoPost(p);
         if (p.imageUrl.isEmpty && !hasVideo) {
-          return Container(
-            color: Colors.grey.shade200,
-            child: const Center(
-              child: Icon(Icons.article_outlined, size: 32),
+          return GestureDetector(
+            onTap: () => context.push('/post/${p.id}', extra: p),
+            child: Container(
+              color: Colors.grey.shade200,
+              child: const Center(
+                child: Icon(Icons.article_outlined, size: 32),
+              ),
             ),
           );
         }
         if (hasVideo && p.imageUrl.isEmpty) {
-          return Container(
-            color: Colors.grey.shade300,
-            child: const Center(
-              child: Icon(Icons.videocam, size: 40, color: Colors.white70),
+          return GestureDetector(
+            onTap: () => context.push('/post/${p.id}', extra: p),
+            child: Container(
+              color: Colors.grey.shade300,
+              child: const Center(
+                child: Icon(Icons.videocam, size: 40, color: Colors.white70),
+              ),
             ),
           );
         }
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              p.imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) => Container(
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.broken_image_outlined),
+        return GestureDetector(
+          onTap: () => context.push('/post/${p.id}', extra: p),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.network(
+                p.imageUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Container(
+                  color: Colors.grey.shade200,
+                  child: const Icon(Icons.broken_image_outlined),
+                ),
               ),
-            ),
-            if (hasVideo)
-              const Center(
-                child: Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
-              ),
-          ],
+              if (hasVideo)
+                const Center(
+                  child: Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
+                ),
+            ],
+          ),
         );
       },
     );
+  }
+
+  bool _isProbablyVideoPost(PostEntity post) {
+    final videoUrl = (post.videoUrl ?? '').trim().toLowerCase();
+    if (videoUrl.isNotEmpty) return true;
+    final imageUrl = post.imageUrl.trim().toLowerCase();
+    if (imageUrl.isEmpty) return false;
+    return imageUrl.contains('/videos/') ||
+        imageUrl.endsWith('.mp4') ||
+        imageUrl.endsWith('.mov') ||
+        imageUrl.endsWith('.m4v') ||
+        imageUrl.endsWith('.webm') ||
+        imageUrl.endsWith('.m3u8');
   }
 }
 
