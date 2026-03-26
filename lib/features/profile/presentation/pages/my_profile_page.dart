@@ -42,6 +42,8 @@ class MyProfilePage extends StatefulWidget {
 }
 
 class _MyProfilePageState extends State<MyProfilePage> {
+  static const Duration _warmCacheTtl = Duration(seconds: 45);
+  static _MyProfileWarmCache? _warmCache;
   SellerProfileEntity? _profile;
   List<PostEntity> _newsPosts = [];
   List<PostEntity> _publicationPosts = [];
@@ -53,15 +55,33 @@ class _MyProfilePageState extends State<MyProfilePage> {
   bool _autoReloadTriggeredForPublications = false;
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
+  String _myStoryNote = '';
   StreamSubscription<String>? _deletedProductSub;
 
   @override
   void initState() {
     super.initState();
     _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 3);
-    _load();
+    final authState = context.read<AuthBloc>().state;
+    final uid = authState is AuthAuthenticated ? authState.user.id : null;
+    final cache = _warmCache;
+    final canUseCache = uid != null &&
+        cache != null &&
+        cache.userId == uid &&
+        DateTime.now().difference(cache.createdAt) <= _warmCacheTtl;
+    if (canUseCache) {
+      _profile = cache.profile;
+      _newsPosts = List<PostEntity>.from(cache.newsPosts);
+      _publicationPosts = List<PostEntity>.from(cache.publicationPosts);
+      _videoPosts = List<PostEntity>.from(cache.videoPosts);
+      _storyGroups = List<StoryGroupEntity>.from(cache.storyGroups);
+      _newStoriesByUserId = Map<String, bool>.from(cache.newStoriesByUserId);
+      _myStoryNote = cache.myStoryNote;
+      _loading = false;
+    }
+    _load(showLoading: !canUseCache);
     _deletedProductSub = deletedProductIdsStream.listen((_) {
-      if (mounted) _load();
+      if (mounted) _load(showLoading: false);
     });
   }
 
@@ -130,14 +150,30 @@ class _MyProfilePageState extends State<MyProfilePage> {
     }
   }
 
-  Future<void> _load() async {
+  void _storeWarmCache(String uid) {
+    _warmCache = _MyProfileWarmCache(
+      createdAt: DateTime.now(),
+      userId: uid,
+      profile: _profile,
+      newsPosts: List<PostEntity>.from(_newsPosts),
+      publicationPosts: List<PostEntity>.from(_publicationPosts),
+      videoPosts: List<PostEntity>.from(_videoPosts),
+      storyGroups: List<StoryGroupEntity>.from(_storyGroups),
+      newStoriesByUserId: Map<String, bool>.from(_newStoriesByUserId),
+      myStoryNote: _myStoryNote,
+    );
+  }
+
+  Future<void> _load({bool showLoading = true}) async {
     final state = context.read<AuthBloc>().state;
     if (state is! AuthAuthenticated) {
       setState(() => _loading = false);
       return;
     }
     final uid = state.user.id;
-    setState(() => _loading = true);
+    if (showLoading) {
+      setState(() => _loading = true);
+    }
     try {
       final repo = context.read<ProfileRepository>();
       final postRepo = context.read<PostRepository>();
@@ -168,7 +204,16 @@ class _MyProfilePageState extends State<MyProfilePage> {
       // Подсчитываем актуальное количество подписок через followers.
       final followingUsers = await repo.getFollowingUsers(uid);
       final followingCount = followingUsers.length;
-      await _loadProfileStories(uid);
+      var myStoryNote = '';
+      try {
+        final me = await supa.Supabase.instance.client
+            .from(SupabaseConstants.usersTable)
+            .select('story_note')
+            .eq('id', uid)
+            .maybeSingle();
+        myStoryNote = (me?['story_note'] ?? '').toString().trim();
+      } catch (_) {}
+      await _loadProfileStories(uid, showLoading: false);
       if (mounted) {
         setState(() {
           _profile = profile == null
@@ -187,19 +232,23 @@ class _MyProfilePageState extends State<MyProfilePage> {
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
           _videoPosts = videoPosts;
+          _myStoryNote = myStoryNote;
           _loading = false;
           if (publicationPosts.isNotEmpty) {
             _autoReloadTriggeredForPublications = false;
           }
         });
+        _storeWarmCache(uid);
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _loadProfileStories(String uid) async {
-    setState(() => _loading = true);
+  Future<void> _loadProfileStories(String uid, {bool showLoading = false}) async {
+    if (showLoading) {
+      setState(() => _loading = true);
+    }
     try {
       final storiesRepo = context.read<StoriesRepository>();
       final authForStories = context.read<AuthBloc>().state;
@@ -265,9 +314,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
         _newStoriesByUserId = nextMap;
         _loading = false;
       });
+      _storeWarmCache(uid);
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loading = false);
+      if (showLoading) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -501,6 +553,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             onAvatarTap: _changeAvatar,
             updatingAvatar: _updatingAvatar,
             ownStoryGroup: ownGroup,
+            myStoryNote: _myStoryNote,
             onOpenOwnStory: () async {
               if (ownGroup == null) {
                 await context.push('/add-story');
@@ -871,6 +924,7 @@ class _ProfileContent extends StatelessWidget {
     required this.onAvatarTap,
     required this.updatingAvatar,
     required this.ownStoryGroup,
+    required this.myStoryNote,
     required this.onOpenOwnStory,
   });
 
@@ -886,6 +940,7 @@ class _ProfileContent extends StatelessWidget {
   final VoidCallback onAvatarTap;
   final bool updatingAvatar;
   final StoryGroupEntity? ownStoryGroup;
+  final String myStoryNote;
   final Future<void> Function()? onOpenOwnStory;
 
   int get _publicationsCount =>
@@ -1557,4 +1612,28 @@ class _PostsGrid extends StatelessWidget {
       },
     );
   }
+}
+
+class _MyProfileWarmCache {
+  const _MyProfileWarmCache({
+    required this.createdAt,
+    required this.userId,
+    required this.profile,
+    required this.newsPosts,
+    required this.publicationPosts,
+    required this.videoPosts,
+    required this.storyGroups,
+    required this.newStoriesByUserId,
+    required this.myStoryNote,
+  });
+
+  final DateTime createdAt;
+  final String userId;
+  final SellerProfileEntity? profile;
+  final List<PostEntity> newsPosts;
+  final List<PostEntity> publicationPosts;
+  final List<PostEntity> videoPosts;
+  final List<StoryGroupEntity> storyGroups;
+  final Map<String, bool> newStoriesByUserId;
+  final String myStoryNote;
 }

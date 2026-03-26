@@ -7,6 +7,9 @@ create table if not exists public.users (
   name text,
   avatar text,
   bio text,
+  story_note text default '',
+  note_location text default '',
+  share_location boolean default false,
   followers_count int default 0,
   following_count int default 0,
   is_verified boolean default false,
@@ -15,6 +18,9 @@ create table if not exists public.users (
 );
 
 -- If table already exists, add column: alter table public.users add column if not exists is_verified boolean default false;
+alter table public.users add column if not exists story_note text default '';
+alter table public.users add column if not exists note_location text default '';
+alter table public.users add column if not exists share_location boolean default false;
 -- Backfill missing rows in public.users from auth.users (safe on repeated runs).
 insert into public.users (id, name)
 select au.id, coalesce(nullif(au.email, ''), 'Пользователь')
@@ -890,6 +896,7 @@ alter table public.channel_messages enable row level security;
 drop policy if exists "User channels select all" on public.user_channels;
 drop policy if exists "User channels insert own" on public.user_channels;
 drop policy if exists "User channels update own" on public.user_channels;
+drop policy if exists "User channels delete own" on public.user_channels;
 drop policy if exists "Channel messages select all" on public.channel_messages;
 drop policy if exists "Channel messages insert owner" on public.channel_messages;
 
@@ -905,6 +912,10 @@ create policy "User channels update own"
   on public.user_channels for update
   using (auth.uid() = owner_id)
   with check (auth.uid() = owner_id);
+
+create policy "User channels delete own"
+  on public.user_channels for delete
+  using (auth.uid() = owner_id);
 
 create policy "Channel messages select all"
   on public.channel_messages for select

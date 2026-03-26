@@ -139,6 +139,8 @@ class _ChatsPageState extends State<ChatsPage> {
   final TextEditingController _searchController = TextEditingController();
   bool _threadSelectionMode = false;
   final Set<String> _selectedThreadKeys = <String>{};
+  String? _optimisticMyStoryNote;
+  String? _optimisticMyStoryLocation;
 
   @override
   void initState() {
@@ -152,6 +154,8 @@ class _ChatsPageState extends State<ChatsPage> {
           threads: [],
           visibleStoryGroups: [],
           newStoriesByUserId: <String, bool>{},
+          storyNotesByUserId: <String, String>{},
+          storyLocationsByUserId: <String, String>{},
         ),
       );
       return;
@@ -170,6 +174,8 @@ class _ChatsPageState extends State<ChatsPage> {
               threads: [],
               visibleStoryGroups: [],
               newStoriesByUserId: <String, bool>{},
+              storyNotesByUserId: <String, String>{},
+              storyLocationsByUserId: <String, String>{},
             ),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -207,8 +213,169 @@ class _ChatsPageState extends State<ChatsPage> {
         threads: List<_ChatThread>.from(data.threads),
         visibleStoryGroups: List<StoryGroupEntity>.from(data.visibleStoryGroups),
         newStoriesByUserId: Map<String, bool>.from(data.newStoriesByUserId),
+        storyNotesByUserId: Map<String, String>.from(data.storyNotesByUserId),
+        storyLocationsByUserId: Map<String, String>.from(data.storyLocationsByUserId),
       ),
     );
+  }
+
+  Future<({Map<String, String> notes, Map<String, String> locations})>
+      _loadStoryNotes(Set<String> userIds) async {
+    if (userIds.isEmpty) {
+      return (
+        notes: const <String, String>{},
+        locations: const <String, String>{},
+      );
+    }
+    try {
+      final res = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id,story_note,note_location,share_location')
+          .inFilter('id', userIds.toList(growable: false));
+      final rows = res as List<dynamic>;
+      final notes = <String, String>{};
+      final locations = <String, String>{};
+      for (final row in rows) {
+        final json = row as Map<String, dynamic>;
+        final id = (json['id'] ?? '').toString();
+        final note = (json['story_note'] ?? '').toString().trim();
+        final location = (json['note_location'] ?? '').toString().trim();
+        final shareLocation = json['share_location'] == true;
+        if (id.isNotEmpty && note.isNotEmpty) {
+          notes[id] = note;
+        }
+        if (id.isNotEmpty && shareLocation && location.isNotEmpty) {
+          locations[id] = location;
+        }
+      }
+      return (notes: notes, locations: locations);
+    } catch (_) {
+      // If migration is not applied yet, keep chat list functional without notes.
+      return (
+        notes: const <String, String>{},
+        locations: const <String, String>{},
+      );
+    }
+  }
+
+  Future<void> _showOwnStoryNoteSheet(
+    String currentNote, {
+    String currentLocation = '',
+  }) async {
+    final controller = TextEditingController(text: currentNote);
+    final locationController =
+        TextEditingController(text: _optimisticMyStoryLocation ?? currentLocation);
+    var shareLocation = (locationController.text.trim().isNotEmpty);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final inset = MediaQuery.of(ctx).viewInsets.bottom;
+        return StatefulBuilder(
+          builder: (context, setSheetState) => Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + inset),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: controller,
+                  maxLength: 60,
+                  decoration: const InputDecoration(
+                    labelText: 'Ваша заметка',
+                    hintText: 'Напишите короткую заметку',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile.adaptive(
+                  value: shareLocation,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Показывать геопозицию'),
+                  subtitle: const Text('Например: Алматы, Казахстан'),
+                  onChanged: (v) => setSheetState(() => shareLocation = v),
+                ),
+                TextField(
+                  controller: locationController,
+                  enabled: shareLocation,
+                  maxLength: 48,
+                  decoration: const InputDecoration(
+                    labelText: 'Город / локация',
+                    hintText: 'Введите город',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(ctx, 'delete'),
+                        child: const Text('Удалить'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        onPressed: () => Navigator.pop(ctx, 'save'),
+                        child: const Text('Сохранить'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (action == null) return;
+    try {
+      if (action == 'delete') {
+        await _client
+            .from(SupabaseConstants.usersTable)
+            .update({
+              'story_note': '',
+              'note_location': '',
+              'share_location': false,
+            })
+            .eq('id', _currentUserId);
+        _optimisticMyStoryNote = '';
+        _optimisticMyStoryLocation = '';
+      } else if (action == 'save') {
+        await _client
+            .from(SupabaseConstants.usersTable)
+            .update({
+              'story_note': controller.text.trim(),
+              'note_location': locationController.text.trim(),
+              'share_location': shareLocation,
+            })
+            .eq('id', _currentUserId);
+        _optimisticMyStoryNote = controller.text.trim();
+        _optimisticMyStoryLocation =
+            shareLocation ? locationController.text.trim() : '';
+      }
+      if (!mounted) return;
+      setState(() {
+        _pageFuture = _loadPageData();
+      });
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString();
+      final isMissingColumn =
+          msg.contains('story_note') && msg.toLowerCase().contains('column');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isMissingColumn
+                ? 'Нужно выполнить SQL миграцию для story_note в Supabase SQL Editor'
+                : 'Не удалось обновить заметку: $e',
+          ),
+        ),
+      );
+    }
   }
 
   Future<_ChatsPageData> _loadPageData() async {
@@ -236,11 +403,33 @@ class _ChatsPageState extends State<ChatsPage> {
         .where((t) => t.kind == _ChatThreadKind.direct)
         .map((t) => t.peerId)
         .toSet();
+    final noteUserIds = {...peerIds, _currentUserId};
+    final storyMeta = await _loadStoryNotes(noteUserIds);
+    final storyNotesByUserId = Map<String, String>.from(storyMeta.notes);
+    final storyLocationsByUserId = Map<String, String>.from(storyMeta.locations);
+    if (_optimisticMyStoryNote != null) {
+      final note = _optimisticMyStoryNote!.trim();
+      if (note.isEmpty) {
+        storyNotesByUserId.remove(_currentUserId);
+      } else {
+        storyNotesByUserId[_currentUserId] = note;
+      }
+    }
+    if (_optimisticMyStoryLocation != null) {
+      final loc = _optimisticMyStoryLocation!.trim();
+      if (loc.isEmpty) {
+        storyLocationsByUserId.remove(_currentUserId);
+      } else {
+        storyLocationsByUserId[_currentUserId] = loc;
+      }
+    }
     if (peerIds.isEmpty) {
       final data = _ChatsPageData(
         threads: threads,
         visibleStoryGroups: const [],
         newStoriesByUserId: const <String, bool>{},
+        storyNotesByUserId: storyNotesByUserId,
+        storyLocationsByUserId: storyLocationsByUserId,
       );
       _storeWarmCache(data);
       return data;
@@ -248,18 +437,32 @@ class _ChatsPageState extends State<ChatsPage> {
 
     // Сначала отдаём список чатов — RefreshIndicator завершается быстро.
     // Сторис подгружаютcя отдельно (тяжёлый запрос + группировка), без блокировки свайпа.
-    unawaited(_loadStoriesDeferred(peerIds, gen));
+    unawaited(
+      _loadStoriesDeferred(
+        peerIds,
+        gen,
+        storyNotesByUserId,
+        storyLocationsByUserId,
+      ),
+    );
 
     final data = _ChatsPageData(
       threads: threads,
       visibleStoryGroups: const [],
       newStoriesByUserId: const <String, bool>{},
+      storyNotesByUserId: storyNotesByUserId,
+      storyLocationsByUserId: storyLocationsByUserId,
     );
     _storeWarmCache(data);
     return data;
   }
 
-  Future<void> _loadStoriesDeferred(Set<String> peerIds, int gen) async {
+  Future<void> _loadStoriesDeferred(
+    Set<String> peerIds,
+    int gen,
+    Map<String, String> storyNotesByUserId,
+    Map<String, String> storyLocationsByUserId,
+  ) async {
     try {
       final visibleStoryGroups = await _loadVisibleStoryGroups(peerIds);
       if (!mounted || gen != _storiesLoadGeneration) return;
@@ -277,6 +480,8 @@ class _ChatsPageState extends State<ChatsPage> {
           threads: _cachedThreadsForStories,
           visibleStoryGroups: visibleStoryGroups,
           newStoriesByUserId: newStoriesByUserId,
+          storyNotesByUserId: storyNotesByUserId,
+          storyLocationsByUserId: storyLocationsByUserId,
         );
         _pageFuture = Future.value(merged);
         _storeWarmCache(merged);
@@ -1142,11 +1347,27 @@ class _ChatsPageState extends State<ChatsPage> {
             .eq('group_id', t.peerId)
             .eq('user_id', _currentUserId);
       } else if (t.kind == _ChatThreadKind.channel) {
-        await _client
-            .from('user_channels')
-            .delete()
-            .eq('channel_id', t.peerId)
-            .eq('user_id', _currentUserId);
+        final channel = await _client
+            .from(SupabaseConstants.userChannelsTable)
+            .select('id,owner_id')
+            .eq('id', t.peerId)
+            .maybeSingle();
+        final ownerId = (channel?['owner_id'] ?? '').toString();
+        if (ownerId == _currentUserId) {
+          // Owner deletes the whole channel (messages/subscribers cascade).
+          await _client
+              .from(SupabaseConstants.userChannelsTable)
+              .delete()
+              .eq('id', t.peerId)
+              .eq('owner_id', _currentUserId);
+        } else {
+          // Non-owner removes only own subscription.
+          await _client
+              .from(SupabaseConstants.channelSubscribersTable)
+              .delete()
+              .eq('channel_id', t.peerId)
+              .eq('user_id', _currentUserId);
+        }
       }
       await _chatStorage.clearPeerState(t.storageKey);
     } catch (e) {
@@ -1271,8 +1492,21 @@ class _ChatsPageState extends State<ChatsPage> {
                 ChatStoriesFriendsStrip(
                   groups: data.visibleStoryGroups,
                   newStoriesByUserId: data.newStoriesByUserId,
+                  storyNotesByUserId: data.storyNotesByUserId,
+                  storyLocationsByUserId: data.storyLocationsByUserId,
                   currentUserId: _currentUserId,
                   currentUserAvatarUrl: authState.user.avatarUrl,
+                  onOwnNoteTap: (currentNote) {
+                    final effective = _optimisticMyStoryNote ?? currentNote;
+                    final location =
+                        _optimisticMyStoryLocation ??
+                        data.storyLocationsByUserId[_currentUserId] ??
+                        '';
+                    _showOwnStoryNoteSheet(
+                      effective,
+                      currentLocation: location,
+                    );
+                  },
                   onAddStoryTap: () async {
                     await context.push('/add-story');
                     if (!mounted) return;
@@ -1775,11 +2009,15 @@ class _ChatsPageData {
     required this.threads,
     required this.visibleStoryGroups,
     required this.newStoriesByUserId,
+    required this.storyNotesByUserId,
+    required this.storyLocationsByUserId,
   });
 
   final List<_ChatThread> threads;
   final List<StoryGroupEntity> visibleStoryGroups;
   final Map<String, bool> newStoriesByUserId;
+  final Map<String, String> storyNotesByUserId;
+  final Map<String, String> storyLocationsByUserId;
 }
 
 class _ChatsWarmCache {

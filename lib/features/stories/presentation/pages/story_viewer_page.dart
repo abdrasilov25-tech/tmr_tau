@@ -36,8 +36,9 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
   late List<PageController> _storyPageControllers;
   late int _currentGroupIndex;
   Timer? _timer;
-  static const Duration _storyDuration = Duration(seconds: 5);
-  Duration _remainingDuration = _storyDuration;
+  static const Duration _photoStoryDuration = Duration(milliseconds: 6500);
+  static const Duration _videoStoryDuration = Duration(seconds: 8);
+  Duration _remainingDuration = _photoStoryDuration;
   DateTime? _timerStartedAt;
   bool _isPaused = false;
 
@@ -77,9 +78,24 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
     _timerStartedAt = DateTime.now();
     _timer = Timer(_remainingDuration, () {
       if (!mounted) return;
-      _remainingDuration = _storyDuration;
+      _remainingDuration = _durationForStory();
       _goNext();
     });
+  }
+
+  Duration _durationForStory({int? groupIndex, int? storyIndex}) {
+    if (widget.groups.isEmpty) return _photoStoryDuration;
+    final g = (groupIndex ?? _currentGroupIndex).clamp(0, widget.groups.length - 1);
+    final group = widget.groups[g];
+    if (group.stories.isEmpty) return _photoStoryDuration;
+    final maxIdx = group.stories.length - 1;
+    final fallbackIndex = _storyPageControllers[g].hasClients
+        ? (_storyPageControllers[g].page?.round() ?? 0)
+        : 0;
+    final s = (storyIndex ?? fallbackIndex).clamp(0, maxIdx);
+    final story = group.stories[s];
+    final hasVideo = (story.videoUrl ?? '').isNotEmpty;
+    return hasVideo ? _videoStoryDuration : _photoStoryDuration;
   }
 
   void _pausePlayback() {
@@ -102,7 +118,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
     if (!_isPaused) return;
     _isPaused = false;
     if (_remainingDuration.inMilliseconds <= 0) {
-      _remainingDuration = _storyDuration;
+      _remainingDuration = _durationForStory();
       _goNext();
       return;
     }
@@ -126,7 +142,10 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
           curve: Curves.easeInOut,
         );
       }
-      _remainingDuration = _storyDuration;
+      _remainingDuration = _durationForStory(
+        groupIndex: _currentGroupIndex,
+        storyIndex: currentStoryPage + 1,
+      );
       _startTimer();
     } else if (_currentGroupIndex < widget.groups.length - 1) {
       _currentGroupIndex++;
@@ -140,7 +159,10 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
       if (nextController.hasClients) {
         nextController.jumpToPage(0);
       }
-      _remainingDuration = _storyDuration;
+      _remainingDuration = _durationForStory(
+        groupIndex: _currentGroupIndex,
+        storyIndex: 0,
+      );
       _startTimer();
     } else {
       context.pop();
@@ -162,7 +184,10 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
           curve: Curves.easeInOut,
         );
       }
-      _remainingDuration = _storyDuration;
+      _remainingDuration = _durationForStory(
+        groupIndex: _currentGroupIndex,
+        storyIndex: currentStoryPage - 1,
+      );
       _startTimer();
     } else if (_currentGroupIndex > 0) {
       _currentGroupIndex--;
@@ -177,7 +202,10 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
       if (prevController.hasClients) {
         prevController.jumpToPage(prevGroup.stories.length - 1);
       }
-      _remainingDuration = _storyDuration;
+      _remainingDuration = _durationForStory(
+        groupIndex: _currentGroupIndex,
+        storyIndex: prevGroup.stories.length - 1,
+      );
       _startTimer();
     } else {
       context.pop();
@@ -218,7 +246,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
           itemCount: widget.groups.length,
           onPageChanged: (i) {
             setState(() => _currentGroupIndex = i);
-            _remainingDuration = _storyDuration;
+            _remainingDuration = _durationForStory(groupIndex: i, storyIndex: 0);
             _startTimer();
           },
           itemBuilder: (context, groupIndex) {
@@ -226,6 +254,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
             return _StoryGroupView(
               group: group,
               storyController: _storyPageControllers[groupIndex],
+              progressDuration: _durationForStory(groupIndex: groupIndex, storyIndex: 0),
               onNext: _goNext,
               onPrev: _goPrev,
               onPause: _pausePlayback,
@@ -245,6 +274,7 @@ class _StoryGroupView extends StatefulWidget {
   const _StoryGroupView({
     required this.group,
     required this.storyController,
+    required this.progressDuration,
     required this.onNext,
     required this.onPrev,
     required this.onPause,
@@ -256,6 +286,7 @@ class _StoryGroupView extends StatefulWidget {
 
   final StoryGroupEntity group;
   final PageController storyController;
+  final Duration progressDuration;
   final VoidCallback onNext;
   final VoidCallback onPrev;
   final VoidCallback onPause;
@@ -275,6 +306,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   final _replyController = TextEditingController();
   final _replyFocusNode = FocusNode();
   bool _sendingReply = false;
+  bool _showReplyComposer = false;
   final Set<String> _markedViewedIds = <String>{};
   int _viewsCount = 0;
   bool _viewsLoading = false;
@@ -321,8 +353,17 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     widget.onPause();
   }
 
+  void _openComposer() {
+    setState(() => _showReplyComposer = true);
+    _pauseForInteraction();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _replyFocusNode.requestFocus();
+    });
+  }
+
   void _resumeAfterInteractionIfPossible() {
-    if (!_replyFocusNode.hasFocus) {
+    if (!_replyFocusNode.hasFocus && !_showReplyComposer) {
       widget.onResume();
     }
   }
@@ -422,6 +463,8 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       await _sendToDirect(kind: 'reply', payload: text);
       if (mounted) {
         _replyController.clear();
+        setState(() => _showReplyComposer = false);
+        _replyFocusNode.unfocus();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Ответ отправлен'), duration: Duration(seconds: 2)),
         );
@@ -471,13 +514,130 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     }
   }
 
+  Future<void> _shareCurrentStory() async {
+    if (widget.currentUserId == null) return;
+    _pauseForInteraction();
+    try {
+      final users = await _loadFollowingUsers();
+      if (!mounted) return;
+      if (users.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('У вас пока нет подписок')),
+        );
+        _resumeAfterInteractionIfPossible();
+        return;
+      }
+      final picked = await showModalBottomSheet<_StoryShareUser>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) => SafeArea(
+          child: SizedBox(
+            height: 420,
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
+                const Text(
+                  'Поделиться сторис',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: users.length,
+                    separatorBuilder: (context, index) =>
+                        const Divider(height: 1),
+                    itemBuilder: (context, index) {
+                      final u = users[index];
+                      return ListTile(
+                        leading: CachedAvatar(
+                          imageUrl: u.avatarUrl,
+                          radius: 18,
+                          fallbackText: u.name,
+                        ),
+                        title: Text(u.name),
+                        onTap: () => Navigator.pop(ctx, u),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (picked == null) {
+        _resumeAfterInteractionIfPossible();
+        return;
+      }
+      await _sendToDirect(
+        kind: 'share',
+        payload: 'Поделился сторис',
+        receiverIdOverride: picked.userId,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Отправлено: ${picked.name}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось поделиться сторис: $e')),
+      );
+    } finally {
+      _resumeAfterInteractionIfPossible();
+    }
+  }
+
+  Future<List<_StoryShareUser>> _loadFollowingUsers() async {
+    final myId = widget.currentUserId;
+    if (myId == null) return const [];
+    final subsRes = await Supabase.instance.client
+        .from(SupabaseConstants.followersTable)
+        .select('following_id')
+        .eq('follower_id', myId)
+        .limit(200);
+    final followingIds = (subsRes as List<dynamic>)
+        .map((e) => (e as Map<String, dynamic>)['following_id'] as String?)
+        .whereType<String>()
+        .toSet()
+        .toList(growable: false);
+    if (followingIds.isEmpty) return const [];
+    final usersRes = await Supabase.instance.client
+        .from(SupabaseConstants.usersTable)
+        .select('id,name,avatar')
+        .inFilter('id', followingIds);
+    final users = (usersRes as List<dynamic>)
+        .map((e) => e as Map<String, dynamic>)
+        .map(
+          (j) => _StoryShareUser(
+            userId: (j['id'] ?? '').toString(),
+            name: ((j['name'] ?? '').toString()).trim().isEmpty
+                ? 'Пользователь'
+                : (j['name'] as String),
+            avatarUrl: (j['avatar'] as String?)?.trim().isEmpty == true
+                ? null
+                : j['avatar'] as String?,
+          ),
+        )
+        .where((u) => u.userId.isNotEmpty)
+        .toList(growable: false);
+    users.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
+    return users;
+  }
+
   Future<void> _sendToDirect({
     required String kind,
     required String payload,
+    String? receiverIdOverride,
   }) async {
     final senderId = widget.currentUserId;
     if (senderId == null) return;
-    final receiverId = widget.group.userId;
+    final receiverId = receiverIdOverride ?? widget.group.userId;
     if (receiverId.isEmpty || receiverId == senderId) return;
     final previewUrl = _currentStory.imageUrl.isNotEmpty
         ? _currentStory.imageUrl
@@ -568,6 +728,8 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           itemCount: widget.group.stories.length,
           onPageChanged: (i) {
             setState(() => _currentIndex = i);
+      _showReplyComposer = false;
+      _replyFocusNode.unfocus();
             _markCurrentStoryViewed();
             _loadViewsCount();
           },
@@ -588,7 +750,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
               _ProgressBars(
                 count: widget.group.stories.length,
                 currentIndex: _currentIndex,
-                duration: _StoryViewerPageState._storyDuration,
+                duration: widget.progressDuration,
                 paused: widget.isPaused,
               ),
               Padding(
@@ -674,52 +836,103 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  SizedBox(
-                    height: 36,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _quickReactions.length,
-                      separatorBuilder: (_, index) => const SizedBox(width: 8),
-                      itemBuilder: (context, index) {
-                        final emoji = _quickReactions[index];
-                        return ActionChip(
-                          label: Text(emoji),
-                          onPressed: _sendingReply
-                              ? null
-                              : () => _sendQuickReaction(emoji),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _replyController,
-                          focusNode: _replyFocusNode,
-                          style: const TextStyle(color: Colors.white),
-                          decoration: InputDecoration(
-                            hintText: 'Написать сообщение...',
-                            hintStyle: TextStyle(color: Colors.grey.shade400),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
-                            filled: true,
-                            fillColor: Colors.white12,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  if (!_showReplyComposer)
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _openComposer,
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: Colors.white38),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            ),
+                            child: const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Отправить сообщение',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ),
                           ),
-                          onTap: _pauseForInteraction,
-                          onSubmitted: (_) => _sendReply(),
                         ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: _sendingReply ? null : () => _sendQuickReaction('❤️'),
+                          icon: const Icon(Icons.favorite_border_rounded, color: Colors.white),
+                        ),
+                        IconButton(
+                          onPressed: _openComposer,
+                          icon: const Icon(Icons.mode_comment_outlined, color: Colors.white),
+                        ),
+                        IconButton(
+                          onPressed: _shareCurrentStory,
+                          icon: const Icon(Icons.send_outlined, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  if (_showReplyComposer) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.center,
+                      child: Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 14,
+                        runSpacing: 10,
+                        children: _quickReactions.map((emoji) {
+                          return InkWell(
+                            onTap: _sendingReply ? null : () => _sendQuickReaction(emoji),
+                            borderRadius: BorderRadius.circular(999),
+                            child: Container(
+                              width: 48,
+                              height: 48,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: Colors.white12,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white24),
+                              ),
+                              child: Text(
+                                emoji,
+                                style: const TextStyle(fontSize: 24),
+                              ),
+                            ),
+                          );
+                        }).toList(),
                       ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        onPressed: _sendingReply ? null : _sendReply,
-                        icon: _sendingReply
-                            ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Icon(Icons.send_rounded, color: Colors.white),
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _replyController,
+                            focusNode: _replyFocusNode,
+                            style: const TextStyle(color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'Написать сообщение...',
+                              hintStyle: TextStyle(color: Colors.grey.shade400),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                              filled: true,
+                              fillColor: Colors.white12,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                            ),
+                            onTap: _pauseForInteraction,
+                            onSubmitted: (_) => _sendReply(),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          onPressed: _sendingReply ? null : _sendReply,
+                          icon: _sendingReply
+                              ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              : const Icon(Icons.send_rounded, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -750,6 +963,18 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       ],
     );
   }
+}
+
+class _StoryShareUser {
+  const _StoryShareUser({
+    required this.userId,
+    required this.name,
+    required this.avatarUrl,
+  });
+
+  final String userId;
+  final String name;
+  final String? avatarUrl;
 }
 
 class _ProgressBars extends StatefulWidget {
