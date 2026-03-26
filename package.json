@@ -1,0 +1,29 @@
+{
+  "name": "tmr_tau",
+  "version": "1.0.0",
+  "description": "Marketplace social app (Instagram/TikTok style). Flutter + Supabase.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abdrasilov25-tech/tmr_tau.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/abdrasilov25-tech/tmr_tau/issues"
+  },
+  "homepage": "https://github.com/abdrasilov25-tech/tmr_tau#readme",
+  "dependencies": {
+    "jose": "^6.2.2"
+  }
+}

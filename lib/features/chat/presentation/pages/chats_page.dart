@@ -14,6 +14,10 @@ import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/entities/story_entity.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../widgets/chat_stories_friends_strip.dart';
+import '../../data/group_chat_system_api.dart';
+import '../../data/invite_candidates.dart';
+import '../chat_unread_badge_controller.dart';
+import '../widgets/channel_create_wizard_sheet.dart';
 
 /// Аргументы для [compute]: тяжёлая сборка директ-тредов в отдельном изоляте.
 class _DirectThreadsComputeArgs {
@@ -154,9 +158,22 @@ class _ChatsPageState extends State<ChatsPage> {
   }
 
   @override
+  void deactivate() {
+    if (context.mounted) {
+      context.read<ChatUnreadBadgeController>().refresh();
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _syncChatBadge() {
+    if (!mounted) return;
+    context.read<ChatUnreadBadgeController>().refresh();
   }
 
   Future<_ChatsPageData> _loadPageData() async {
@@ -164,11 +181,13 @@ class _ChatsPageState extends State<ChatsPage> {
 
     final directFuture = _loadDirectThreads();
     final groupFuture = _loadGroupThreads();
+    final channelFuture = _loadChannelThreads();
     final results = await Future.wait<List<_ChatThread>>([
       directFuture,
       groupFuture,
+      channelFuture,
     ]);
-    final threads = [...results[0], ...results[1]]
+    final threads = [...results[0], ...results[1], ...results[2]]
       ..sort((a, b) {
         final aUnread = a.unreadCount > 0;
         final bUnread = b.unreadCount > 0;
@@ -340,23 +359,31 @@ class _ChatsPageState extends State<ChatsPage> {
                           ? const Center(child: CircularProgressIndicator())
                           : suggestions.isEmpty
                           ? const Center(child: Text('Ничего не найдено'))
-                          : ListView.separated(
+                          : ListView.builder(
                               itemCount: suggestions.length,
-                              separatorBuilder: (c, i) =>
-                                  const Divider(height: 1),
                               itemBuilder: (c, i) {
                                 final s = suggestions[i];
-                                return ListTile(
-                                  leading: CachedAvatar(
-                                    imageUrl: s.avatarUrl,
-                                    radius: 20,
-                                    fallbackText: s.name ?? 'Пользователь',
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 3),
+                                  child: Material(
+                                    color: Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(14),
+                                    child: ListTile(
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(14),
+                                      ),
+                                      leading: CachedAvatar(
+                                        imageUrl: s.avatarUrl,
+                                        radius: 20,
+                                        fallbackText: s.name ?? 'Пользователь',
+                                      ),
+                                      title: Text(s.name ?? 'Пользователь'),
+                                      onTap: () {
+                                        selectedUser = s;
+                                        Navigator.pop(ctx);
+                                      },
+                                    ),
                                   ),
-                                  title: Text(s.name ?? 'Пользователь'),
-                                  onTap: () {
-                                    selectedUser = s;
-                                    Navigator.pop(ctx);
-                                  },
                                 );
                               },
                             ),
@@ -385,41 +412,14 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
-  Future<List<_MutualUser>> _loadMutualFollowers() async {
-    final myFollowingRes = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('following_id')
-        .eq('follower_id', _currentUserId);
-    final myFollowersRes = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('follower_id')
-        .eq('following_id', _currentUserId);
-
-    final followingIds = (myFollowingRes as List)
-        .map((e) => (e as Map<String, dynamic>)['following_id'] as String?)
-        .whereType<String>()
-        .toSet();
-    final followerIds = (myFollowersRes as List)
-        .map((e) => (e as Map<String, dynamic>)['follower_id'] as String?)
-        .whereType<String>()
-        .toSet();
-    final mutualIds = followingIds
-        .intersection(followerIds)
-        .toList(growable: false);
-    if (mutualIds.isEmpty) return const [];
-
-    final usersRes = await _client
-        .from(SupabaseConstants.usersTable)
-        .select('id,name,avatar')
-        .inFilter('id', mutualIds)
-        .order('name');
-    return (usersRes as List)
-        .map((e) => e as Map<String, dynamic>)
+  Future<List<_MutualUser>> _loadInviteCandidates() async {
+    final list = await loadInviteCandidates(_client, _currentUserId);
+    return list
         .map(
-          (j) => _MutualUser(
-            id: j['id'] as String,
-            name: (j['name'] as String?) ?? 'Пользователь',
-            avatarUrl: j['avatar'] as String?,
+          (e) => _MutualUser(
+            id: e.id,
+            name: e.name,
+            avatarUrl: e.avatarUrl,
           ),
         )
         .toList(growable: false);
@@ -428,12 +428,14 @@ class _ChatsPageState extends State<ChatsPage> {
   Future<void> _showCreateGroupChatDialog() async {
     final rootContext = context;
     try {
-      final users = await _loadMutualFollowers();
+      final users = await _loadInviteCandidates();
       if (!mounted) return;
       if (users.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Нет взаимных подписок для группового чата'),
+            content: Text(
+              'Нет контактов для группы. Подпишитесь на людей или получите подписчиков.',
+            ),
           ),
         );
         return;
@@ -477,16 +479,22 @@ class _ChatsPageState extends State<ChatsPage> {
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          'Участники (взаимные подписки)',
+                          'Кого пригласить (подписчики и подписки)',
                           style: Theme.of(ctx).textTheme.titleSmall,
                         ),
                         const SizedBox(height: 8),
                         ...List.generate(users.length, (i) {
                           final u = users[i];
                           final isChecked = selected.contains(u.id);
-                          return Column(
-                            children: [
-                              CheckboxListTile(
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 3),
+                            child: Material(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(14),
+                              child: CheckboxListTile(
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
                                 value: isChecked,
                                 onChanged: (v) {
                                   setStateSheet(() {
@@ -506,9 +514,7 @@ class _ChatsPageState extends State<ChatsPage> {
                                 controlAffinity:
                                     ListTileControlAffinity.trailing,
                               ),
-                              if (i != users.length - 1)
-                                const Divider(height: 1),
-                            ],
+                            ),
                           );
                         }),
                         const SizedBox(height: 10),
@@ -557,6 +563,22 @@ class _ChatsPageState extends State<ChatsPage> {
           .from(SupabaseConstants.chatGroupMembersTable)
           .upsert(members);
 
+      await GroupChatSystemApi.notifyGroupCreated(
+        _client,
+        groupId: groupId,
+        ownerId: _currentUserId,
+        title: title,
+      );
+      for (final uid in selected) {
+        final u = users.firstWhere((x) => x.id == uid);
+        await GroupChatSystemApi.notifyMemberJoined(
+          _client,
+          groupId: groupId,
+          ownerId: _currentUserId,
+          memberName: u.name,
+        );
+      }
+
       if (!rootContext.mounted) return;
       await rootContext.push(
         '/chat-group/$groupId?name=${Uri.encodeComponent(title)}',
@@ -576,23 +598,23 @@ class _ChatsPageState extends State<ChatsPage> {
           .select('id,title')
           .eq('owner_id', _currentUserId)
           .maybeSingle();
-      String channelId;
-      String title;
-      if (existing != null) {
-        channelId = existing['id'] as String;
-        title = (existing['title'] as String?) ?? 'Мой канал';
-      } else {
-        final created = await _client
-            .from(SupabaseConstants.userChannelsTable)
-            .insert({'owner_id': _currentUserId, 'title': 'Мой канал'})
-            .select('id,title')
-            .single();
-        channelId = created['id'] as String;
-        title = (created['title'] as String?) ?? 'Мой канал';
-      }
       if (!mounted) return;
+      if (existing != null) {
+        final channelId = existing['id'] as String;
+        final title = (existing['title'] as String?) ?? 'Мой канал';
+        await context.push(
+          '/channel/$channelId?title=${Uri.encodeComponent(title)}',
+        );
+        return;
+      }
+      final created = await ChannelCreateWizardSheet.show(
+        context,
+        client: _client,
+        ownerId: _currentUserId,
+      );
+      if (!mounted || created == null) return;
       await context.push(
-        '/channel/$channelId?title=${Uri.encodeComponent(title)}',
+        '/channel/${created.channelId}?title=${Uri.encodeComponent(created.title)}',
       );
     } catch (e) {
       if (!mounted) return;
@@ -782,13 +804,13 @@ class _ChatsPageState extends State<ChatsPage> {
 
       final groupsRes = await _client
           .from(SupabaseConstants.chatGroupsTable)
-          .select('id,title,created_at')
+          .select('id,title,avatar_url,created_at')
           .inFilter('id', groupIds);
       final groups = (groupsRes as List).cast<Map<String, dynamic>>();
 
       final groupMessagesRes = await _client
           .from(SupabaseConstants.chatGroupMessagesTable)
-          .select('group_id,text,created_at,sender_id')
+          .select('group_id,text,created_at,sender_id,kind')
           .inFilter('group_id', groupIds)
           .order('created_at', ascending: false)
           .limit(400);
@@ -798,6 +820,26 @@ class _ChatsPageState extends State<ChatsPage> {
         final gid = m['group_id'] as String?;
         if (gid == null) continue;
         latestByGroup.putIfAbsent(gid, () => m);
+      }
+
+      final unreadByGroupId = <String, int>{};
+      final lastIncomingByGroup = <String, DateTime?>{};
+      for (final m in allMessages) {
+        final kind = m['kind'] as String? ?? 'text';
+        if (kind != 'text') continue;
+        final gid = m['group_id'] as String?;
+        if (gid == null) continue;
+        final senderId = m['sender_id'] as String;
+        final createdAt = DateTime.parse(m['created_at'] as String);
+        if (senderId == _currentUserId) continue;
+        final prevIn = lastIncomingByGroup[gid];
+        if (prevIn == null || createdAt.isAfter(prevIn)) {
+          lastIncomingByGroup[gid] = createdAt;
+        }
+        final lr = _chatStorage.getLastReadAt(gid);
+        if (lr == null || createdAt.isAfter(lr)) {
+          unreadByGroupId[gid] = (unreadByGroupId[gid] ?? 0) + 1;
+        }
       }
 
       return groups.map((g) {
@@ -812,15 +854,95 @@ class _ChatsPageState extends State<ChatsPage> {
           kind: _ChatThreadKind.group,
           peerId: id,
           peerName: title,
-          peerAvatarUrl: null,
+          peerAvatarUrl: (g['avatar_url'] as String?)?.trim().isEmpty == true
+              ? null
+              : g['avatar_url'] as String?,
           lastMessageText: (latest?['text'] as String?) ?? 'Группа создана',
           lastMessageAt: latest != null
               ? DateTime.parse(latest['created_at'] as String)
               : (fallbackCreatedAt ?? DateTime.now()),
           lastMessageSenderId:
               (latest?['sender_id'] as String?) ?? _currentUserId,
-          unreadCount: 0,
-          lastIncomingAt: null,
+          unreadCount: unreadByGroupId[id] ?? 0,
+          lastIncomingAt: lastIncomingByGroup[id],
+        );
+      }).toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  Future<List<_ChatThread>> _loadChannelThreads() async {
+    try {
+      final membershipRes = await _client
+          .from(SupabaseConstants.channelSubscribersTable)
+          .select('channel_id')
+          .eq('user_id', _currentUserId);
+      final channelIds = (membershipRes as List)
+          .map((e) => (e as Map<String, dynamic>)['channel_id'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList(growable: false);
+      if (channelIds.isEmpty) return const [];
+
+      final channelsRes = await _client
+          .from(SupabaseConstants.userChannelsTable)
+          .select('id,title,avatar_url,created_at')
+          .inFilter('id', channelIds);
+      final channels = (channelsRes as List).cast<Map<String, dynamic>>();
+
+      final channelMessagesRes = await _client
+          .from(SupabaseConstants.channelMessagesTable)
+          .select('channel_id,text,created_at,sender_id')
+          .inFilter('channel_id', channelIds)
+          .order('created_at', ascending: false)
+          .limit(400);
+      final allMessages =
+          (channelMessagesRes as List).cast<Map<String, dynamic>>();
+
+      final latestByChannel = <String, Map<String, dynamic>>{};
+      final unreadByChannel = <String, int>{};
+      final lastIncomingByChannel = <String, DateTime?>{};
+      for (final m in allMessages) {
+        final cid = m['channel_id'] as String?;
+        if (cid == null) continue;
+        latestByChannel.putIfAbsent(cid, () => m);
+        final senderId = m['sender_id'] as String;
+        final createdAt = DateTime.parse(m['created_at'] as String);
+        if (senderId == _currentUserId) continue;
+        final prevIn = lastIncomingByChannel[cid];
+        if (prevIn == null || createdAt.isAfter(prevIn)) {
+          lastIncomingByChannel[cid] = createdAt;
+        }
+        final lr = _chatStorage.getLastReadAt(cid);
+        if (lr == null || createdAt.isAfter(lr)) {
+          unreadByChannel[cid] = (unreadByChannel[cid] ?? 0) + 1;
+        }
+      }
+
+      return channels.map((c) {
+        final id = c['id'] as String;
+        final title = (c['title'] as String?) ?? 'Канал';
+        final latest = latestByChannel[id];
+        final createdAtRaw = c['created_at'] as String?;
+        final fallbackCreatedAt = createdAtRaw != null
+            ? DateTime.tryParse(createdAtRaw)
+            : null;
+        return _ChatThread(
+          kind: _ChatThreadKind.channel,
+          peerId: id,
+          peerName: title,
+          peerAvatarUrl: (c['avatar_url'] as String?)?.trim().isEmpty == true
+              ? null
+              : c['avatar_url'] as String?,
+          lastMessageText: (latest?['text'] as String?) ?? 'Канал создан',
+          lastMessageAt: latest != null
+              ? DateTime.parse(latest['created_at'] as String)
+              : (fallbackCreatedAt ?? DateTime.now()),
+          lastMessageSenderId:
+              (latest?['sender_id'] as String?) ?? _currentUserId,
+          unreadCount: unreadByChannel[id] ?? 0,
+          lastIncomingAt: lastIncomingByChannel[id],
         );
       }).toList(growable: false);
     } catch (_) {
@@ -888,6 +1010,7 @@ class _ChatsPageState extends State<ChatsPage> {
                 setState(() {
                   _pageFuture = _loadPageData();
                 });
+                _syncChatBadge();
               },
             ),
             if (t.kind == _ChatThreadKind.direct) ...[
@@ -913,6 +1036,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   setState(() {
                     _pageFuture = _loadPageData();
                   });
+                  _syncChatBadge();
                 },
               ),
               ListTile(
@@ -988,6 +1112,7 @@ class _ChatsPageState extends State<ChatsPage> {
         setState(() {
           _pageFuture = _loadPageData();
         });
+        _syncChatBadge();
       }
     } catch (e) {
       debugPrint('_deleteChat error: $e');
@@ -1177,6 +1302,19 @@ class _ChatsPageState extends State<ChatsPage> {
   }
 
   Future<void> _openChat(_ChatThread t) async {
+    if (t.kind == _ChatThreadKind.channel) {
+      await context.push(
+        '/channel/${t.peerId}?title=${Uri.encodeComponent(t.peerName)}',
+      );
+      if (mounted) {
+        setState(() {
+          _pageFuture = _loadPageData();
+        });
+        _syncChatBadge();
+      }
+      return;
+    }
+
     if (t.kind == _ChatThreadKind.group) {
       await context
           .push('/chat-group/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}');
@@ -1184,6 +1322,7 @@ class _ChatsPageState extends State<ChatsPage> {
         setState(() {
           _pageFuture = _loadPageData();
         });
+        _syncChatBadge();
       }
       return;
     }
@@ -1239,6 +1378,7 @@ class _ChatsPageState extends State<ChatsPage> {
       setState(() {
         _pageFuture = _loadPageData();
       });
+      _syncChatBadge();
     }
   }
 
@@ -1251,6 +1391,7 @@ class _ChatsPageState extends State<ChatsPage> {
     setState(() {
       _pageFuture = _loadPageData();
     });
+    _syncChatBadge();
   }
 
   Future<void> _setThreadArchived(_ChatThread t, bool archived) async {
@@ -1259,6 +1400,7 @@ class _ChatsPageState extends State<ChatsPage> {
     setState(() {
       _pageFuture = _loadPageData();
     });
+    _syncChatBadge();
   }
 
   Widget _buildThreadList(BuildContext context, List<_ChatThread> threads) {
@@ -1280,119 +1422,169 @@ class _ChatsPageState extends State<ChatsPage> {
         } catch (_) {
           // Error state will be shown by FutureBuilder.
         }
+        if (mounted) _syncChatBadge();
       },
-      child: ListView.separated(
+      child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: threads.length,
-        separatorBuilder: (context, index) => const Divider(height: 1),
         itemBuilder: (context, index) {
           final t = threads[index];
           final isUnread = t.unreadCount > 0;
-          return Dismissible(
-            key: ValueKey(t.storageKey),
-            direction: DismissDirection.horizontal,
-            confirmDismiss: (direction) async {
-              if (direction == DismissDirection.startToEnd) {
-                await _markThreadRead(t);
+          final isOnline = _isProbablyOnline(t);
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+            child: Dismissible(
+              key: ValueKey(t.storageKey),
+              direction: DismissDirection.horizontal,
+              confirmDismiss: (direction) async {
+                if (direction == DismissDirection.startToEnd) {
+                  await _markThreadRead(t);
+                  return false;
+                }
+                if (direction == DismissDirection.endToStart) {
+                  await _setThreadArchived(t, true);
+                  return false;
+                }
                 return false;
-              }
-              if (direction == DismissDirection.endToStart) {
-                await _setThreadArchived(t, true);
-                return false;
-              }
-              return false;
-            },
-            background: _SwipeActionBackground(
-              color: Colors.blue.withValues(alpha: 0.18),
-              icon: Icons.mark_chat_read_outlined,
-              label: 'Прочитано',
-              alignRight: false,
-            ),
-            secondaryBackground: _SwipeActionBackground(
-              color: Colors.orange.withValues(alpha: 0.18),
-              icon: Icons.archive_outlined,
-              label: 'В архив',
-              alignRight: true,
-            ),
-            child: ListTile(
-              leading: SizedBox(
-                width: 44,
-                height: 44,
-                child: Center(
-                  child: CachedAvatar(
-                    imageUrl: t.peerAvatarUrl,
-                    radius: 22,
-                    fallbackText: t.peerName,
+              },
+              background: _SwipeActionBackground(
+                color: Colors.blue.withValues(alpha: 0.18),
+                icon: Icons.mark_chat_read_outlined,
+                label: 'Прочитано',
+                alignRight: false,
+              ),
+              secondaryBackground: _SwipeActionBackground(
+                color: Colors.orange.withValues(alpha: 0.18),
+                icon: Icons.archive_outlined,
+                label: 'В архив',
+                alignRight: true,
+              ),
+              child: Material(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(18),
+                child: ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18),
                   ),
-                ),
-              ),
-              title: Text(
-                t.peerName,
-                style: TextStyle(
-                  fontWeight: isUnread ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              subtitle: Text(
-                t.lastMessageText,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _timeAgo(t.lastMessageAt),
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                  if (isUnread) ...[
-                    const SizedBox(width: 6),
-                    if (t.unreadCount > 1)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '${t.unreadCount}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
+                  minVerticalPadding: 10,
+                  leading: SizedBox(
+                    width: 52,
+                    height: 52,
+                    child: Center(
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          CachedAvatar(
+                            imageUrl: t.peerAvatarUrl,
+                            radius: 26,
+                            fallbackText: t.peerName,
                           ),
-                        ),
-                      )
-                    else
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                        ),
+                          if (isOnline)
+                            Positioned(
+                              right: -1,
+                              bottom: -1,
+                              child: Container(
+                                width: 13,
+                                height: 13,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF22C55E),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
-                  IconButton(
-                    icon: const Icon(Icons.more_vert, size: 22),
-                    onPressed: () => _showThreadMenu(context, t),
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                      minWidth: 36,
-                      minHeight: 36,
                     ),
                   ),
-                ],
+                  title: Text(
+                    t.peerName,
+                    style: TextStyle(
+                      fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                  subtitle: Text(
+                    t.lastMessageText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
+                    ),
+                  ),
+                  trailing: SizedBox(
+                    width: 54,
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _timeAgo(t.lastMessageAt),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: isUnread
+                                    ? const Color(0xFF2563EB)
+                                    : Colors.grey.shade500,
+                                fontWeight:
+                                    isUnread ? FontWeight.w600 : FontWeight.w500,
+                              ),
+                        ),
+                        const SizedBox(height: 6),
+                        if (isUnread)
+                          if (t.unreadCount > 1)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2563EB),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                '${t.unreadCount}',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  height: 1,
+                                ),
+                              ),
+                            )
+                          else
+                            Container(
+                              width: 9,
+                              height: 9,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF2563EB),
+                                shape: BoxShape.circle,
+                              ),
+                            )
+                        else
+                          const SizedBox(height: 9),
+                      ],
+                    ),
+                  ),
+                  onTap: () => _openChat(t),
+                  onLongPress: () => _showThreadMenu(context, t),
+                ),
               ),
-              onTap: () => _openChat(t),
-              onLongPress: () => _showThreadMenu(context, t),
             ),
           );
         },
       ),
     );
+  }
+
+  bool _isProbablyOnline(_ChatThread t) {
+    if (t.kind != _ChatThreadKind.direct) return false;
+    final diff = DateTime.now().difference(t.lastMessageAt);
+    return diff.inMinutes <= 5;
   }
 }
 
@@ -1482,7 +1674,7 @@ class _ChatThread {
   }
 }
 
-enum _ChatThreadKind { direct, group }
+enum _ChatThreadKind { direct, group, channel }
 
 class _ChatsPageData {
   const _ChatsPageData({

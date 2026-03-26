@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -224,6 +225,9 @@ class _LoginPageState extends State<LoginPage>
       },
       builder: (context, state) {
         final loading = state is AuthLoading;
+        final appleAvailable = !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.iOS ||
+                defaultTargetPlatform == TargetPlatform.macOS);
         const titleColor = Color(0xFF1A1A1E);
         const subtitleColor = Color(0xFF5C5C66);
         return SingleChildScrollView(
@@ -316,6 +320,19 @@ class _LoginPageState extends State<LoginPage>
                   onPressed: loading ? null : _submit,
                   loading: loading,
                 ),
+                if (appleAvailable) ...[
+                  const SizedBox(height: 12),
+                  FilledButton.tonal(
+                    onPressed: loading
+                        ? null
+                        : () {
+                            context
+                                .read<AuthBloc>()
+                                .add(const AuthSignInWithAppleRequested());
+                          },
+                    child: const Text('Продолжить с Apple'),
+                  ),
+                ],
                 const SizedBox(height: 24),
                 TextButton(
                   onPressed: () => context.push('/register'),

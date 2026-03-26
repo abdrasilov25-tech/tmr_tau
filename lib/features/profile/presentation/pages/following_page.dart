@@ -102,26 +102,53 @@ class _FollowingPageState extends State<FollowingPage> {
               ),
             );
           }
-          return ListView.separated(
+          return ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
             itemCount: list.length,
-            separatorBuilder: (context, index) => const Divider(height: 1),
             itemBuilder: (context, index) {
               final u = list[index];
-              return ListTile(
-                leading: CachedAvatar(
-                  imageUrl: u.avatarUrl,
-                  radius: 22,
-                  fallbackText: u.name,
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Material(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(16),
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    leading: CachedAvatar(
+                      imageUrl: u.avatarUrl,
+                      radius: 24,
+                      fallbackText: u.name,
+                    ),
+                    title: Text(
+                      u.name,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: u.bio != null && u.bio!.isNotEmpty
+                        ? Text(
+                            u.bio!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        : null,
+                    trailing: FilledButton.tonal(
+                      onPressed: () => context.push(
+                        '/chat/${u.id}?name=${Uri.encodeComponent(u.name)}',
+                      ),
+                      style: FilledButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                      ),
+                      child: const Text('Сообщение'),
+                    ),
+                    onTap: () => context.push('/profile/${u.id}'),
+                  ),
                 ),
-                title: Text(u.name),
-                subtitle: u.bio != null && u.bio!.isNotEmpty
-                    ? Text(
-                        u.bio!,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    : null,
-                onTap: () => context.push('/profile/${u.id}'),
               );
             },
           );

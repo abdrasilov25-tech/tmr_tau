@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../chat/presentation/widgets/chat_stories_friends_strip.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -1082,10 +1083,13 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: _PostMedia(
-              imageUrls: p.displayImageUrls,
-              videoUrl: p.videoUrl,
-              fillHeight: mediaHeight,
+            child: DoubleTapLikeBurst(
+              onDoubleTapLike: widget.onLike,
+              child: _PostMedia(
+                imageUrls: p.displayImageUrls,
+                videoUrl: p.videoUrl,
+                fillHeight: mediaHeight,
+              ),
             ),
           ),
           // Верхняя панель: автор.

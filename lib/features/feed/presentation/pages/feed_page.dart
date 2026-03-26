@@ -6,6 +6,7 @@ import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/feed_product_card_skeleton.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
+import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../product/presentation/widgets/product_promo_badges.dart';
 import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
@@ -109,7 +110,7 @@ class _FeedPageState extends State<FeedPage> {
                               ),
                               const SizedBox(height: 24),
                               FilledButton.icon(
-                                onPressed: () => context.go('/home/add'),
+                                onPressed: () => context.go('/add-product'),
                                 icon: const Icon(Icons.add),
                                 label: const Text('Добавить товар'),
                               ),
@@ -606,25 +607,32 @@ class _ProductCard extends StatelessWidget {
               builder: (context, constraints) {
                 final dpr = MediaQuery.devicePixelRatioOf(context);
                 final w = constraints.maxWidth;
+                final imageStack = Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedProductImage(
+                      imageUrl: product.imageUrl,
+                      width: double.infinity,
+                      height: double.infinity,
+                      memCacheWidth: (w * dpr).round(),
+                      compactPlaceholder: true,
+                    ),
+                    Positioned(
+                      top: 10,
+                      left: 10,
+                      child: ProductPromoBadges(product: product),
+                    ),
+                  ],
+                );
                 return AspectRatio(
                   aspectRatio: 1,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      CachedProductImage(
-                        imageUrl: product.imageUrl,
-                        width: double.infinity,
-                        height: double.infinity,
-                        memCacheWidth: (w * dpr).round(),
-                        compactPlaceholder: true,
-                      ),
-                      Positioned(
-                        top: 10,
-                        left: 10,
-                        child: ProductPromoBadges(product: product),
-                      ),
-                    ],
-                  ),
+                  child: onLike != null
+                      ? DoubleTapLikeBurst(
+                          iconSize: 80,
+                          onDoubleTapLike: onLike!,
+                          child: imageStack,
+                        )
+                      : imageStack,
                 );
               },
             ),

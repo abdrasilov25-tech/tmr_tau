@@ -15,19 +15,59 @@ class AuthRepositoryImpl implements AuthRepository {
   AppUser? get currentUser => _cachedUser;
 
   @override
-  Future<AppUser?> getCurrentUserOnce() async {
-    try {
-      final uid = _client.auth.currentUser?.id;
-      if (uid == null) {
-        _cachedUser = null;
-        return null;
-      }
-      _cachedUser = await _dataSource.fetchUserProfile(uid);
-      return _cachedUser;
-    } catch (_) {
+  AppUser? userFromCurrentSession() {
+    final authUser = _client.auth.currentUser;
+    if (authUser == null) {
       _cachedUser = null;
       return null;
     }
+    final u = _fallbackAppUser(authUser);
+    _cachedUser = u;
+    return u;
+  }
+
+  @override
+  Future<AppUser?> fetchUserProfileFromRemote(String uid) async {
+    try {
+      final profile = await _dataSource.fetchUserProfile(uid);
+      if (profile != null) {
+        _cachedUser = profile;
+        return profile;
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<AppUser?> getCurrentUserOnce() async {
+    final stub = userFromCurrentSession();
+    if (stub == null) return null;
+    final full = await fetchUserProfileFromRemote(stub.id);
+    _cachedUser = full ?? stub;
+    return _cachedUser;
+  }
+
+  /// Пока строка в `users` недоступна или сеть тормозит — не блокируем вход: данные из JWT/session.
+  AppUser _fallbackAppUser(User authUser) {
+    final meta = authUser.userMetadata;
+    String? username;
+    String? avatarUrl;
+    if (meta != null) {
+      final u = meta['username'];
+      if (u is String) username = u;
+      final a = meta['avatar_url'];
+      if (a is String) avatarUrl = a;
+    }
+    return AppUser(
+      id: authUser.id,
+      email: authUser.email ?? '',
+      name: _getName(authUser),
+      username: username,
+      avatarUrl: avatarUrl,
+      followersCount: 0,
+    );
   }
 
   @override

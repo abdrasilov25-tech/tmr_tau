@@ -14,10 +14,17 @@ void main() {
   late MockAuthRepository mockAuthRepository;
   late MockMultiAccountStorage mockMultiAccountStorage;
 
-  const testUser = AppUser(
+  const stubUser = AppUser(
     id: 'user-1',
     email: 'test@test.com',
-    name: 'Test User',
+    name: 'Stub',
+  );
+
+  const fullUser = AppUser(
+    id: 'user-1',
+    email: 'test@test.com',
+    name: 'From DB',
+    followersCount: 7,
   );
 
   setUpAll(() {
@@ -35,6 +42,8 @@ void main() {
         .thenAnswer((_) async {});
     when(() => mockMultiAccountStorage.removeAccount(any()))
         .thenAnswer((_) async {});
+    when(() => mockAuthRepository.fetchUserProfileFromRemote(any()))
+        .thenAnswer((_) async => null);
   });
 
   group('AuthBloc', () {
@@ -46,45 +55,63 @@ void main() {
     });
 
     blocTest<AuthBloc, AuthState>(
-      'AuthCheckRequested: нет пользователя -> AuthUnauthenticated',
+      'AuthCheckRequested: нет сессии -> AuthUnauthenticated (без AuthLoading)',
       build: () {
-        when(() => mockAuthRepository.getCurrentUserOnce())
+        when(() => mockAuthRepository.userFromCurrentSession())
+            .thenReturn(null);
+        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+      },
+      act: (bloc) => bloc.add(const AuthCheckRequested()),
+      expect: () => [isA<AuthUnauthenticated>()],
+    );
+
+    blocTest<AuthBloc, AuthState>(
+      'AuthCheckRequested: сессия есть, профиль с сервера не пришёл -> только stub',
+      build: () {
+        when(() => mockAuthRepository.userFromCurrentSession())
+            .thenReturn(stubUser);
+        when(() => mockAuthRepository.fetchUserProfileFromRemote('user-1'))
             .thenAnswer((_) async => null);
         return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
-        isA<AuthLoading>(),
-        isA<AuthUnauthenticated>(),
+        const AuthAuthenticated(stubUser, fromSessionOnly: true),
       ],
     );
 
     blocTest<AuthBloc, AuthState>(
-      'AuthCheckRequested: есть пользователь -> AuthAuthenticated',
+      'AuthCheckRequested: сессия + профиль с сервера -> stub затем полный пользователь',
       build: () {
-        when(() => mockAuthRepository.getCurrentUserOnce())
-            .thenAnswer((_) async => testUser);
-        when(() => mockAuthRepository.currentUser).thenReturn(testUser);
+        when(() => mockAuthRepository.userFromCurrentSession())
+            .thenReturn(stubUser);
+        when(() => mockAuthRepository.fetchUserProfileFromRemote('user-1'))
+            .thenAnswer((_) async => fullUser);
         return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
-        isA<AuthLoading>(),
-        isA<AuthAuthenticated>(),
+        const AuthAuthenticated(stubUser, fromSessionOnly: true),
+        const AuthAuthenticated(fullUser, fromSessionOnly: false),
       ],
     );
 
     blocTest<AuthBloc, AuthState>(
-      'AuthCheckRequested: ошибка репозитория -> AuthUnauthenticated',
+      'AuthCheckRequested: после загрузки профиля сессии уже нет -> второй emit не делаем',
       build: () {
-        when(() => mockAuthRepository.getCurrentUserOnce())
-            .thenThrow(Exception('network'));
+        var sessionProbe = 0;
+        when(() => mockAuthRepository.userFromCurrentSession())
+            .thenAnswer((_) {
+          sessionProbe++;
+          return sessionProbe == 1 ? stubUser : null;
+        });
+        when(() => mockAuthRepository.fetchUserProfileFromRemote('user-1'))
+            .thenAnswer((_) async => fullUser);
         return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
-        isA<AuthLoading>(),
-        isA<AuthUnauthenticated>(),
+        const AuthAuthenticated(stubUser, fromSessionOnly: true),
       ],
     );
 
@@ -93,7 +120,7 @@ void main() {
       build: () {
         when(() => mockAuthRepository.signInWithEmail(any(), any()))
             .thenAnswer((_) async => {});
-        when(() => mockAuthRepository.currentUser).thenReturn(testUser);
+        when(() => mockAuthRepository.currentUser).thenReturn(stubUser);
         return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
       },
       act: (bloc) => bloc.add(const AuthSignInRequested(

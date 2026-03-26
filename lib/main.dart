@@ -10,7 +10,20 @@ import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-bool _supabaseInitialized = false;
+Future<bool> _initializeSupabase(String url, String anonKey) async {
+  if (url.isEmpty || anonKey.isEmpty) return false;
+  try {
+    await Supabase.initialize(
+      url: url,
+      anonKey: anonKey,
+      debug: false,
+    );
+    return true;
+  } catch (e, st) {
+    debugPrint('Supabase init failed: $e $st');
+    return false;
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,18 +38,13 @@ Future<void> main() async {
     return true;
   }());
 
-  try {
-    await Supabase.initialize(
-      url: supabaseUrl,
-      anonKey: supabaseAnonKey,
-      debug: false,
-    );
-    _supabaseInitialized = true;
-  } catch (e, st) {
-    debugPrint('Supabase init failed: $e $st');
-  }
-
-  final prefs = await SharedPreferences.getInstance();
+  /// Параллельно: Supabase и SharedPreferences — быстрее первый кадр после `runApp`.
+  final startup = await Future.wait<Object?>([
+    _initializeSupabase(supabaseUrl, supabaseAnonKey),
+    SharedPreferences.getInstance(),
+  ]);
+  final supabaseOk = startup[0] == true;
+  final prefs = startup[1]! as SharedPreferences;
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
   final chatStoryListStorage = ChatStoryListStorage(prefs);
@@ -47,7 +55,7 @@ Future<void> main() async {
   runApp(TmrTauApp(
     supabaseUrl: supabaseUrl,
     supabaseAnonKey: supabaseAnonKey,
-    supabaseInitialized: _supabaseInitialized,
+    supabaseInitialized: supabaseOk,
     localReactionsStorage: localReactions,
     chatListStorage: chatListStorage,
     chatStoryListStorage: chatStoryListStorage,

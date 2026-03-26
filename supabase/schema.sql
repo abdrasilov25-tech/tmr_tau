@@ -868,6 +868,11 @@ create table if not exists public.user_channels (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null unique references public.users(id) on delete cascade,
   title text not null default 'Мой канал',
+  description text,
+  avatar_url text,
+  sign_posts boolean not null default true,
+  show_link_preview boolean not null default true,
+  silent_broadcast boolean not null default false,
   created_at timestamptz default now()
 );
 

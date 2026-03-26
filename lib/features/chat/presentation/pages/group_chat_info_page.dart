@@ -8,6 +8,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../data/group_chat_system_api.dart';
+import '../../data/invite_candidates.dart';
 
 class GroupChatInfoPage extends StatefulWidget {
   const GroupChatInfoPage({
@@ -203,82 +205,127 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
     final current = _currentUserId;
     if (current == null) return;
     try {
-      final myFollowingRes = await _client
-          .from(SupabaseConstants.followersTable)
-          .select('following_id')
-          .eq('follower_id', current);
-      final myFollowersRes = await _client
-          .from(SupabaseConstants.followersTable)
-          .select('follower_id')
-          .eq('following_id', current);
-      final followingIds = (myFollowingRes as List)
-          .map((e) => (e as Map<String, dynamic>)['following_id'] as String?)
-          .whereType<String>()
-          .toSet();
-      final followerIds = (myFollowersRes as List)
-          .map((e) => (e as Map<String, dynamic>)['follower_id'] as String?)
-          .whereType<String>()
-          .toSet();
-      final candidates = followingIds
-          .intersection(followerIds)
-          .where((id) => !memberIds.contains(id))
-          .toList(growable: false);
-      if (candidates.isEmpty) {
+      final all = await loadInviteCandidates(_client, current);
+      final users = all.where((u) => !memberIds.contains(u.id)).toList();
+      if (users.isEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Нет доступных пользователей для добавления')),
+          const SnackBar(
+            content: Text(
+              'Некого добавить — подпишитесь на людей или получите подписчиков.',
+            ),
+          ),
         );
         return;
       }
-      final usersRes = await _client
-          .from(SupabaseConstants.usersTable)
-          .select('id,name,avatar')
-          .inFilter('id', candidates)
-          .order('name');
       if (!mounted) return;
-      final users = (usersRes as List).cast<Map<String, dynamic>>();
-      String? pickedId;
-      await showModalBottomSheet<void>(
+      final selected = <String>{};
+      final ok = await showModalBottomSheet<bool>(
         context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.white,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
         builder: (ctx) {
-          return SafeArea(
-            child: ListView.builder(
-              itemCount: users.length,
-              itemBuilder: (_, i) {
-                final u = users[i];
-                return ListTile(
-                  leading: CachedAvatar(
-                    imageUrl: u['avatar'] as String?,
-                    radius: 18,
-                    fallbackText: (u['name'] as String?) ?? 'Пользователь',
+          final h = MediaQuery.sizeOf(ctx).height * 0.55;
+          return StatefulBuilder(
+            builder: (ctx, setSheet) {
+              return SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Добавить участников',
+                        style: Theme.of(ctx).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: h,
+                        child: ListView.builder(
+                          itemCount: users.length,
+                          itemBuilder: (_, i) {
+                            final u = users[i];
+                            final isOn = selected.contains(u.id);
+                            return CheckboxListTile(
+                              value: isOn,
+                              onChanged: (v) {
+                                setSheet(() {
+                                  if (v == true) {
+                                    selected.add(u.id);
+                                  } else {
+                                    selected.remove(u.id);
+                                  }
+                                });
+                              },
+                              secondary: CachedAvatar(
+                                imageUrl: u.avatarUrl,
+                                radius: 18,
+                                fallbackText: u.name,
+                              ),
+                              title: Text(u.name),
+                              controlAffinity: ListTileControlAffinity.trailing,
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () => Navigator.pop(ctx, true),
+                        child: const Text('Добавить выбранных'),
+                      ),
+                    ],
                   ),
-                  title: Text((u['name'] as String?) ?? 'Пользователь'),
-                  onTap: () {
-                    pickedId = u['id'] as String?;
-                    Navigator.pop(ctx);
-                  },
-                );
-              },
-            ),
+                ),
+              );
+            },
           );
         },
       );
-      if (pickedId == null) return;
-      await _client.from(SupabaseConstants.chatGroupMembersTable).insert({
-        'group_id': widget.groupId,
-        'user_id': pickedId!,
-      });
+      if (ok != true || selected.isEmpty) return;
+      for (final uid in selected) {
+        final u = users.firstWhere((x) => x.id == uid);
+        await _client.from(SupabaseConstants.chatGroupMembersTable).insert({
+          'group_id': widget.groupId,
+          'user_id': uid,
+        });
+        await GroupChatSystemApi.notifyMemberJoined(
+          _client,
+          groupId: widget.groupId,
+          ownerId: current,
+          memberName: u.name,
+        );
+      }
       await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось добавить участника: $e')),
+        SnackBar(content: Text('Не удалось добавить участников: $e')),
       );
     }
   }
 
   Future<void> _removeMember(String userId) async {
     if (!_isOwner) return;
+    final ownerId = _currentUserId;
+    if (ownerId == null) return;
+    var name = 'Пользователь';
+    for (final m in _members) {
+      if (m.id == userId) {
+        name = m.name;
+        break;
+      }
+    }
+    await GroupChatSystemApi.notifyMemberRemoved(
+      _client,
+      groupId: widget.groupId,
+      ownerId: ownerId,
+      memberName: name,
+    );
     await _client
         .from(SupabaseConstants.chatGroupMembersTable)
         .delete()
@@ -290,6 +337,19 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
   Future<void> _leaveGroup() async {
     final current = _currentUserId;
     if (current == null) return;
+    var name = 'Пользователь';
+    for (final m in _members) {
+      if (m.id == current) {
+        name = m.name;
+        break;
+      }
+    }
+    await GroupChatSystemApi.notifySelfLeft(
+      _client,
+      groupId: widget.groupId,
+      userId: current,
+      displayName: name,
+    );
     await _client
         .from(SupabaseConstants.chatGroupMembersTable)
         .delete()

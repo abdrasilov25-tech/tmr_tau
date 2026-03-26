@@ -25,17 +25,26 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   final MultiAccountStorage _multiAccountStorage;
 
   void _onCheckRequested(AuthCheckRequested event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
-    try {
-      final user = await _authRepository.getCurrentUserOnce();
-      if (user != null) {
-        // При успешном восстановлении сессии сохраняем последний активный аккаунт.
-        await _multiAccountStorage.setLastActiveAccountId(user.id);
-      }
-      if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
-    } catch (_) {
+    final stub = _authRepository.userFromCurrentSession();
+    if (stub == null) {
       if (!isClosed) emit(AuthUnauthenticated());
+      return;
     }
+    try {
+      await _multiAccountStorage.setLastActiveAccountId(stub.id);
+    } catch (_) {}
+    if (!isClosed) {
+      emit(AuthAuthenticated(stub, fromSessionOnly: true));
+    }
+    try {
+      final full = await _authRepository.fetchUserProfileFromRemote(stub.id);
+      if (full != null && !isClosed) {
+        final still = _authRepository.userFromCurrentSession();
+        if (still?.id == stub.id) {
+          emit(AuthAuthenticated(full, fromSessionOnly: false));
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _onSignInRequested(AuthSignInRequested event, Emitter<AuthState> emit) async {

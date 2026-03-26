@@ -285,6 +285,8 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   List<PostEntity> _publicationPosts = const [];
   bool _loadingPublications = true;
   String? _currentUserId;
+  bool _isMutualFollow = false;
+  List<SellerProfileEntity> _commonFollowers = const [];
 
   @override
   void initState() {
@@ -294,6 +296,18 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
       _currentUserId = authState.user.id;
     }
     _loadPublications();
+    _loadMutualFollow();
+    _loadCommonFollowers();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SellerProfileView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.profile.id != widget.profile.id ||
+        oldWidget.profile.isFollowingByMe != widget.profile.isFollowingByMe) {
+      _loadMutualFollow();
+      _loadCommonFollowers();
+    }
   }
 
   Future<void> _loadPublications() async {
@@ -313,6 +327,154 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
       if (!mounted) return;
       setState(() => _loadingPublications = false);
     }
+  }
+
+  Future<void> _loadMutualFollow() async {
+    final me = _currentUserId;
+    if (me == null || me == widget.profile.id) return;
+    if (!widget.profile.isFollowingByMe) {
+      if (!mounted) return;
+      setState(() => _isMutualFollow = false);
+      return;
+    }
+    try {
+      final peerFollowsMe = await Supabase.instance.client
+          .from(SupabaseConstants.followersTable)
+          .select('follower_id')
+          .eq('follower_id', widget.profile.id)
+          .eq('following_id', me)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() => _isMutualFollow = peerFollowsMe != null);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isMutualFollow = false);
+    }
+  }
+
+  Future<void> _loadCommonFollowers() async {
+    final me = _currentUserId;
+    if (me == null || me == widget.profile.id) {
+      if (!mounted) return;
+      setState(() => _commonFollowers = const []);
+      return;
+    }
+    try {
+      final myFollowingRes = await Supabase.instance.client
+          .from(SupabaseConstants.followersTable)
+          .select('following_id')
+          .eq('follower_id', me);
+      final myFollowingIds = (myFollowingRes as List)
+          .map((e) => (e as Map<String, dynamic>)['following_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      if (myFollowingIds.isEmpty) {
+        if (!mounted) return;
+        setState(() => _commonFollowers = const []);
+        return;
+      }
+
+      final targetFollowersRes = await Supabase.instance.client
+          .from(SupabaseConstants.followersTable)
+          .select('follower_id')
+          .eq('following_id', widget.profile.id);
+      final targetFollowerIds = (targetFollowersRes as List)
+          .map((e) => (e as Map<String, dynamic>)['follower_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      if (targetFollowerIds.isEmpty) {
+        if (!mounted) return;
+        setState(() => _commonFollowers = const []);
+        return;
+      }
+
+      final commonIds = myFollowingIds.intersection(targetFollowerIds).toList();
+      if (commonIds.isEmpty) {
+        if (!mounted) return;
+        setState(() => _commonFollowers = const []);
+        return;
+      }
+
+      final usersRes = await Supabase.instance.client
+          .from(SupabaseConstants.usersTable)
+          .select('id,name,avatar,bio')
+          .inFilter('id', commonIds.take(20).toList(growable: false));
+      final rows = (usersRes as List).cast<Map<String, dynamic>>();
+      final mapped = rows
+          .map(
+            (m) => SellerProfileEntity(
+              id: m['id'] as String,
+              name: (m['name'] as String?) ?? 'Пользователь',
+              avatarUrl: m['avatar'] as String?,
+              bio: m['bio'] as String?,
+              followersCount: 0,
+              followingCount: 0,
+              isFollowingByMe: true,
+              products: const [],
+              isVerified: false,
+            ),
+          )
+          .toList(growable: false);
+      if (!mounted) return;
+      setState(() => _commonFollowers = mapped);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _commonFollowers = const []);
+    }
+  }
+
+  Future<void> _showCommonFollowersSheet() async {
+    if (_commonFollowers.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Общие',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                itemCount: _commonFollowers.length,
+                itemBuilder: (context, index) {
+                  final u = _commonFollowers[index];
+                  return ListTile(
+                    leading: CachedAvatar(
+                      imageUrl: u.avatarUrl,
+                      radius: 22,
+                      fallbackText: u.name,
+                    ),
+                    title: Text(u.name),
+                    subtitle: u.bio != null && u.bio!.isNotEmpty
+                        ? Text(
+                            u.bio!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        : null,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      context.push('/profile/${u.id}');
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -426,25 +588,119 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                     ),
                   ],
                 ),
+                if (_commonFollowers.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: _showCommonFollowersSheet,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 6,
+                      ),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: 74,
+                            height: 28,
+                            child: Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                for (var i = 0;
+                                    i < (_commonFollowers.length < 3
+                                        ? _commonFollowers.length
+                                        : 3);
+                                    i++)
+                                  Positioned(
+                                    left: i * 18,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: CachedAvatar(
+                                        imageUrl: _commonFollowers[i].avatarUrl,
+                                        radius: 13,
+                                        fallbackText: _commonFollowers[i].name,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Expanded(
+                            child: Text(
+                              _commonFollowers.length == 1
+                                  ? 'Подписаны: ${_commonFollowers.first.name}'
+                                  : 'Подписаны: ${_commonFollowers.take(2).map((u) => u.name).join(', ')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                    color:
+                                        ThemedContentSurface.profileTextSecondary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right_rounded, size: 20),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
                 if (_currentUserId != null && _currentUserId != profile.id) ...[
                   const SizedBox(height: 16),
                   Row(
                     children: [
                       Expanded(
-                        child: FilledButton(
-                          onPressed: () {
-                            final uid = (context.read<AuthBloc>().state as AuthAuthenticated).user.id;
-                            context.read<ProfileBloc>().add(
-                                  ProfileToggleFollow(
-                                    followerId: uid,
-                                    followingId: profile.id,
-                                  ),
-                                );
-                          },
-                          child: Text(
-                            profile.isFollowingByMe ? 'Отписаться' : 'Подписаться',
-                          ),
-                        ),
+                        child: (profile.isFollowingByMe
+                                ? OutlinedButton(
+                                    onPressed: () async {
+                                      final uid = (context.read<AuthBloc>().state
+                                              as AuthAuthenticated)
+                                          .user
+                                          .id;
+                                      context.read<ProfileBloc>().add(
+                                            ProfileToggleFollow(
+                                              followerId: uid,
+                                              followingId: profile.id,
+                                            ),
+                                          );
+                                      await Future<void>.delayed(
+                                        const Duration(milliseconds: 220),
+                                      );
+                                      if (!mounted) return;
+                                      await _loadMutualFollow();
+                                    },
+                                    child: Text(
+                                      _isMutualFollow
+                                          ? 'Вы подписаны'
+                                          : 'Отписаться',
+                                    ),
+                                  )
+                                : FilledButton(
+                                    onPressed: () async {
+                                      final uid = (context.read<AuthBloc>().state
+                                              as AuthAuthenticated)
+                                          .user
+                                          .id;
+                                      context.read<ProfileBloc>().add(
+                                            ProfileToggleFollow(
+                                              followerId: uid,
+                                              followingId: profile.id,
+                                            ),
+                                          );
+                                      await Future<void>.delayed(
+                                        const Duration(milliseconds: 220),
+                                      );
+                                      if (!mounted) return;
+                                      await _loadMutualFollow();
+                                    },
+                                    child: const Text('Подписаться'),
+                                  )),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
