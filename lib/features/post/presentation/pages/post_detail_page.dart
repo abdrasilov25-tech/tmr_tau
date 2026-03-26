@@ -543,13 +543,16 @@ class _PostVideoPlayer extends StatefulWidget {
 
 class _PostVideoPlayerState extends State<_PostVideoPlayer> {
   late VideoPlayerController _controller;
+  bool _ready = false;
 
   @override
   void initState() {
     super.initState();
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
       ..initialize().then((_) {
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        setState(() => _ready = true);
+        _controller.play();
       });
   }
 
@@ -561,15 +564,41 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_controller.value.isInitialized) {
+    if (!_ready || !_controller.value.isInitialized) {
       return AspectRatio(
         aspectRatio: 16 / 9,
         child: Container(color: Colors.grey.shade300, child: const Center(child: CircularProgressIndicator())),
       );
     }
-    return AspectRatio(
-      aspectRatio: _controller.value.aspectRatio,
-      child: VideoPlayer(_controller),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        setState(() {
+          if (_controller.value.isPlaying) {
+            _controller.pause();
+          } else {
+            _controller.play();
+          }
+        });
+      },
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          AspectRatio(
+            aspectRatio: _controller.value.aspectRatio,
+            child: VideoPlayer(_controller),
+          ),
+          if (!_controller.value.isPlaying)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: const BoxDecoration(
+                color: Colors.black45,
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 38),
+            ),
+        ],
+      ),
     );
   }
 }

@@ -8,6 +8,9 @@ class DoubleTapLikeBurst extends StatefulWidget {
     required this.child,
     required this.onDoubleTapLike,
     this.canDoubleTap,
+    this.shouldTriggerLike,
+    this.showPersistentLikeIndicator = false,
+    this.isLiked = false,
     this.iconSize = 92,
   });
 
@@ -17,6 +20,12 @@ class DoubleTapLikeBurst extends StatefulWidget {
   /// Если задано и возвращает `false`, анимация и [onDoubleTapLike] не выполняются
   /// (например, показали подсказку «Войдите»).
   final bool Function()? canDoubleTap;
+
+  /// Если задано и возвращает `false`, двойной тап не вызывает лайк.
+  /// Полезно для поведения "double tap только ставит лайк".
+  final bool Function()? shouldTriggerLike;
+  final bool showPersistentLikeIndicator;
+  final bool isLiked;
   final double iconSize;
 
   @override
@@ -77,7 +86,10 @@ class _DoubleTapLikeBurstState extends State<DoubleTapLikeBurst>
     if (widget.canDoubleTap != null && !widget.canDoubleTap!()) {
       return;
     }
-    widget.onDoubleTapLike();
+    final shouldTriggerLike = widget.shouldTriggerLike == null || widget.shouldTriggerLike!();
+    if (shouldTriggerLike) {
+      widget.onDoubleTapLike();
+    }
     _controller.forward(from: 0);
   }
 
@@ -98,7 +110,23 @@ class _DoubleTapLikeBurstState extends State<DoubleTapLikeBurst>
               animation: _controller,
               builder: (context, _) {
                 if (_controller.value == 0) {
-                  return const SizedBox.shrink();
+                  if (!widget.showPersistentLikeIndicator || !widget.isLiked) {
+                    return const SizedBox.shrink();
+                  }
+                  return Align(
+                    alignment: Alignment.bottomRight,
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 14, bottom: 14),
+                      child: Icon(
+                        Icons.favorite,
+                        size: 22,
+                        color: Colors.redAccent.withValues(alpha: 0.95),
+                        shadows: const [
+                          Shadow(blurRadius: 8, color: Colors.black45),
+                        ],
+                      ),
+                    ),
+                  );
                 }
                 return Center(
                   child: Opacity(

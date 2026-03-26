@@ -303,6 +303,9 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   return true;
                 },
                 onDoubleTapLike: _toggleFavorite,
+                shouldTriggerLike: () => !_isInFavorites,
+                showPersistentLikeIndicator: true,
+                isLiked: _isInFavorites,
                 child: ProductImageGallery(
                   key: ValueKey<String>(_product.imageUrls.join('|')),
                   imageUrls: _product.imageUrls.isNotEmpty

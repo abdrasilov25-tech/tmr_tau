@@ -1198,6 +1198,9 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
           Positioned.fill(
             child: DoubleTapLikeBurst(
               onDoubleTapLike: widget.onLike,
+              shouldTriggerLike: () => !p.isLikedByMe,
+              showPersistentLikeIndicator: true,
+              isLiked: p.isLikedByMe,
               child: _PostMedia(
                 imageUrls: p.displayImageUrls,
                 videoUrl: p.videoUrl,
@@ -1414,9 +1417,55 @@ class _VideoMediaState extends State<_VideoMedia> {
     if (!_ready) {
       return const Center(child: CircularProgressIndicator());
     }
-    return FittedBox(
-      fit: BoxFit.cover,
-      child: VideoPlayer(_controller),
+    final size = _controller.value.size;
+    if (size.width <= 0 || size.height <= 0) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return SizedBox.expand(
+      child: ClipRect(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                setState(() {
+                  if (_controller.value.isPlaying) {
+                    _controller.pause();
+                  } else {
+                    _controller.play();
+                  }
+                });
+              },
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  VideoPlayer(_controller),
+                  if (!_controller.value.isPlaying)
+                    const Center(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.all(14),
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 38,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

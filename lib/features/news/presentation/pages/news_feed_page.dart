@@ -348,6 +348,9 @@ class _NewsPostCard extends StatelessWidget {
                 DoubleTapLikeBurst(
                   iconSize: 72,
                   onDoubleTapLike: onLike,
+                  shouldTriggerLike: () => !post.isLikedByMe,
+                  showPersistentLikeIndicator: true,
+                  isLiked: post.isLikedByMe,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: _PostVideoPlayer(videoUrl: post.videoUrl!),
@@ -358,6 +361,9 @@ class _NewsPostCard extends StatelessWidget {
                 DoubleTapLikeBurst(
                   iconSize: 72,
                   onDoubleTapLike: onLike,
+                  shouldTriggerLike: () => !post.isLikedByMe,
+                  showPersistentLikeIndicator: true,
+                  isLiked: post.isLikedByMe,
                   child: PostNetworkPhotoGallery(
                     urls: post.displayImageUrls,
                     height: post.displayImageUrls.length > 1 ? 300 : 280,

@@ -482,12 +482,20 @@ class _EditVideoPreviewState extends State<_EditVideoPreview> {
     if (!_controller.value.isInitialized) {
       return const Center(child: CircularProgressIndicator());
     }
-    return FittedBox(
-      fit: BoxFit.cover,
-      child: SizedBox(
-        width: _controller.value.size.width,
-        height: _controller.value.size.height,
-        child: VideoPlayer(_controller),
+    final size = _controller.value.size;
+    if (size.width <= 0 || size.height <= 0) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    return SizedBox.expand(
+      child: ClipRect(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: VideoPlayer(_controller),
+          ),
+        ),
       ),
     );
   }
