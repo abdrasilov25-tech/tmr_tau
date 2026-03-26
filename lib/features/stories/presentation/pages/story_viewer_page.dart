@@ -307,6 +307,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   final _replyFocusNode = FocusNode();
   bool _sendingReply = false;
   bool _showReplyComposer = false;
+  bool _isFastForward = false;
   final Set<String> _markedViewedIds = <String>{};
   int _viewsCount = 0;
   bool _viewsLoading = false;
@@ -366,6 +367,36 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     if (!_replyFocusNode.hasFocus && !_showReplyComposer) {
       widget.onResume();
     }
+  }
+
+  void _togglePauseResume() {
+    if (widget.isPaused) {
+      widget.onResume();
+    } else {
+      widget.onPause();
+    }
+  }
+
+  void _handleRightZoneTap() {
+    final hasVideo = (_currentStory.videoUrl ?? '').isNotEmpty;
+    if (!hasVideo) {
+      widget.onNext();
+      return;
+    }
+    widget.onNext();
+  }
+
+  void _startRightHoldFastForward() {
+    final hasVideo = (_currentStory.videoUrl ?? '').isNotEmpty;
+    if (!hasVideo) {
+      return;
+    }
+    setState(() => _isFastForward = true);
+  }
+
+  void _stopRightHoldFastForward() {
+    if (!_isFastForward) return;
+    setState(() => _isFastForward = false);
   }
 
   Future<void> _loadViewsCount() async {
@@ -728,8 +759,9 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           itemCount: widget.group.stories.length,
           onPageChanged: (i) {
             setState(() => _currentIndex = i);
-      _showReplyComposer = false;
-      _replyFocusNode.unfocus();
+            _showReplyComposer = false;
+            _isFastForward = false;
+            _replyFocusNode.unfocus();
             _markCurrentStoryViewed();
             _loadViewsCount();
           },
@@ -737,10 +769,14 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
             return _StoryContent(
               story: widget.group.stories[index],
               onTapLeft: widget.onPrev,
-              onTapRight: widget.onNext,
+              onTapRight: _handleRightZoneTap,
+              onTapCenter: _togglePauseResume,
               onHoldStart: widget.onPause,
               onHoldEnd: widget.onResume,
+              onRightHoldStart: _startRightHoldFastForward,
+              onRightHoldEnd: _stopRightHoldFastForward,
               isPaused: widget.isPaused,
+              isFastForward: _isFastForward,
             );
           },
         ),
@@ -1082,31 +1118,67 @@ class _StoryContent extends StatelessWidget {
     required this.story,
     required this.onTapLeft,
     required this.onTapRight,
+    required this.onTapCenter,
     required this.onHoldStart,
     required this.onHoldEnd,
+    required this.onRightHoldStart,
+    required this.onRightHoldEnd,
     required this.isPaused,
+    required this.isFastForward,
   });
 
   final StoryEntity story;
   final VoidCallback onTapLeft;
   final VoidCallback onTapRight;
+  final VoidCallback onTapCenter;
   final VoidCallback onHoldStart;
   final VoidCallback onHoldEnd;
+  final VoidCallback onRightHoldStart;
+  final VoidCallback onRightHoldEnd;
   final bool isPaused;
+  final bool isFastForward;
 
   @override
   Widget build(BuildContext context) {
     final hasVideo = story.videoUrl != null && story.videoUrl!.isNotEmpty;
     return GestureDetector(
-      onLongPressStart: (_) => onHoldStart(),
-      onLongPressEnd: (_) => onHoldEnd(),
-      onLongPressCancel: onHoldEnd,
-      onTapDown: (details) {
+      onLongPressStart: (details) {
         final w = MediaQuery.sizeOf(context).width;
-        if (details.localPosition.dx < w * 0.4) {
+        final dx = details.localPosition.dx;
+        final isRightZone = dx > w * 0.85;
+        if (isRightZone && hasVideo) {
+          onRightHoldStart();
+          return;
+        }
+        onHoldStart();
+      },
+      onLongPressEnd: (details) {
+        final w = MediaQuery.sizeOf(context).width;
+        final dx = details.localPosition.dx;
+        final isRightZone = dx > w * 0.85;
+        if (isRightZone && hasVideo) {
+          onRightHoldEnd();
+          return;
+        }
+        onHoldEnd();
+      },
+      onLongPressCancel: () {
+        onRightHoldEnd();
+        onHoldEnd();
+      },
+      onTapDown: (details) {
+        if (hasVideo) {
+          onTapCenter();
+          return;
+        }
+        final w = MediaQuery.sizeOf(context).width;
+        final dx = details.localPosition.dx;
+        if (dx < w * 0.15) {
           onTapLeft();
-        } else {
+        } else if (dx > w * 0.85) {
           onTapRight();
+        } else {
+          onTapCenter();
         }
       },
       child: Center(
@@ -1114,7 +1186,11 @@ class _StoryContent extends StatelessWidget {
           aspectRatio: _storyAspectRatio,
           child: ClipRect(
             child: hasVideo
-                ? _StoryVideoContent(videoUrl: story.videoUrl!, paused: isPaused)
+                ? _StoryVideoContent(
+                    videoUrl: story.videoUrl!,
+                    paused: isPaused,
+                    fastForward: isFastForward,
+                  )
                 : story.imageUrl.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: story.imageUrl,
@@ -1141,10 +1217,15 @@ class _StoryContent extends StatelessWidget {
 }
 
 class _StoryVideoContent extends StatefulWidget {
-  const _StoryVideoContent({required this.videoUrl, required this.paused});
+  const _StoryVideoContent({
+    required this.videoUrl,
+    required this.paused,
+    required this.fastForward,
+  });
 
   final String videoUrl;
   final bool paused;
+  final bool fastForward;
 
   @override
   State<_StoryVideoContent> createState() => _StoryVideoContentState();
@@ -1183,6 +1264,9 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
         _controller.play();
       }
     }
+    if (oldWidget.fastForward != widget.fastForward) {
+      _controller.setPlaybackSpeed(widget.fastForward ? 2.0 : 1.0);
+    }
   }
 
   @override
@@ -1192,12 +1276,50 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
-    return FittedBox(
-      fit: BoxFit.cover,
-      child: SizedBox(
-        width: _controller.value.size.width,
-        height: _controller.value.size.height,
-        child: VideoPlayer(_controller),
+    final size = _controller.value.size;
+    if (size.width <= 0 || size.height <= 0) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+    return SizedBox.expand(
+      child: ClipRect(
+        child: FittedBox(
+          fit: BoxFit.cover,
+          child: SizedBox(
+            width: size.width,
+            height: size.height,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                VideoPlayer(_controller),
+                if (widget.fastForward)
+                  const Align(
+                    alignment: Alignment.topRight,
+                    child: Padding(
+                      padding: EdgeInsets.all(12),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.all(Radius.circular(10)),
+                        ),
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          child: Text(
+                            '2x',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

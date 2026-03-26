@@ -630,6 +630,9 @@ class _ProductCard extends StatelessWidget {
                       ? DoubleTapLikeBurst(
                           iconSize: 80,
                           onDoubleTapLike: onLike!,
+                          shouldTriggerLike: () => !product.isLikedByMe,
+                          showPersistentLikeIndicator: true,
+                          isLiked: product.isLikedByMe,
                           child: imageStack,
                         )
                       : imageStack,
