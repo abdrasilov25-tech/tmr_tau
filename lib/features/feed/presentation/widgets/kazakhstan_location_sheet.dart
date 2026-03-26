@@ -66,40 +66,6 @@ class _KazakhstanLocationSheetState extends State<KazakhstanLocationSheet> {
     Navigator.of(context).pop(const KazOutcomeWholeCountry());
   }
 
-  Future<void> _onManualCity() async {
-    final ctrl = TextEditingController();
-    final text = await showDialog<String?>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Город или регион'),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          decoration: const InputDecoration(
-            hintText: 'Например, Петропавловск',
-            border: OutlineInputBorder(),
-          ),
-          textCapitalization: TextCapitalization.words,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Готово'),
-          ),
-        ],
-      ),
-    );
-    ctrl.dispose();
-    if (!mounted) return;
-    final t = text?.trim();
-    if (t == null || t.isEmpty) return;
-    Navigator.of(context).pop(KazOutcomeManualCity(t));
-  }
-
   Future<void> _onMyLocation() async {
     try {
       final enabled = await Geolocator.isLocationServiceEnabled();
@@ -262,7 +228,6 @@ class _KazakhstanLocationSheetState extends State<KazakhstanLocationSheet> {
                 ],
               ),
             ),
-            const Divider(height: 1),
             Expanded(
               child: _step == 0
                   ? _buildHome(theme)
@@ -298,29 +263,32 @@ class _KazakhstanLocationSheetState extends State<KazakhstanLocationSheet> {
           subtitle: const Text('Область и город / вся область'),
           onTap: _goRegions,
         ),
-        ListTile(
-          leading: Icon(Icons.edit_location_alt_outlined,
-              color: theme.colorScheme.outline),
-          title: const Text('Указать город вручную'),
-          subtitle: const Text('Произвольный текст для поиска по полю «Город»'),
-          onTap: _onManualCity,
-        ),
       ],
     );
   }
 
   Widget _buildRegionList(ThemeData theme) {
     final list = KazakhstanRegions.all;
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       itemCount: list.length,
-      separatorBuilder: (context, index) => const Divider(height: 1),
       itemBuilder: (context, i) {
         final r = list[i];
-        return ListTile(
-          title: Text(r.name),
-          trailing: const Icon(Icons.chevron_right_rounded),
-          onTap: () => _pickRegion(r),
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Material(
+            color: Colors.grey.shade100,
+            borderRadius: BorderRadius.circular(14),
+            child: ListTile(
+              leading: Icon(
+                Icons.map_outlined,
+                color: theme.colorScheme.primary,
+              ),
+              title: Text(r.name),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _pickRegion(r),
+            ),
+          ),
         );
       },
     );
@@ -331,27 +299,45 @@ class _KazakhstanLocationSheetState extends State<KazakhstanLocationSheet> {
     if (r == null) return const SizedBox.shrink();
 
     return ListView(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       children: [
-        ListTile(
-          leading: Icon(Icons.select_all_rounded, color: theme.colorScheme.primary),
-          title: Text('Вся ${r.name}'),
-          subtitle: const Text('По всем крупным пунктам из списка'),
-          onTap: () {
-            Navigator.of(context).pop(
-              KazOutcomeRegion(regionId: r.id, localityName: null),
-            );
-          },
-        ),
-        const Divider(height: 1),
-        ...r.settlements.map(
-          (name) => ListTile(
-            title: Text(name),
+        Material(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(14),
+          child: ListTile(
+            leading: Icon(
+              Icons.public_rounded,
+              color: theme.colorScheme.primary,
+            ),
+            title: Text('Вся ${r.name}'),
+            subtitle: const Text('По всем крупным пунктам из списка'),
             onTap: () {
               Navigator.of(context).pop(
-                KazOutcomeRegion(regionId: r.id, localityName: name),
+                KazOutcomeRegion(regionId: r.id, localityName: null),
               );
             },
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...r.settlements.map(
+          (name) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Material(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(14),
+              child: ListTile(
+                leading: Icon(
+                  Icons.location_city_rounded,
+                  color: theme.colorScheme.primary,
+                ),
+                title: Text(name),
+                onTap: () {
+                  Navigator.of(context).pop(
+                    KazOutcomeRegion(regionId: r.id, localityName: name),
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ],
