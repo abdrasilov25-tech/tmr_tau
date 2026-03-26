@@ -120,6 +120,8 @@ class _ChatsPageState extends State<ChatsPage> {
   static const int _kMessagesListLimit = 500;
   /// Лимит сторис для полосы друзей (без блокировки refresh).
   static const int _kStoriesStripLimit = 120;
+  static const Duration _warmCacheTtl = Duration(seconds: 30);
+  static _ChatsWarmCache? _warmCache;
 
   late final SupabaseClient _client;
   late final String _currentUserId;
@@ -135,6 +137,8 @@ class _ChatsPageState extends State<ChatsPage> {
 
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
+  bool _threadSelectionMode = false;
+  final Set<String> _selectedThreadKeys = <String>{};
 
   @override
   void initState() {
@@ -154,7 +158,26 @@ class _ChatsPageState extends State<ChatsPage> {
     }
     _currentUserId = authState.user.id;
     _client = Supabase.instance.client;
-    _pageFuture = _loadPageData();
+    final cache = _warmCache;
+    final canUseCache = cache != null &&
+        cache.userId == _currentUserId &&
+        DateTime.now().difference(cache.createdAt) <= _warmCacheTtl;
+    // Start loading after first frame to keep navigation into chats responsive.
+    _pageFuture = Future.value(
+      canUseCache
+          ? cache.data
+          : const _ChatsPageData(
+              threads: [],
+              visibleStoryGroups: [],
+              newStoriesByUserId: <String, bool>{},
+            ),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _pageFuture = _loadPageData();
+      });
+    });
   }
 
   @override
@@ -174,6 +197,18 @@ class _ChatsPageState extends State<ChatsPage> {
   void _syncChatBadge() {
     if (!mounted) return;
     context.read<ChatUnreadBadgeController>().refresh();
+  }
+
+  void _storeWarmCache(_ChatsPageData data) {
+    _warmCache = _ChatsWarmCache(
+      createdAt: DateTime.now(),
+      userId: _currentUserId,
+      data: _ChatsPageData(
+        threads: List<_ChatThread>.from(data.threads),
+        visibleStoryGroups: List<StoryGroupEntity>.from(data.visibleStoryGroups),
+        newStoriesByUserId: Map<String, bool>.from(data.newStoriesByUserId),
+      ),
+    );
   }
 
   Future<_ChatsPageData> _loadPageData() async {
@@ -202,22 +237,26 @@ class _ChatsPageState extends State<ChatsPage> {
         .map((t) => t.peerId)
         .toSet();
     if (peerIds.isEmpty) {
-      return _ChatsPageData(
+      final data = _ChatsPageData(
         threads: threads,
         visibleStoryGroups: const [],
         newStoriesByUserId: const <String, bool>{},
       );
+      _storeWarmCache(data);
+      return data;
     }
 
     // Сначала отдаём список чатов — RefreshIndicator завершается быстро.
     // Сторис подгружаютcя отдельно (тяжёлый запрос + группировка), без блокировки свайпа.
     unawaited(_loadStoriesDeferred(peerIds, gen));
 
-    return _ChatsPageData(
+    final data = _ChatsPageData(
       threads: threads,
       visibleStoryGroups: const [],
       newStoriesByUserId: const <String, bool>{},
     );
+    _storeWarmCache(data);
+    return data;
   }
 
   Future<void> _loadStoriesDeferred(Set<String> peerIds, int gen) async {
@@ -234,13 +273,13 @@ class _ChatsPageState extends State<ChatsPage> {
       }
 
       setState(() {
-        _pageFuture = Future.value(
-          _ChatsPageData(
-            threads: _cachedThreadsForStories,
-            visibleStoryGroups: visibleStoryGroups,
-            newStoriesByUserId: newStoriesByUserId,
-          ),
+        final merged = _ChatsPageData(
+          threads: _cachedThreadsForStories,
+          visibleStoryGroups: visibleStoryGroups,
+          newStoriesByUserId: newStoriesByUserId,
         );
+        _pageFuture = Future.value(merged);
+        _storeWarmCache(merged);
       });
     } catch (_) {
       if (!mounted || gen != _storiesLoadGeneration) return;
@@ -985,110 +1024,6 @@ class _ChatsPageState extends State<ChatsPage> {
         .toList();
   }
 
-  void _showThreadMenu(BuildContext context, _ChatThread t) {
-    final archived = _chatStorage.getArchivedPeerIds();
-    final isArchived = archived.contains(t.storageKey);
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(
-                isArchived ? Icons.unarchive_outlined : Icons.archive_outlined,
-              ),
-              title: Text(isArchived ? 'Из архива' : 'В архив'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                await _chatStorage.setArchived(t.storageKey, !isArchived);
-                if (!mounted) return;
-                setState(() {
-                  _pageFuture = _loadPageData();
-                });
-                _syncChatBadge();
-              },
-            ),
-            if (t.kind == _ChatThreadKind.direct) ...[
-              ListTile(
-                leading: Icon(
-                  t.isBlocked ? Icons.block : Icons.block_outlined,
-                  color: t.isBlocked ? Colors.orange : null,
-                ),
-                title: Text(
-                  t.isBlocked ? 'Разблокировать' : 'Заблокировать',
-                  style: t.isBlocked
-                      ? const TextStyle(color: Colors.orange)
-                      : null,
-                ),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  if (t.isBlocked) {
-                    await _unblockPeer(t.peerId);
-                  } else {
-                    await _blockPeer(t.peerId);
-                  }
-                  if (!mounted) return;
-                  setState(() {
-                    _pageFuture = _loadPageData();
-                  });
-                  _syncChatBadge();
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text(
-                  'Удалить чат',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () async {
-                  Navigator.pop(ctx);
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder: (c) => AlertDialog(
-                      title: const Text('Удалить чат?'),
-                      content: Text('Переписка с ${t.peerName} будет удалена.'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(c, false),
-                          child: const Text('Отмена'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(c, true),
-                          child: const Text('Удалить'),
-                        ),
-                      ],
-                    ),
-                  );
-                  if (ok == true && mounted) await _deleteChat(t);
-                },
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _blockPeer(String peerId) async {
-    await _client.from('blocked_users').insert({
-      'blocker_id': _currentUserId,
-      'blocked_user_id': peerId,
-    });
-  }
-
-  Future<void> _unblockPeer(String peerId) async {
-    await _client
-        .from('blocked_users')
-        .delete()
-        .eq('blocker_id', _currentUserId)
-        .eq('blocked_user_id', peerId);
-  }
-
   Future<void> _deleteChat(_ChatThread t) async {
     try {
       try {
@@ -1107,7 +1042,8 @@ class _ChatsPageState extends State<ChatsPage> {
             .eq('sender_id', t.peerId)
             .eq('receiver_id', _currentUserId);
       }
-      await _chatStorage.setArchived(t.storageKey, false);
+      await _chatStorage.clearPeerState(t.storageKey);
+      _warmCache = null;
       if (mounted) {
         setState(() {
           _pageFuture = _loadPageData();
@@ -1132,6 +1068,101 @@ class _ChatsPageState extends State<ChatsPage> {
         );
       }
     }
+  }
+
+  void _toggleThreadSelectionMode([bool? enabled]) {
+    setState(() {
+      _threadSelectionMode = enabled ?? !_threadSelectionMode;
+      if (!_threadSelectionMode) {
+        _selectedThreadKeys.clear();
+      }
+    });
+  }
+
+  void _toggleThreadSelection(_ChatThread t) {
+    setState(() {
+      if (_selectedThreadKeys.contains(t.storageKey)) {
+        _selectedThreadKeys.remove(t.storageKey);
+      } else {
+        _selectedThreadKeys.add(t.storageKey);
+      }
+    });
+  }
+
+  Future<void> _deleteSelectedThreads() async {
+    if (_selectedThreadKeys.isEmpty) return;
+    final data = await _pageFuture;
+    if (!mounted) return;
+    final selected = data.threads
+        .where((t) => _selectedThreadKeys.contains(t.storageKey))
+        .toList(growable: false);
+    if (selected.isEmpty) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Удалить выбранные чаты?'),
+        content: Text(
+          'Будет удалено: ${selected.length}. Это действие нельзя отменить.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    for (final t in selected) {
+      await _deleteThreadByKind(t);
+    }
+    if (!mounted) return;
+    setState(() {
+      _threadSelectionMode = false;
+      _selectedThreadKeys.clear();
+      _warmCache = null;
+      _pageFuture = _loadPageData();
+    });
+  }
+
+  Future<void> _deleteThreadByKind(_ChatThread t) async {
+    if (t.kind == _ChatThreadKind.direct) {
+      await _deleteChat(t);
+      return;
+    }
+    try {
+      if (t.kind == _ChatThreadKind.group) {
+        await _client
+            .from('chat_group_members')
+            .delete()
+            .eq('group_id', t.peerId)
+            .eq('user_id', _currentUserId);
+      } else if (t.kind == _ChatThreadKind.channel) {
+        await _client
+            .from('user_channels')
+            .delete()
+            .eq('channel_id', t.peerId)
+            .eq('user_id', _currentUserId);
+      }
+      await _chatStorage.clearPeerState(t.storageKey);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось удалить чат ${t.peerName}: $e')),
+      );
+    }
+  }
+
+  void _selectAllThreads(_ChatsPageData data) {
+    setState(() {
+      _selectedThreadKeys
+        ..clear()
+        ..addAll(data.threads.map((t) => t.storageKey));
+    });
   }
 
   @override
@@ -1160,16 +1191,43 @@ class _ChatsPageState extends State<ChatsPage> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Мои чаты'),
+          title: _threadSelectionMode
+              ? Text('Выбрано: ${_selectedThreadKeys.length}')
+              : const Text('Мои чаты'),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.person_add_alt_1_outlined),
-              onPressed: () => _showCreateChatDialog(),
-            ),
-            IconButton(
-              icon: const Icon(Icons.more_horiz),
-              onPressed: _showChatsTopMenu,
-            ),
+            if (_threadSelectionMode) ...[
+              FutureBuilder<_ChatsPageData>(
+                future: _pageFuture,
+                builder: (context, snapshot) {
+                  final data = snapshot.data;
+                  return IconButton(
+                    tooltip: 'Выбрать все',
+                    icon: const Icon(Icons.select_all_rounded),
+                    onPressed: data == null ? null : () => _selectAllThreads(data),
+                  );
+                },
+              ),
+              IconButton(
+                tooltip: 'Удалить выбранные',
+                icon: const Icon(Icons.delete_outline),
+                onPressed:
+                    _selectedThreadKeys.isEmpty ? null : _deleteSelectedThreads,
+              ),
+              IconButton(
+                tooltip: 'Закрыть выбор',
+                icon: const Icon(Icons.close),
+                onPressed: () => _toggleThreadSelectionMode(false),
+              ),
+            ] else ...[
+              IconButton(
+                icon: const Icon(Icons.person_add_alt_1_outlined),
+                onPressed: () => _showCreateChatDialog(),
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_horiz),
+                onPressed: _showChatsTopMenu,
+              ),
+            ],
           ],
           bottom: const TabBar(
             tabs: [
@@ -1433,149 +1491,185 @@ class _ChatsPageState extends State<ChatsPage> {
           final isOnline = _isProbablyOnline(t);
           return Padding(
             padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
-            child: Dismissible(
-              key: ValueKey(t.storageKey),
-              direction: DismissDirection.horizontal,
-              confirmDismiss: (direction) async {
-                if (direction == DismissDirection.startToEnd) {
-                  await _markThreadRead(t);
-                  return false;
-                }
-                if (direction == DismissDirection.endToStart) {
-                  await _setThreadArchived(t, true);
-                  return false;
-                }
-                return false;
-              },
-              background: _SwipeActionBackground(
-                color: Colors.blue.withValues(alpha: 0.18),
-                icon: Icons.mark_chat_read_outlined,
-                label: 'Прочитано',
-                alignRight: false,
-              ),
-              secondaryBackground: _SwipeActionBackground(
-                color: Colors.orange.withValues(alpha: 0.18),
-                icon: Icons.archive_outlined,
-                label: 'В архив',
-                alignRight: true,
-              ),
-              child: Material(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(18),
-                child: ListTile(
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  minVerticalPadding: 10,
-                  leading: SizedBox(
-                    width: 52,
-                    height: 52,
-                    child: Center(
-                      child: Stack(
-                        clipBehavior: Clip.none,
-                        children: [
-                          CachedAvatar(
-                            imageUrl: t.peerAvatarUrl,
-                            radius: 26,
-                            fallbackText: t.peerName,
-                          ),
-                          if (isOnline)
-                            Positioned(
-                              right: -1,
-                              bottom: -1,
-                              child: Container(
-                                width: 13,
-                                height: 13,
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF22C55E),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: Colors.white,
-                                    width: 2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                        ],
+            child: (_threadSelectionMode
+                    ? Material(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(18),
+                        child: _buildThreadTile(context, t, isUnread, isOnline),
+                      )
+                    : Dismissible(
+                        key: ValueKey(t.storageKey),
+                        direction: DismissDirection.horizontal,
+                        confirmDismiss: (direction) async {
+                          if (direction == DismissDirection.startToEnd) {
+                            await _markThreadRead(t);
+                            return false;
+                          }
+                          if (direction == DismissDirection.endToStart) {
+                            await _setThreadArchived(t, true);
+                            return false;
+                          }
+                          return false;
+                        },
+                        background: _SwipeActionBackground(
+                          color: Colors.blue.withValues(alpha: 0.18),
+                          icon: Icons.mark_chat_read_outlined,
+                          label: 'Прочитано',
+                          alignRight: false,
+                        ),
+                        secondaryBackground: _SwipeActionBackground(
+                          color: Colors.orange.withValues(alpha: 0.18),
+                          icon: Icons.archive_outlined,
+                          label: 'В архив',
+                          alignRight: true,
+                        ),
+                        child: Material(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(18),
+                          child: _buildThreadTile(context, t, isUnread, isOnline),
+                        ),
+                      )),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildThreadTile(
+    BuildContext context,
+    _ChatThread t,
+    bool isUnread,
+    bool isOnline,
+  ) {
+    final isSelected = _selectedThreadKeys.contains(t.storageKey);
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: isSelected
+            ? Border.all(color: const Color(0xFF2563EB), width: 1.4)
+            : null,
+        color: isSelected ? const Color(0x1A2563EB) : Colors.grey.shade100,
+      ),
+      child: ListTile(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        minVerticalPadding: 10,
+        leading: SizedBox(
+          width: 52,
+          height: 52,
+          child: Center(
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CachedAvatar(
+                  imageUrl: t.peerAvatarUrl,
+                  radius: 26,
+                  fallbackText: t.peerName,
+                ),
+                if (isOnline)
+                  Positioned(
+                    right: -1,
+                    bottom: -1,
+                    child: Container(
+                      width: 13,
+                      height: 13,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF22C55E),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white,
+                          width: 2,
+                        ),
                       ),
                     ),
                   ),
-                  title: Text(
-                    t.peerName,
-                    style: TextStyle(
-                      fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600,
-                      letterSpacing: -0.1,
-                    ),
-                  ),
-                  subtitle: Text(
-                    t.lastMessageText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
-                    ),
-                  ),
-                  trailing: SizedBox(
-                    width: 54,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          _timeAgo(t.lastMessageAt),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: isUnread
-                                    ? const Color(0xFF2563EB)
-                                    : Colors.grey.shade500,
-                                fontWeight:
-                                    isUnread ? FontWeight.w600 : FontWeight.w500,
-                              ),
-                        ),
-                        const SizedBox(height: 6),
-                        if (isUnread)
-                          if (t.unreadCount > 1)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 7,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF2563EB),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                '${t.unreadCount}',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  height: 1,
-                                ),
-                              ),
-                            )
-                          else
-                            Container(
-                              width: 9,
-                              height: 9,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF2563EB),
-                                shape: BoxShape.circle,
-                              ),
-                            )
-                        else
-                          const SizedBox(height: 9),
-                      ],
-                    ),
-                  ),
-                  onTap: () => _openChat(t),
-                  onLongPress: () => _showThreadMenu(context, t),
-                ),
-              ),
+              ],
             ),
-          );
+          ),
+        ),
+        title: Text(
+          t.peerName,
+          style: TextStyle(
+            fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600,
+            letterSpacing: -0.1,
+          ),
+        ),
+        subtitle: Text(
+          t.lastMessageText,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.grey.shade600,
+            fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
+          ),
+        ),
+        trailing: SizedBox(
+          width: 54,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _timeAgo(t.lastMessageAt),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: isUnread
+                          ? const Color(0xFF2563EB)
+                          : Colors.grey.shade500,
+                      fontWeight:
+                          isUnread ? FontWeight.w600 : FontWeight.w500,
+                    ),
+              ),
+              const SizedBox(height: 6),
+              if (isUnread)
+                if (t.unreadCount > 1)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2563EB),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${t.unreadCount}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        height: 1,
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    width: 9,
+                    height: 9,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF2563EB),
+                      shape: BoxShape.circle,
+                    ),
+                  )
+              else
+                const SizedBox(height: 9),
+            ],
+          ),
+        ),
+        onTap: () {
+          if (_threadSelectionMode) {
+            _toggleThreadSelection(t);
+            return;
+          }
+          _openChat(t);
+        },
+        onLongPress: () {
+          if (!_threadSelectionMode) {
+            _toggleThreadSelectionMode(true);
+          }
+          _toggleThreadSelection(t);
         },
       ),
     );
@@ -1686,6 +1780,18 @@ class _ChatsPageData {
   final List<_ChatThread> threads;
   final List<StoryGroupEntity> visibleStoryGroups;
   final Map<String, bool> newStoriesByUserId;
+}
+
+class _ChatsWarmCache {
+  const _ChatsWarmCache({
+    required this.createdAt,
+    required this.userId,
+    required this.data,
+  });
+
+  final DateTime createdAt;
+  final String userId;
+  final _ChatsPageData data;
 }
 
 class _UserSuggestion {
