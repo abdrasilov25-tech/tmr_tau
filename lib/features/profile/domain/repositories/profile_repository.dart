@@ -21,5 +21,9 @@ abstract class ProfileRepository {
     String? bio,
     String? username,
     String? gender,
+    String? city,
+    String? instagramUrl,
+    String? telegramUsername,
+    String? websiteUrl,
   });
 }

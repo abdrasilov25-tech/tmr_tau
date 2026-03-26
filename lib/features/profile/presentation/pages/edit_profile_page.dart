@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/theme/themed_content_surface.dart';
@@ -15,11 +19,17 @@ class EditProfilePage extends StatefulWidget {
 }
 
 class _EditProfilePageState extends State<EditProfilePage> {
+  static const String _genderPrefsPrefix = 'tmr_tau_edit_profile_gender_';
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameController;
   late final TextEditingController _usernameController;
   late final TextEditingController _bioController;
+  late final TextEditingController _cityController;
+  late final TextEditingController _instagramController;
+  late final TextEditingController _telegramController;
+  late final TextEditingController _websiteController;
   String? _gender; // 'male' / 'female' / null
+  String? _currentUserId;
   bool _saving = false;
 
   @override
@@ -27,9 +37,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
     super.initState();
     final authState = context.read<AuthBloc>().state;
     final user = authState is AuthAuthenticated ? authState.user : null;
+    _currentUserId = user?.id;
     _nameController = TextEditingController(text: user?.name ?? '');
     _usernameController = TextEditingController(text: user?.username ?? '');
     _bioController = TextEditingController(text: user?.bio ?? '');
+    _cityController = TextEditingController();
+    _instagramController = TextEditingController();
+    _telegramController = TextEditingController();
+    _websiteController = TextEditingController();
+    unawaited(_loadLocalGender());
+    unawaited(_loadExtraFields());
   }
 
   @override
@@ -37,6 +54,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _nameController.dispose();
     _usernameController.dispose();
     _bioController.dispose();
+    _cityController.dispose();
+    _instagramController.dispose();
+    _telegramController.dispose();
+    _websiteController.dispose();
     super.dispose();
   }
 
@@ -60,7 +81,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ? null
                 : _usernameController.text.trim(),
             gender: _gender,
+            city: _cityController.text.trim(),
+            instagramUrl: _instagramController.text.trim(),
+            telegramUsername: _telegramController.text.trim(),
+            websiteUrl: _websiteController.text.trim(),
           );
+      await _persistLocalGender(_gender);
       if (!mounted) return;
       // Обновим локальное имя в сохранённых аккаунтах (для свитчера и быстрого входа).
       try {
@@ -86,6 +112,49 @@ class _EditProfilePageState extends State<EditProfilePage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  Future<void> _loadLocalGender() async {
+    final uid = _currentUserId;
+    if (uid == null || uid.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString('$_genderPrefsPrefix$uid');
+    if (!mounted) return;
+    if (saved == 'male' || saved == 'female') {
+      setState(() => _gender = saved);
+    } else {
+      setState(() => _gender = null);
+    }
+  }
+
+  Future<void> _persistLocalGender(String? gender) async {
+    final uid = _currentUserId;
+    if (uid == null || uid.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final key = '$_genderPrefsPrefix$uid';
+    if (gender == null || gender.isEmpty) {
+      await prefs.remove(key);
+      return;
+    }
+    await prefs.setString(key, gender);
+  }
+
+  Future<void> _loadExtraFields() async {
+    final uid = _currentUserId;
+    if (uid == null || uid.isEmpty) return;
+    try {
+      final row = await supa.Supabase.instance.client
+          .from('users')
+          .select('city,instagram_url,telegram_username,website_url')
+          .eq('id', uid)
+          .maybeSingle();
+      if (!mounted || row == null) return;
+      _cityController.text = (row['city'] ?? '').toString();
+      _instagramController.text = (row['instagram_url'] ?? '').toString();
+      _telegramController.text = (row['telegram_username'] ?? '').toString();
+      _websiteController.text = (row['website_url'] ?? '').toString();
+      setState(() {});
+    } catch (_) {}
   }
 
   @override
@@ -131,6 +200,38 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                   maxLines: 3,
                 ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _cityController,
+                  decoration: const InputDecoration(
+                    labelText: 'Город',
+                    hintText: 'Например, Алматы',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _instagramController,
+                  decoration: const InputDecoration(
+                    labelText: 'Instagram',
+                    hintText: 'https://instagram.com/username',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _telegramController,
+                  decoration: const InputDecoration(
+                    labelText: 'Telegram',
+                    hintText: '@username',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _websiteController,
+                  decoration: const InputDecoration(
+                    labelText: 'Website',
+                    hintText: 'https://your-site.com',
+                  ),
+                ),
                 const SizedBox(height: 24),
                 Text(
                   'Пол',
@@ -140,7 +241,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 ),
                 RadioGroup<String?>(
                   groupValue: _gender,
-                  onChanged: (v) => setState(() => _gender = v),
+                  onChanged: (v) {
+                    setState(() => _gender = v);
+                    unawaited(_persistLocalGender(v));
+                  },
                   child: Column(
                     children: [
                       ListTile(
@@ -150,7 +254,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         horizontalTitleGap: 0,
                         leading: const Radio<String?>(value: 'male'),
                         title: const Text('Мужской'),
-                        onTap: () => setState(() => _gender = 'male'),
+                        onTap: () {
+                          setState(() => _gender = 'male');
+                          unawaited(_persistLocalGender('male'));
+                        },
                       ),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -159,7 +266,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         horizontalTitleGap: 0,
                         leading: const Radio<String?>(value: 'female'),
                         title: const Text('Женский'),
-                        onTap: () => setState(() => _gender = 'female'),
+                        onTap: () {
+                          setState(() => _gender = 'female');
+                          unawaited(_persistLocalGender('female'));
+                        },
                       ),
                       ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -168,7 +278,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         horizontalTitleGap: 0,
                         leading: const Radio<String?>(value: null),
                         title: const Text('Не указывать'),
-                        onTap: () => setState(() => _gender = null),
+                        onTap: () {
+                          setState(() => _gender = null);
+                          unawaited(_persistLocalGender(null));
+                        },
                       ),
                     ],
                   ),

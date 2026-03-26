@@ -252,12 +252,20 @@ class ProfileRepositoryImpl implements ProfileRepository {
     String? bio,
     String? username,
     String? gender,
+    String? city,
+    String? instagramUrl,
+    String? telegramUsername,
+    String? websiteUrl,
   }) async {
     final updates = <String, dynamic>{};
     if (name != null) updates['name'] = name;
     if (username != null) updates['username'] = username;
     if (avatarUrl != null) updates['avatar'] = avatarUrl;
     if (bio != null) updates['bio'] = bio;
+    if (city != null) updates['city'] = city;
+    if (instagramUrl != null) updates['instagram_url'] = instagramUrl;
+    if (telegramUsername != null) updates['telegram_username'] = telegramUsername;
+    if (websiteUrl != null) updates['website_url'] = websiteUrl;
     if (updates.isEmpty) return;
     updates['updated_at'] = DateTime.now().toIso8601String();
     await _client

@@ -13,7 +13,7 @@ class SplashPage extends StatefulWidget {
 
 class _SplashPageState extends State<SplashPage>
     with TickerProviderStateMixin {
-  static const _minSplash = Duration(milliseconds: 600);
+  static const _minSplash = Duration(milliseconds: 320);
 
   late final DateTime _splashStartedAt;
   late AnimationController _logoController;
