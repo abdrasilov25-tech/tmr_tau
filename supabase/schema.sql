@@ -21,6 +21,10 @@ create table if not exists public.users (
 alter table public.users add column if not exists story_note text default '';
 alter table public.users add column if not exists note_location text default '';
 alter table public.users add column if not exists share_location boolean default false;
+alter table public.users add column if not exists city text default '';
+alter table public.users add column if not exists instagram_url text default '';
+alter table public.users add column if not exists telegram_username text default '';
+alter table public.users add column if not exists website_url text default '';
 -- Backfill missing rows in public.users from auth.users (safe on repeated runs).
 insert into public.users (id, name)
 select au.id, coalesce(nullif(au.email, ''), 'Пользователь')
