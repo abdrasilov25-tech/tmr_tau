@@ -10,6 +10,7 @@ class ChatListStorage {
   static const _readPrefix = 'tmr_tau_chat_read_';
   static const _dialogPrefix = 'tmr_tau_chat_dialog_';
   static const _acceptedPrefix = 'tmr_tau_chat_accepted_';
+  static const _hiddenMessagesPrefix = 'tmr_tau_chat_hidden_messages_';
 
   Set<String> getArchivedPeerIds() {
     final list = _prefs.getStringList(_archivedKey);
@@ -52,6 +53,30 @@ class ChatListStorage {
 
   Future<void> setAccepted(String peerId, bool value) async {
     await _prefs.setBool(_acceptedPrefix + peerId, value);
+  }
+
+  /// Очищает локальное состояние конкретного чата (чтобы удалённый чат не "возвращался" из локальных флагов).
+  Future<void> clearPeerState(String peerId) async {
+    final archived = getArchivedPeerIds();
+    if (archived.remove(peerId)) {
+      await _prefs.setStringList(_archivedKey, archived.toList());
+    }
+    await _prefs.remove(_readPrefix + peerId);
+    await _prefs.remove(_dialogPrefix + peerId);
+    await _prefs.remove(_acceptedPrefix + peerId);
+    await _prefs.remove(_hiddenMessagesPrefix + peerId);
+  }
+
+  Set<String> getHiddenMessageIds(String peerId) {
+    final list = _prefs.getStringList(_hiddenMessagesPrefix + peerId);
+    return list != null ? list.toSet() : <String>{};
+  }
+
+  Future<void> addHiddenMessageIds(String peerId, Iterable<String> ids) async {
+    if (ids.isEmpty) return;
+    final current = getHiddenMessageIds(peerId);
+    current.addAll(ids.where((e) => e.isNotEmpty));
+    await _prefs.setStringList(_hiddenMessagesPrefix + peerId, current.toList());
   }
 
   /// Полностью очищает локальное состояние чатов (архив/непрочитанное).
