@@ -96,6 +96,7 @@ class _MainHomePageState extends State<MainHomePage> {
       : _hasMoreSubscriptions;
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
+  Map<String, String> _storyNotesByUserId = const {};
 
   String? _currentUserId;
   String? _loadedUserId;
@@ -348,6 +349,7 @@ class _MainHomePageState extends State<MainHomePage> {
     _hasMoreSubscriptions = cache.hasMoreSubscriptions;
     _storyGroups = cache.storyGroups;
     _newStoriesByUserId = cache.newStoriesByUserId;
+    _storyNotesByUserId = cache.storyNotesByUserId;
     _feedTab = _FeedTab.recommendations;
     _initialLoading = false;
   }
@@ -366,6 +368,7 @@ class _MainHomePageState extends State<MainHomePage> {
       hasMoreSubscriptions: _hasMoreSubscriptions,
       storyGroups: List<StoryGroupEntity>.from(_storyGroups),
       newStoriesByUserId: Map<String, bool>.from(_newStoriesByUserId),
+      storyNotesByUserId: Map<String, String>.from(_storyNotesByUserId),
     );
   }
 
@@ -538,12 +541,32 @@ class _MainHomePageState extends State<MainHomePage> {
       for (final g in groups) {
         nextMap[g.userId] = g.stories.any((s) => !viewedStoryIds.contains(s.id));
       }
+      final ids = {...groups.map((e) => e.userId)};
+      if (_currentUserId != null) ids.add(_currentUserId!);
+      final notesMap = <String, String>{};
+      if (ids.isNotEmpty) {
+        try {
+          final rows = await supa.Supabase.instance.client
+              .from(SupabaseConstants.usersTable)
+              .select('id,story_note')
+              .inFilter('id', ids.toList(growable: false));
+          for (final row in (rows as List<dynamic>)) {
+            final map = row as Map<String, dynamic>;
+            final id = (map['id'] ?? '').toString();
+            final note = (map['story_note'] ?? '').toString().trim();
+            if (id.isNotEmpty && note.isNotEmpty) {
+              notesMap[id] = note;
+            }
+          }
+        } catch (_) {}
+      }
       if (!mounted) return;
       setState(() {
         // Keep last stories while background refresh is loading if new set is empty.
         if (groups.isNotEmpty || _storyGroups.isEmpty) {
           _storyGroups = groups;
           _newStoriesByUserId = nextMap;
+          _storyNotesByUserId = notesMap;
         }
       });
       _storeWarmCache();
@@ -939,8 +962,11 @@ class _MainHomePageState extends State<MainHomePage> {
                   ChatStoriesFriendsStrip(
                     groups: _storyGroups,
                     newStoriesByUserId: _newStoriesByUserId,
+                    storyNotesByUserId: const <String, String>{},
+                    enableNotes: false,
                     currentUserId: _currentUserId,
                     currentUserAvatarUrl: currentUserAvatarUrl,
+                    onOwnNoteTap: (_) {},
                     onAddStoryTap: _openAddStoryAndRefresh,
                     onStoryTap: (group) async {
                       if (group.stories.isEmpty) return;
@@ -1025,6 +1051,7 @@ class _MainHomeWarmCache {
     required this.hasMoreSubscriptions,
     required this.storyGroups,
     required this.newStoriesByUserId,
+    required this.storyNotesByUserId,
   });
 
   final DateTime createdAt;
@@ -1037,6 +1064,7 @@ class _MainHomeWarmCache {
   final bool hasMoreSubscriptions;
   final List<StoryGroupEntity> storyGroups;
   final Map<String, bool> newStoriesByUserId;
+  final Map<String, String> storyNotesByUserId;
 }
 
 class _FeedNotificationsButton extends StatefulWidget {

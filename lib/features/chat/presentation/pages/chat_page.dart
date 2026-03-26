@@ -574,10 +574,6 @@ class _ChatPageState extends State<ChatPage> {
                     onPressed: _confirmDeleteAll,
                   ),
                 ] else ...[
-                  TextButton(
-                    onPressed: () => _toggleSelectionMode(true),
-                    child: const Text('Выбрать'),
-                  ),
                   IconButton(
                     icon: const Icon(Icons.palette_outlined),
                     onPressed: _showThemePicker,
