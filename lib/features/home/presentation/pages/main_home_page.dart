@@ -52,6 +52,8 @@ enum _FeedTab {
 
 class _MainHomePageState extends State<MainHomePage> {
   static const int _pageSize = 10;
+  static const Duration _warmCacheTtl = Duration(seconds: 45);
+  static _MainHomeWarmCache? _warmCache;
 
   /// Отдельный вертикальный «экран» на вкладку — свайп как в TikTok.
   late final PageController _pageRecommendationsController;
@@ -112,8 +114,19 @@ class _MainHomePageState extends State<MainHomePage> {
     _currentUserId = authState is AuthAuthenticated ? authState.user.id : null;
 
     debugPrint('[MainHomePage] opened (currentUserId=${_currentUserId ?? 'null'})');
-    _loadInitial();
-    _loadStories();
+    final cache = _warmCache;
+    final canUseCache = cache != null &&
+        cache.userId == _currentUserId &&
+        DateTime.now().difference(cache.createdAt) <= _warmCacheTtl;
+    if (canUseCache) {
+      _applyWarmCache(cache);
+    }
+    // Defer heavy network calls until after first frame to improve perceived startup.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_loadInitial(showLoading: !canUseCache));
+      unawaited(_loadStories());
+    });
   }
 
   @override
@@ -299,7 +312,8 @@ class _MainHomePageState extends State<MainHomePage> {
   void _precacheStoryStripMedia() {
     if (!mounted || _storyGroups.isEmpty) return;
     final ctx = context;
-    for (final g in _storyGroups.take(16)) {
+    // Smaller initial media warmup reduces launch-time pressure.
+    for (final g in _storyGroups.take(8)) {
       final av = g.userAvatarUrl;
       if (av != null && av.isNotEmpty) {
         unawaited(
@@ -321,14 +335,50 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
-  Future<void> _loadInitial() async {
+  void _applyWarmCache(_MainHomeWarmCache cache) {
+    _postsRecommendations
+      ..clear()
+      ..addAll(cache.postsRecommendations);
+    _postsSubscriptions
+      ..clear()
+      ..addAll(cache.postsSubscriptions);
+    _cursorRecommendations = cache.cursorRecommendations;
+    _cursorSubscriptions = cache.cursorSubscriptions;
+    _hasMoreRecommendations = cache.hasMoreRecommendations;
+    _hasMoreSubscriptions = cache.hasMoreSubscriptions;
+    _storyGroups = cache.storyGroups;
+    _newStoriesByUserId = cache.newStoriesByUserId;
+    _feedTab = _FeedTab.recommendations;
+    _initialLoading = false;
+  }
+
+  void _storeWarmCache() {
+    final uid = _currentUserId;
+    if (uid == null) return;
+    _warmCache = _MainHomeWarmCache(
+      createdAt: DateTime.now(),
+      userId: uid,
+      postsRecommendations: List<PostEntity>.from(_postsRecommendations),
+      postsSubscriptions: List<PostEntity>.from(_postsSubscriptions),
+      cursorRecommendations: _cursorRecommendations,
+      cursorSubscriptions: _cursorSubscriptions,
+      hasMoreRecommendations: _hasMoreRecommendations,
+      hasMoreSubscriptions: _hasMoreSubscriptions,
+      storyGroups: List<StoryGroupEntity>.from(_storyGroups),
+      newStoriesByUserId: Map<String, bool>.from(_newStoriesByUserId),
+    );
+  }
+
+  Future<void> _loadInitial({bool showLoading = true}) async {
     final authState = context.read<AuthBloc>().state;
     final activeUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
     _currentUserId = activeUserId;
     _loadedUserId = _currentUserId;
     _feedTab = _FeedTab.recommendations;
-    setState(() => _initialLoading = true);
+    if (showLoading) {
+      setState(() => _initialLoading = true);
+    }
     _postsRecommendations.clear();
     _postsSubscriptions.clear();
     _cursorRecommendations = 0;
@@ -340,6 +390,7 @@ class _MainHomePageState extends State<MainHomePage> {
       if (!mounted) return;
       setState(() => _initialLoading = false);
       _resetAllFeedPagesAfterFullReload();
+      _storeWarmCache();
       debugPrint(
         '[MainHomePage] loaded tab=$_feedTab count=${_posts.length}',
       );
@@ -489,9 +540,13 @@ class _MainHomePageState extends State<MainHomePage> {
       }
       if (!mounted) return;
       setState(() {
-        _storyGroups = groups;
-        _newStoriesByUserId = nextMap;
+        // Keep last stories while background refresh is loading if new set is empty.
+        if (groups.isNotEmpty || _storyGroups.isEmpty) {
+          _storyGroups = groups;
+          _newStoriesByUserId = nextMap;
+        }
       });
+      _storeWarmCache();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         _precacheStoryStripMedia();
@@ -663,10 +718,14 @@ class _MainHomePageState extends State<MainHomePage> {
     final senderId = _currentUserId!;
     final receiverId = pickedUser.userId;
     debugPrint('[MainHomePage] share post=${post.id} to user=$receiverId');
-    final caption = post.caption.trim();
-    final shareText = caption.isNotEmpty
-        ? 'Публикация: ${post.id}\n$caption'
-        : 'Публикация: ${post.id}';
+    String enc(String value) => Uri.encodeComponent(value);
+    final primaryImage = post.displayImageUrls.isNotEmpty
+        ? post.displayImageUrls.first
+        : '';
+    final shareText =
+        '__post__|${enc(post.id)}|${enc(primaryImage)}|${enc(post.caption.trim())}|'
+        '${enc(post.userName ?? 'Пользователь')}|${enc(post.videoUrl ?? '')}|'
+        '${post.likesCount}|${post.commentsCount}|${post.repostsCount}';
     try {
       await supa.Supabase.instance.client
           .from(SupabaseConstants.messagesTable)
@@ -954,6 +1013,32 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 }
 
+class _MainHomeWarmCache {
+  const _MainHomeWarmCache({
+    required this.createdAt,
+    required this.userId,
+    required this.postsRecommendations,
+    required this.postsSubscriptions,
+    required this.cursorRecommendations,
+    required this.cursorSubscriptions,
+    required this.hasMoreRecommendations,
+    required this.hasMoreSubscriptions,
+    required this.storyGroups,
+    required this.newStoriesByUserId,
+  });
+
+  final DateTime createdAt;
+  final String userId;
+  final List<PostEntity> postsRecommendations;
+  final List<PostEntity> postsSubscriptions;
+  final int cursorRecommendations;
+  final int cursorSubscriptions;
+  final bool hasMoreRecommendations;
+  final bool hasMoreSubscriptions;
+  final List<StoryGroupEntity> storyGroups;
+  final Map<String, bool> newStoriesByUserId;
+}
+
 class _FeedNotificationsButton extends StatefulWidget {
   @override
   State<_FeedNotificationsButton> createState() =>
@@ -1154,7 +1239,7 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
                       ),
                     ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.black.withValues(alpha: 0.55),
                       border: Border(
@@ -1184,14 +1269,14 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
                           count: p.repostsCount,
                           onTap: widget.onRepost,
                         ),
-                        _SaveButton(
-                          onTap: widget.onSave,
-                          isSaved: p.isSavedByMe,
-                        ),
-                        const SizedBox(width: 2),
                         _ShareButton(
                           onTap: widget.onShare,
                           label: 'Поделиться',
+                        ),
+                        const Spacer(),
+                        _SaveButton(
+                          onTap: widget.onSave,
+                          isSaved: p.isSavedByMe,
                         ),
                       ],
                     ),
@@ -1327,22 +1412,22 @@ class _ActionButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
         child: SizedBox(
-          width: 70,
+          width: 52,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, color: iconColor, size: 24),
-              const SizedBox(height: 4),
+              Icon(icon, color: iconColor, size: 20),
+              const SizedBox(height: 2),
               Text(
                 '$count',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
-                  fontSize: 12,
+                  fontSize: 10.5,
                 ),
               ),
             ],
@@ -1363,20 +1448,20 @@ class _SaveButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
         child: SizedBox(
-          width: 54,
+          width: 44,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 isSaved ? Icons.bookmark : Icons.bookmark_border,
                 color: Colors.white,
-                size: 25,
+                size: 21,
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 2),
               const Text(
                 'Сохран.',
                 maxLines: 1,
@@ -1384,7 +1469,7 @@ class _SaveButton extends StatelessWidget {
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.w800,
-                  fontSize: 11,
+                  fontSize: 9.5,
                 ),
               ),
             ],
@@ -1405,16 +1490,16 @@ class _ShareButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
         child: SizedBox(
-          width: 70,
+          width: 52,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.send_outlined, color: Colors.white, size: 26),
-              const SizedBox(height: 4),
+              const Icon(Icons.send_outlined, color: Colors.white, size: 21),
+              const SizedBox(height: 2),
               Text(
                 label,
                 maxLines: 1,
@@ -1422,7 +1507,7 @@ class _ShareButton extends StatelessWidget {
                 style: TextStyle(
                   color: Colors.white.withValues(alpha: 0.95),
                   fontWeight: FontWeight.w800,
-                  fontSize: 12,
+                  fontSize: 10,
                 ),
               ),
             ],
