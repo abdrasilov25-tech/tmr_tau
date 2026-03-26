@@ -33,6 +33,9 @@ class _EditPostPageState extends State<EditPostPage> {
   int get _maxVideoSeconds =>
       widget.post.kind == 'publication' ? _maxVideoSecondsPublication : _maxVideoSecondsNews;
 
+  bool get _hasExistingVideo =>
+      widget.post.videoUrl != null && widget.post.videoUrl!.trim().isNotEmpty;
+
   @override
   void initState() {
     super.initState();
@@ -261,14 +264,19 @@ class _EditPostPageState extends State<EditPostPage> {
         await controller.dispose();
       }
 
+      final hadVideoBefore = _hasExistingVideo;
+      final willHaveVideoAfter = _newVideo != null || hadVideoBefore;
+      final clearVideo = _newImage != null && !willHaveVideoAfter;
+      final clearImage = _newVideo != null;
+
       await repo.updatePost(
         postId: widget.post.id,
         caption: caption,
         imageUrl: newImageUrl,
         videoUrl: newVideoUrl,
         videoDurationSeconds: newVideoDurationSeconds,
-        clearImage: _newVideo != null,
-        clearVideo: _newImage != null,
+        clearImage: clearImage,
+        clearVideo: clearVideo,
       );
 
       if (!mounted) return;
@@ -277,8 +285,8 @@ class _EditPostPageState extends State<EditPostPage> {
         imageUrl: newImageUrl,
         videoUrl: newVideoUrl,
         videoDurationSeconds: newVideoDurationSeconds,
-        clearImage: _newVideo != null,
-        clearVideo: _newImage != null,
+        clearImage: clearImage,
+        clearVideo: clearVideo,
       );
       context.pop(updatedPost);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -414,11 +422,8 @@ class _EditPostPageState extends State<EditPostPage> {
                             Icon(Icons.edit, color: Colors.white, size: 20),
                             SizedBox(width: 8),
                             Text(
-                              'Нажмите, чтобы заменить фото или видео',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                              ),
+                              'Изменить',
+                              style: TextStyle(color: Colors.white, fontSize: 13),
                             ),
                           ],
                         ),
