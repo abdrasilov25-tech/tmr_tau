@@ -36,6 +36,7 @@ import '../../features/profile/presentation/pages/edit_profile_page.dart';
 import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/chat/presentation/pages/chats_page.dart';
+import '../../features/chat/presentation/chat_unread_badge_controller.dart';
 import '../../features/chat/presentation/pages/group_chat_page.dart';
 import '../../features/chat/presentation/pages/channel_page.dart';
 import '../../features/chat/presentation/pages/group_chat_info_page.dart';
@@ -406,8 +407,8 @@ class AppRouter {
               StatefulShellBranch(
                 routes: [
                   GoRoute(
-                    path: 'add',
-                    builder: (context, state) => const AddProductPage(),
+                    path: 'chats',
+                    builder: (context, state) => const ChatsPage(),
                   ),
                 ],
               ),
@@ -524,6 +525,9 @@ class _MainShell extends StatelessWidget {
                       .read<NotificationActivityPeekBus>()
                       .pulsePublicationsTab();
                 }
+                if (index == 2) {
+                  context.read<ChatUnreadBadgeController>().refresh();
+                }
               },
               backgroundColor: Colors.transparent,
               elevation: 0,
@@ -540,9 +544,9 @@ class _MainShell extends StatelessWidget {
                   label: 'Поиск',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.add_circle_outline, size: 28),
-                  selectedIcon: Icon(Icons.add_circle_rounded, size: 28),
-                  label: 'Добавить',
+                  icon: Icon(Icons.chat_bubble_outline_rounded, size: 26),
+                  selectedIcon: Icon(Icons.chat_rounded, size: 26),
+                  label: 'Чаты',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.article_outlined, size: 26),

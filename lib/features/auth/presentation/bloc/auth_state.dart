@@ -11,10 +11,14 @@ final class AuthInitial extends AuthState {}
 final class AuthLoading extends AuthState {}
 
 final class AuthAuthenticated extends AuthState {
-  const AuthAuthenticated(this.user);
+  const AuthAuthenticated(this.user, {this.fromSessionOnly = false});
   final AppUser user;
+
+  /// `true` — только данные из сессии; позже может прийти обновление с сервера.
+  final bool fromSessionOnly;
+
   @override
-  List<Object?> get props => [user];
+  List<Object?> get props => [user, fromSessionOnly];
 }
 
 final class AuthUnauthenticated extends AuthState {}

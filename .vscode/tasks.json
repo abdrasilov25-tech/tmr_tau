@@ -4,7 +4,7 @@
     {
       "label": "Boot iOS Simulator",
       "type": "shell",
-      "command": "open -a Simulator; flutter emulators --launch apple_ios_simulator",
+      "command": "open -a Simulator",
       "options": {
         "cwd": "${workspaceFolder}",
         "env": {}

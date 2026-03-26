@@ -36,6 +36,21 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      min_ios = '15.0'
+      current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+      if current.nil? || Gem::Version.new(current) < Gem::Version.new(min_ios)
+        config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios
+      end
+    end
+
+    # geocoding_ios podspec lists PrivacyInfo.xcprivacy as a source; Xcode then tries to compile it.
+    if target.name == 'geocoding_ios'
+      target.source_build_phase.files.to_a.each do |build_file|
+        path = build_file.file_ref&.path.to_s
+        build_file.remove_from_project if path.end_with?('PrivacyInfo.xcprivacy')
+      end
+    end
   end
 
   installer.aggregate_targets.each do |aggregate_target|

@@ -2,18 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "tmr_tau (Flutter iPhone 16e)",
+      "name": "tmr_tau (Flutter iOS)",
       "request": "launch",
       "type": "dart",
-      "program": "lib/main.dart",
-      "deviceId": "iPhone 16e"
+      "program": "lib/main.dart"
     },
     {
-      "name": "tmr_tau (iOS — сначала симулятор)",
+      "name": "tmr_tau (iOS — открыть Simulator, затем Run)",
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
-      "deviceId": "iPhone 16e",
       "preLaunchTask": "Boot iOS Simulator"
     },
     {

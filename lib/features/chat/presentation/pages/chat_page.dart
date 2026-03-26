@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/storage/chat_list_storage.dart';
+import '../chat_unread_badge_controller.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
@@ -52,8 +53,22 @@ class _ChatPageState extends State<ChatPage> {
       _currentUserId = authState.user.id;
     }
     if (widget.markReadOnOpen) {
-      context.read<ChatListStorage>().setLastReadAt(widget.peerId, DateTime.now());
+      context
+          .read<ChatListStorage>()
+          .setLastReadAt(widget.peerId, DateTime.now())
+          .then((_) {
+        if (!mounted) return;
+        context.read<ChatUnreadBadgeController>().refresh();
+      });
     }
+  }
+
+  @override
+  void deactivate() {
+    if (context.mounted) {
+      context.read<ChatUnreadBadgeController>().refresh();
+    }
+    super.deactivate();
   }
 
   @override

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'core/accounts/account_manager.dart';
 import 'core/accounts/account_model.dart';
@@ -19,6 +20,7 @@ import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
 import 'features/auth/domain/repositories/auth_repository.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
+import 'features/chat/presentation/chat_unread_badge_controller.dart';
 import 'features/comments/data/repositories/comments_repository_impl.dart';
 import 'features/comments/domain/repositories/comments_repository.dart';
 import 'features/feed/data/repositories/feed_repository_impl.dart';
@@ -87,7 +89,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
   late final ThemeIndexNotifier _themeIndexNotifier;
-  late final NotificationActivityPeekBus _notificationActivityPeekBus;
+  ChatUnreadBadgeController? _chatUnreadBadgeController;
+  NotificationActivityPeekBus? _notificationActivityPeekBus;
 
   @override
   void initState() {
@@ -97,6 +100,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
     }
     _themeRepository = ThemeRepositoryImpl(widget.localReactionsStorage);
     _themeIndexNotifier = ThemeIndexNotifier(_themeRepository);
+    _chatUnreadBadgeController =
+        ChatUnreadBadgeController(chatListStorage: widget.chatListStorage);
     _notificationActivityPeekBus = NotificationActivityPeekBus();
     _client = supa.Supabase.instance.client;
     final authDataSource = AuthRemoteDataSourceImpl(_client);
@@ -133,7 +138,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
 
   @override
   void dispose() {
-    _notificationActivityPeekBus.dispose();
+    _chatUnreadBadgeController?.dispose();
+    _notificationActivityPeekBus?.dispose();
     super.dispose();
   }
 
@@ -171,6 +177,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
           RepositoryProvider<LocalReactionsStorage>.value(
             value: widget.localReactionsStorage),
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
+        ChangeNotifierProvider<ChatUnreadBadgeController>.value(
+          value: _chatUnreadBadgeController!,
+        ),
         RepositoryProvider<ChatStoryListStorage>.value(
           value: widget.chatStoryListStorage,
         ),
@@ -196,7 +205,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
           value: _notificationsRepository,
         ),
         RepositoryProvider<NotificationActivityPeekBus>.value(
-          value: _notificationActivityPeekBus,
+          value: _notificationActivityPeekBus!,
         ),
         RepositoryProvider<PostRepository>.value(value: _postRepository),
         RepositoryProvider<SettingsRepository>.value(
@@ -209,6 +218,11 @@ class _TmrTauAppState extends State<TmrTauApp> {
           widget.multiAccountStorage,
         )..add(const AuthCheckRequested()),
         child: BlocListener<AuthBloc, AuthState>(
+          listenWhen: (prev, curr) {
+            if (curr is! AuthAuthenticated) return false;
+            if (prev is! AuthAuthenticated) return true;
+            return prev.user.id != curr.user.id;
+          },
           listener: (context, state) async {
             if (state is AuthAuthenticated) {
               // При входе/переключении аккаунта очищаем локальные лайки/репосты и состояние чатов,
@@ -231,6 +245,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
                 username: state.user.username,
               );
               await context.read<AccountManager>().addOrUpdateAccount(account);
+              if (context.mounted) {
+                await context.read<ChatUnreadBadgeController>().refresh();
+              }
             }
           },
           child: BlocProvider<FeedBloc>(
@@ -244,13 +261,21 @@ class _TmrTauAppState extends State<TmrTauApp> {
               listener: (context, state) {
                 if (state is AuthAuthenticated) {
                   context.read<FeedBloc>().add(FeedLoaded(currentUserId: state.user.id));
+                  context.read<ChatUnreadBadgeController>().refresh();
                 }
               },
-              child: MaterialApp.router(
-                title: 'tmr_tau',
-                debugShowCheckedModeBanner: false,
-                theme: AppTheme.light,
-                routerConfig: _appRouter.router,
+              child: BlocListener<AuthBloc, AuthState>(
+                listenWhen: (prev, curr) =>
+                    curr is AuthUnauthenticated || curr is AuthError,
+                listener: (context, state) {
+                  context.read<ChatUnreadBadgeController>().clear();
+                },
+                child: MaterialApp.router(
+                  title: 'tmr_tau',
+                  debugShowCheckedModeBanner: false,
+                  theme: AppTheme.light,
+                  routerConfig: _appRouter.router,
+                ),
               ),
             ),
           ),

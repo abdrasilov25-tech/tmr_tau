@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -44,6 +45,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
   SellerProfileEntity? _profile;
   List<PostEntity> _newsPosts = [];
   List<PostEntity> _publicationPosts = [];
+  List<PostEntity> _videoPosts = [];
   bool _loading = true;
   late int _tabIndex;
   bool _updatingAvatar = false;
@@ -56,7 +58,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
   @override
   void initState() {
     super.initState();
-    _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 2);
+    _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 3);
     _load();
     _deletedProductSub = deletedProductIdsStream.listen((_) {
       if (mounted) _load();
@@ -149,6 +151,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
       var publicationPosts = posts
           .where((p) => p.kind.trim().toLowerCase() == 'publication')
           .toList(growable: false);
+      final videoPosts = posts
+          .where((p) => p.videoUrl != null && p.videoUrl!.trim().isNotEmpty)
+          .toList(growable: false);
       if (publicationPosts.isEmpty) {
         if (!mounted) return;
         final publicationFeed = await postRepo.searchPublicationsByCursor(
@@ -181,6 +186,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 );
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
+          _videoPosts = videoPosts;
           _loading = false;
           if (publicationPosts.isNotEmpty) {
             _autoReloadTriggeredForPublications = false;
@@ -291,7 +297,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 subtitle: const Text('Продать вещь на маркете'),
                 onTap: () {
                   Navigator.pop(context);
-                  context.go('/home/add');
+                  context.go('/add-product');
                 },
               ),
               ListTile(
@@ -444,7 +450,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           IconButton(
             icon: const Icon(Icons.menu_rounded, size: 26),
             onPressed: () {
-              // Меню: темки, чаты, избранное, выйти
+              // Меню: темки, избранное, настройки, выйти
               _showProfileMenu(context);
             },
           ),
@@ -487,6 +493,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             profile: _profile,
             newsPosts: _newsPosts,
             publicationPosts: _publicationPosts,
+            videoPosts: _videoPosts,
             tabIndex: _tabIndex,
             onTabChanged: (i) => setState(() => _tabIndex = i),
             onRefresh: _load,
@@ -787,14 +794,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.chat_bubble_outline),
-              title: const Text('Мои чаты'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/chats');
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.favorite_border),
               title: const Text('Избранное'),
               onTap: () {
@@ -864,6 +863,7 @@ class _ProfileContent extends StatelessWidget {
     required this.profile,
     required this.newsPosts,
     required this.publicationPosts,
+    required this.videoPosts,
     required this.tabIndex,
     required this.onTabChanged,
     required this.onRefresh,
@@ -878,6 +878,7 @@ class _ProfileContent extends StatelessWidget {
   final SellerProfileEntity? profile;
   final List<PostEntity> newsPosts;
   final List<PostEntity> publicationPosts;
+  final List<PostEntity> videoPosts;
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final VoidCallback onRefresh;
@@ -1184,13 +1185,21 @@ class _ProfileContent extends StatelessWidget {
                                       emptyActionLabel: 'Опубликовать новость',
                                       onEmptyAction: () => context.push('/add-news'),
                                     )
-                                  : _PostsGrid(
-                                      posts: publicationPosts,
-                                      emptyTitle: 'Нет публикаций',
-                                      emptyActionLabel: 'Создать публикацию',
-                                      onEmptyAction: () =>
-                                          context.push('/add-publication'),
-                                    ),
+                                  : tabIndex == 2
+                                      ? _PostsGrid(
+                                          posts: publicationPosts,
+                                          emptyTitle: 'Нет публикаций',
+                                          emptyActionLabel: 'Создать публикацию',
+                                          onEmptyAction: () =>
+                                              context.push('/add-publication'),
+                                        )
+                                      : _PostsGrid(
+                                          posts: videoPosts,
+                                          emptyTitle: 'Нет видео',
+                                          emptyActionLabel: 'Создать видео',
+                                          onEmptyAction: () =>
+                                              context.push('/add-publication?video=1'),
+                                        ),
                         ),
                       ),
                     ],
@@ -1212,7 +1221,7 @@ Widget _statDivider() => Container(
       color: const Color(0xFFE2E5EB),
     );
 
-/// Переключатель «Товары / Новости / Лента» в профиле.
+/// Переключатель вкладок профиля в стиле Instagram.
 class _ProfileTabBar extends StatelessWidget {
   const _ProfileTabBar({
     required this.tabIndex,
@@ -1230,33 +1239,49 @@ class _ProfileTabBar extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFECEEF2),
         borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFFD8DCE4).withValues(alpha: 0.9),
+        ),
       ),
       child: Row(
         children: [
           Expanded(
             child: _ProfileTabChip(
-              selected: tabIndex == 2,
-              icon: Icons.person_outline_rounded,
-              label: 'Лента',
-              onTap: () => onChanged(2),
+              selected: tabIndex == 0,
+              icon: Icons.grid_on_rounded,
+              label: '',
+              compact: true,
+              onTap: () => onChanged(0),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 3),
           Expanded(
             child: _ProfileTabChip(
               selected: tabIndex == 1,
-              icon: Icons.article_rounded,
-              label: 'Новости',
+              icon: Icons.article_outlined,
+              label: '',
+              compact: true,
               onTap: () => onChanged(1),
             ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 3),
           Expanded(
             child: _ProfileTabChip(
-              selected: tabIndex == 0,
-              icon: Icons.grid_view_rounded,
-              label: 'Товары',
-              onTap: () => onChanged(0),
+              selected: tabIndex == 2,
+              icon: Icons.person_pin_outlined,
+              label: '',
+              compact: true,
+              onTap: () => onChanged(2),
+            ),
+          ),
+          const SizedBox(width: 3),
+          Expanded(
+            child: _ProfileTabChip(
+              selected: tabIndex == 3,
+              icon: Icons.smart_display_outlined,
+              label: '',
+              compact: true,
+              onTap: () => onChanged(3),
             ),
           ),
         ],
@@ -1271,33 +1296,49 @@ class _ProfileTabChip extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onTap,
+    this.compact = false,
   });
 
   final bool selected;
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final iconSize = compact ? 17.0 : 19.0;
+    final fontSize = compact ? 12.5 : 14.0;
+    final gap = compact ? 4.0 : 8.0;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
         borderRadius: BorderRadius.circular(11),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
           alignment: Alignment.center,
+          padding: compact
+              ? const EdgeInsets.symmetric(horizontal: 2, vertical: 2)
+              : EdgeInsets.zero,
           decoration: BoxDecoration(
             color: selected ? Colors.white : Colors.transparent,
             borderRadius: BorderRadius.circular(11),
+            border: selected
+                ? Border.all(
+                    color: Colors.black.withValues(alpha: 0.06),
+                  )
+                : null,
             boxShadow: selected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 8,
-                      offset: const Offset(0, 2),
+                      offset: const Offset(0, 1),
                     ),
                   ]
                 : null,
@@ -1308,22 +1349,28 @@ class _ProfileTabChip extends StatelessWidget {
             children: [
               Icon(
                 icon,
-                size: 19,
+                size: iconSize,
                 color: selected
                     ? ThemedContentSurface.profileTextPrimary
                     : const Color(0xFF8E92A0),
               ),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: selected
-                      ? ThemedContentSurface.profileTextPrimary
-                      : const Color(0xFF8E92A0),
+              if (label.isNotEmpty) ...[
+                SizedBox(width: gap),
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: fontSize,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected
+                          ? ThemedContentSurface.profileTextPrimary
+                          : const Color(0xFF8E92A0),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         ),
@@ -1394,7 +1441,7 @@ class _ProductsGrid extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             TextButton.icon(
-              onPressed: () => context.go('/home/add'),
+              onPressed: () => context.go('/add-product'),
               icon: const Icon(Icons.add),
               label: const Text('Добавить товар'),
             ),

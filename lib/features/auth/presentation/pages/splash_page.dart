@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+
 import '../bloc/auth_bloc.dart';
 
 class SplashPage extends StatefulWidget {
@@ -13,7 +13,9 @@ class SplashPage extends StatefulWidget {
 
 class _SplashPageState extends State<SplashPage>
     with TickerProviderStateMixin {
-  Timer? _timeout;
+  static const _minSplash = Duration(milliseconds: 600);
+
+  late final DateTime _splashStartedAt;
   late AnimationController _logoController;
   late AnimationController _fadeOutController;
   late Animation<double> _scaleAnimation;
@@ -23,8 +25,8 @@ class _SplashPageState extends State<SplashPage>
   @override
   void initState() {
     super.initState();
+    _splashStartedAt = DateTime.now();
 
-    // Появление логотипа: масштаб + прозрачность (как в TikTok)
     _logoController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -42,62 +44,62 @@ class _SplashPageState extends State<SplashPage>
       ),
     );
 
-    // Плавное исчезновение перед переходом
     _fadeOutController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 350),
+      duration: const Duration(milliseconds: 320),
     );
 
     _logoController.forward();
 
-    // Минимальное время показа сплэша
-    _timeout = Timer(const Duration(milliseconds: 2500), () {
-      if (!mounted || _navigating) return;
-      _navigateFromSplash();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _scheduleNavigateFromAuth();
     });
+  }
+
+  /// Ждём конец проверки сессии и минимальное время бренд-анимации; без искусственных 2.5 с.
+  void _scheduleNavigateFromAuth() {
+    if (!mounted || _navigating) return;
+
+    final state = context.read<AuthBloc>().state;
+    if (state is AuthLoading) return;
+
+    final elapsed = DateTime.now().difference(_splashStartedAt);
+    if (elapsed < _minSplash) {
+      Future<void>.delayed(_minSplash - elapsed, () {
+        if (mounted) _scheduleNavigateFromAuth();
+      });
+      return;
+    }
+
+    _navigateFromSplash();
   }
 
   void _navigateFromSplash() {
     if (_navigating) return;
     _navigating = true;
-    _timeout?.cancel();
 
     final state = context.read<AuthBloc>().state;
-    if (state is AuthAuthenticated) {
-      _goAfterFadeOut('/home/feed');
-    } else {
-      _goAfterFadeOut('/login');
-    }
+    final route = state is AuthAuthenticated ? '/home/feed' : '/login';
+    _goAfterFadeOut(route);
   }
 
   void _goAfterFadeOut(String route) {
     _fadeOutController.forward();
-    _fadeOutController.addStatusListener((status) {
+    void listener(AnimationStatus status) {
       if (status == AnimationStatus.completed && mounted) {
+        _fadeOutController.removeStatusListener(listener);
         context.go(route);
       }
-    });
+    }
+
+    _fadeOutController.addStatusListener(listener);
   }
 
   @override
   void dispose() {
-    _timeout?.cancel();
     _logoController.dispose();
     _fadeOutController.dispose();
     super.dispose();
-  }
-
-  void _onAuthStateChanged(BuildContext context, AuthState state) {
-    if (_navigating) return;
-    if (state is AuthAuthenticated || state is AuthUnauthenticated ||
-        state is AuthError) {
-      _timeout?.cancel();
-      // Небольшая задержка, чтобы анимация появления успела завершиться
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (!mounted || _navigating) return;
-        _navigateFromSplash();
-      });
-    }
   }
 
   @override
@@ -107,7 +109,13 @@ class _SplashPageState extends State<SplashPage>
           state is AuthAuthenticated ||
           state is AuthUnauthenticated ||
           state is AuthError,
-      listener: _onAuthStateChanged,
+      listener: (context, state) {
+        if (_navigating) return;
+        // Даём кадру сменить состояние, затем снова проверяем минимальное время сплэша.
+        Future<void>.delayed(const Duration(milliseconds: 120), () {
+          if (mounted) _scheduleNavigateFromAuth();
+        });
+      },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: SafeArea(
@@ -124,6 +132,7 @@ class _SplashPageState extends State<SplashPage>
                       'assets/icons.png',
                       width: 160,
                       height: 160,
+                      cacheWidth: 320,
                       fit: BoxFit.contain,
                       errorBuilder: (_, _, _) => const Icon(
                         Icons.image_outlined,

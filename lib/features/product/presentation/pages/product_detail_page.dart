@@ -8,6 +8,7 @@ import '../../../../core/products/deleted_product_bus.dart';
 import '../../../../core/utils/phone_launch.dart';
 import '../../../feed/presentation/bloc/feed_bloc.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../widgets/product_image_gallery.dart';
 import '../widgets/product_promo_badges.dart';
 import '../widgets/product_promotion_sheet.dart';
@@ -285,14 +286,32 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   ]
                 : null,
             flexibleSpace: FlexibleSpaceBar(
-              background: ProductImageGallery(
-                key: ValueKey<String>(_product.imageUrls.join('|')),
-                imageUrls: _product.imageUrls.isNotEmpty
-                    ? _product.imageUrls
-                    : (_product.imageUrl.isNotEmpty
-                        ? <String>[_product.imageUrl]
-                        : <String>[]),
-                height: 320,
+              background: DoubleTapLikeBurst(
+                iconSize: 88,
+                canDoubleTap: () {
+                  if (authState is! AuthAuthenticated) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Войдите, чтобы добавить товар в избранное'),
+                      ),
+                    );
+                    return false;
+                  }
+                  if (widget.productRepository == null || _favoriteToggling) {
+                    return false;
+                  }
+                  return true;
+                },
+                onDoubleTapLike: _toggleFavorite,
+                child: ProductImageGallery(
+                  key: ValueKey<String>(_product.imageUrls.join('|')),
+                  imageUrls: _product.imageUrls.isNotEmpty
+                      ? _product.imageUrls
+                      : (_product.imageUrl.isNotEmpty
+                          ? <String>[_product.imageUrl]
+                          : <String>[]),
+                  height: 320,
+                ),
               ),
             ),
           ),

@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
@@ -344,17 +345,25 @@ class _NewsPostCard extends StatelessWidget {
               ],
               if (post.videoUrl != null && post.videoUrl!.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: _PostVideoPlayer(videoUrl: post.videoUrl!),
+                DoubleTapLikeBurst(
+                  iconSize: 72,
+                  onDoubleTapLike: onLike,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: _PostVideoPlayer(videoUrl: post.videoUrl!),
+                  ),
                 ),
               ] else if (post.displayImageUrls.isNotEmpty) ...[
                 const SizedBox(height: 12),
-                PostNetworkPhotoGallery(
-                  urls: post.displayImageUrls,
-                  height: post.displayImageUrls.length > 1 ? 300 : 280,
-                  borderRadius: 8,
-                  viewportFraction: post.displayImageUrls.length > 1 ? 0.92 : 1,
+                DoubleTapLikeBurst(
+                  iconSize: 72,
+                  onDoubleTapLike: onLike,
+                  child: PostNetworkPhotoGallery(
+                    urls: post.displayImageUrls,
+                    height: post.displayImageUrls.length > 1 ? 300 : 280,
+                    borderRadius: 8,
+                    viewportFraction: post.displayImageUrls.length > 1 ? 0.92 : 1,
+                  ),
                 ),
               ],
               const SizedBox(height: 12),

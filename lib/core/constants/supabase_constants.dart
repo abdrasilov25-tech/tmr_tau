@@ -33,6 +33,7 @@ class SupabaseConstants {
   static const String chatGroupMessagesTable = 'chat_group_messages';
   static const String userChannelsTable = 'user_channels';
   static const String channelMessagesTable = 'channel_messages';
+  static const String channelSubscribersTable = 'channel_subscribers';
 
   static const String bucketProducts = 'products';
   static const String bucketStories = 'stories';

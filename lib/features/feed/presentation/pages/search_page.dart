@@ -266,6 +266,69 @@ class _SearchPageState extends State<SearchPage> {
         .toList(growable: false);
   }
 
+  Future<void> _showCreateFromSearchSheet() async {
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 42,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Добавить',
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.w800),
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              leading: const Icon(Icons.shopping_bag_outlined),
+              title: const Text('Товар'),
+              subtitle: const Text('Разместить объявление'),
+              onTap: () => Navigator.pop(ctx, 'product'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: const Text('Новость'),
+              subtitle: const Text('Опубликовать пост в новости'),
+              onTap: () => Navigator.pop(ctx, 'news'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.person_outline_rounded),
+              title: const Text('Публикация'),
+              subtitle: const Text('Пост в личную ленту'),
+              onTap: () => Navigator.pop(ctx, 'publication'),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || selected == null) return;
+    switch (selected) {
+      case 'product':
+        context.go('/add-product');
+        break;
+      case 'news':
+        await context.push('/add-news');
+        break;
+      case 'publication':
+        await context.push('/add-publication');
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -354,6 +417,34 @@ class _SearchPageState extends State<SearchPage> {
             ],
           );
         },
+      ),
+      floatingActionButton: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF6C63FF), Color(0xFF8B5CF6)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(999),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF6C63FF).withValues(alpha: 0.35),
+              blurRadius: 16,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: FloatingActionButton.extended(
+          onPressed: _showCreateFromSearchSheet,
+          elevation: 0,
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text(
+            'Добавить',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
       ),
     );
   }

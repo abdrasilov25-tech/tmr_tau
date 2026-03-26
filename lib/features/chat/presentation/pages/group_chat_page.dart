@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/storage/chat_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../chat_unread_badge_controller.dart';
 
 class GroupChatPage extends StatefulWidget {
   const GroupChatPage({
@@ -40,6 +42,16 @@ class _GroupChatPageState extends State<GroupChatPage> {
     }
     _groupTitle = widget.groupName;
     _loadGroupMeta();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final auth = context.read<AuthBloc>().state;
+      if (auth is! AuthAuthenticated) return;
+      await context.read<ChatListStorage>().setLastReadAt(
+            widget.groupId,
+            DateTime.now(),
+          );
+      if (!mounted) return;
+      await context.read<ChatUnreadBadgeController>().refresh();
+    });
   }
 
   @override
@@ -54,7 +66,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         .from(SupabaseConstants.chatGroupMessagesTable)
         .stream(primaryKey: ['id'])
         .eq('group_id', widget.groupId)
-        .order('created_at')
+        .order('created_at', ascending: true)
         .map((list) => list.cast<Map<String, dynamic>>());
   }
 
@@ -95,6 +107,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         'group_id': widget.groupId,
         'sender_id': senderId,
         'text': text,
+        'kind': 'text',
       });
       _controller.clear();
     } catch (e) {
@@ -172,8 +185,36 @@ class _GroupChatPageState extends State<GroupChatPage> {
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final m = messages[index];
-                    final isMe = m['sender_id'] == _currentUserId;
+                    final kind = m['kind'] as String? ?? 'text';
                     final text = (m['text'] as String?) ?? '';
+                    if (kind != 'text') {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: Center(
+                          child: Container(
+                            constraints: const BoxConstraints(maxWidth: 320),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade300,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              text,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.grey.shade900,
+                                fontSize: 12.5,
+                                height: 1.25,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+                    final isMe = m['sender_id'] == _currentUserId;
                     return Align(
                       alignment: isMe
                           ? Alignment.centerRight
