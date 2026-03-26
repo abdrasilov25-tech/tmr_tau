@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
@@ -16,6 +17,7 @@ import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
+import '../../../post/domain/repositories/post_repository.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -36,13 +38,16 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   static const String _storyDmPrefix = '__story__';
+  static const String _postDmPrefix = '__post__';
   late final SupabaseClient _client;
   String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
   final ScrollController _messagesScrollController = ScrollController();
   bool _sending = false;
   bool _showScrollToBottom = false;
+  bool _showNewMessagesHint = false;
   bool _didInitialAutoScroll = false;
+  int _lastMessageCount = 0;
 
   @override
   void initState() {
@@ -148,25 +153,32 @@ class _ChatPageState extends State<ChatPage> {
 
   void _scrollToBottom({bool animated = false}) {
     if (!_messagesScrollController.hasClients) return;
-    final max = _messagesScrollController.position.maxScrollExtent;
+    final bottom = _messagesScrollController.position.minScrollExtent;
     if (animated) {
       _messagesScrollController.animateTo(
-        max,
+        bottom,
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     } else {
-      _messagesScrollController.jumpTo(max);
+      _messagesScrollController.jumpTo(bottom);
     }
   }
 
   void _handleScroll() {
     if (!_messagesScrollController.hasClients) return;
     final position = _messagesScrollController.position;
-    final distanceToBottom = position.maxScrollExtent - position.pixels;
-    final shouldShow = distanceToBottom > 160;
-    if (shouldShow != _showScrollToBottom) {
-      setState(() => _showScrollToBottom = shouldShow);
+    final distanceFromBottom = position.pixels - position.minScrollExtent;
+    final shouldShow = distanceFromBottom > 160;
+    final isNearBottom = distanceFromBottom < 120;
+    if (shouldShow != _showScrollToBottom ||
+        (isNearBottom && _showNewMessagesHint)) {
+      setState(() {
+        _showScrollToBottom = shouldShow;
+        if (isNearBottom) {
+          _showNewMessagesHint = false;
+        }
+      });
     }
   }
 
@@ -287,12 +299,22 @@ class _ChatPageState extends State<ChatPage> {
                         if (!mounted || !_messagesScrollController.hasClients) return;
                         final position = _messagesScrollController.position;
                         final isNearBottom =
-                            (position.maxScrollExtent - position.pixels) < 120;
+                            (position.pixels - position.minScrollExtent) < 120;
                         if (!_didInitialAutoScroll) {
                           _didInitialAutoScroll = true;
+                          _lastMessageCount = messages.length;
                           _scrollToBottom();
-                        } else if (isNearBottom) {
+                          return;
+                        }
+                        final hasNewMessages = messages.length > _lastMessageCount;
+                        _lastMessageCount = messages.length;
+                        if (isNearBottom) {
+                          if (_showNewMessagesHint) {
+                            setState(() => _showNewMessagesHint = false);
+                          }
                           _scrollToBottom();
+                        } else if (hasNewMessages && !_showNewMessagesHint) {
+                          setState(() => _showNewMessagesHint = true);
                         }
                       });
                       return NotificationListener<ScrollNotification>(
@@ -302,16 +324,18 @@ class _ChatPageState extends State<ChatPage> {
                         },
                         child: ListView.builder(
                           controller: _messagesScrollController,
+                          reverse: true,
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
                             vertical: 8,
                           ),
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
-                          final m = messages[index];
+                          final m = messages[messages.length - 1 - index];
                           final senderId = m['sender_id'] as String?;
                           final text = m['text'] as String? ?? '';
                           final structured = _parseStoryDirectMessage(text);
+                          final postStructured = _parsePostDirectMessage(text);
                           final isMe = senderId == me;
                           return Align(
                             alignment: isMe
@@ -329,7 +353,49 @@ class _ChatPageState extends State<ChatPage> {
                                     : Colors.grey.shade200,
                                 borderRadius: BorderRadius.circular(16),
                               ),
-                              child: structured == null
+                              child: postStructured != null
+                                  ? _PostLinkedChatBubble(
+                                      message: postStructured,
+                                      isMe: isMe,
+                                      onOpenPost: () {
+                                        context.push('/post/${postStructured.postId}');
+                                      },
+                                      onShare: () async {
+                                        await SharePlus.instance.share(
+                                          ShareParams(
+                                            text:
+                                                'https://tmr-tau.app/post/${postStructured.postId}',
+                                          ),
+                                        );
+                                      },
+                                      onSave: () async {
+                                        if (_currentUserId == null) return;
+                                        final postRepo =
+                                            context.read<PostRepository>();
+                                        final messenger =
+                                            ScaffoldMessenger.of(context);
+                                        try {
+                                          await postRepo.toggleSave(
+                                            postStructured.postId,
+                                            _currentUserId!,
+                                          );
+                                          if (!mounted) return;
+                                          messenger.showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Публикация сохранена'),
+                                            ),
+                                          );
+                                        } catch (_) {
+                                          if (!mounted) return;
+                                          messenger.showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Не удалось сохранить публикацию'),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                    )
+                                  : structured == null
                                   ? Text(
                                       text,
                                       style: TextStyle(
@@ -398,17 +464,64 @@ class _ChatPageState extends State<ChatPage> {
                 Positioned(
                   right: 16,
                   bottom: 92,
-                  child: AnimatedOpacity(
-                    opacity: _showScrollToBottom ? 1 : 0,
+                  child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 180),
-                    child: IgnorePointer(
-                      ignoring: !_showScrollToBottom,
-                      child: FloatingActionButton.small(
-                        heroTag: 'chat_scroll_to_bottom',
-                        onPressed: () => _scrollToBottom(animated: true),
-                        child: const Icon(Icons.keyboard_arrow_down_rounded),
-                      ),
-                    ),
+                    child: (_showScrollToBottom || _showNewMessagesHint)
+                        ? Material(
+                            key: ValueKey(_showNewMessagesHint),
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(999),
+                              onTap: () {
+                                _scrollToBottom(animated: true);
+                                if (_showNewMessagesHint) {
+                                  setState(() => _showNewMessagesHint = false);
+                                }
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: BorderRadius.circular(999),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black26,
+                                      blurRadius: 8,
+                                      offset: Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color:
+                                          Theme.of(context).colorScheme.onPrimary,
+                                      size: 18,
+                                    ),
+                                    if (_showNewMessagesHint) ...[
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Новые',
+                                        style: TextStyle(
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onPrimary,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
                   ),
                 ),
               ],
@@ -458,6 +571,35 @@ class _ChatPageState extends State<ChatPage> {
       storyId: storyId,
       previewUrl: previewUrl,
       payload: payload,
+    );
+  }
+
+  _PostDirectMessage? _parsePostDirectMessage(String text) {
+    if (!text.startsWith('$_postDmPrefix|')) return null;
+    final parts = text.split('|');
+    if (parts.length < 6) return null;
+    String decode(String value) {
+      try {
+        return Uri.decodeComponent(value);
+      } catch (_) {
+        return value;
+      }
+    }
+    final postId = decode(parts[1]);
+    if (postId.isEmpty) return null;
+    int parseCount(int index) {
+      if (parts.length <= index) return 0;
+      return int.tryParse(parts[index]) ?? 0;
+    }
+    return _PostDirectMessage(
+      postId: postId,
+      imageUrl: decode(parts[2]),
+      caption: decode(parts[3]),
+      authorName: decode(parts[4]),
+      videoUrl: decode(parts[5]),
+      likesCount: parseCount(6),
+      commentsCount: parseCount(7),
+      repostsCount: parseCount(8),
     );
   }
 
@@ -529,6 +671,28 @@ class _StoryDirectMessage {
   final String payload;
 }
 
+class _PostDirectMessage {
+  const _PostDirectMessage({
+    required this.postId,
+    required this.imageUrl,
+    required this.caption,
+    required this.authorName,
+    required this.videoUrl,
+    required this.likesCount,
+    required this.commentsCount,
+    required this.repostsCount,
+  });
+
+  final String postId;
+  final String imageUrl;
+  final String caption;
+  final String authorName;
+  final String videoUrl;
+  final int likesCount;
+  final int commentsCount;
+  final int repostsCount;
+}
+
 class _StoryLinkedChatBubble extends StatelessWidget {
   const _StoryLinkedChatBubble({
     required this.message,
@@ -578,4 +742,168 @@ class _StoryLinkedChatBubble extends StatelessWidget {
       ],
     );
   }
+}
+
+class _PostLinkedChatBubble extends StatelessWidget {
+  const _PostLinkedChatBubble({
+    required this.message,
+    required this.isMe,
+    required this.onOpenPost,
+    required this.onShare,
+    required this.onSave,
+  });
+
+  final _PostDirectMessage message;
+  final bool isMe;
+  final VoidCallback onOpenPost;
+  final Future<void> Function() onShare;
+  final Future<void> Function() onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = isMe ? Colors.white : Colors.black87;
+    final hasPreview = message.imageUrl.isNotEmpty;
+    final hasVideo = message.videoUrl.isNotEmpty;
+    return GestureDetector(
+      onTap: onOpenPost,
+      child: SizedBox(
+        width: 210,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasPreview)
+              Container(
+                width: 210,
+                height: 240,
+                margin: const EdgeInsets.only(bottom: 6),
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  color: Colors.black12,
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: message.imageUrl,
+                      fit: BoxFit.cover,
+                      errorWidget: (context, url, error) =>
+                          const Center(child: Icon(Icons.broken_image_outlined)),
+                    ),
+                    if (hasVideo)
+                      const Center(
+                        child: Icon(
+                          Icons.play_circle_fill_rounded,
+                          size: 34,
+                          color: Colors.white70,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            Text(
+              message.authorName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: textColor,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            if (message.caption.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                message.caption,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: textColor),
+              ),
+            ],
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                _PostMetricChip(
+                  icon: Icons.favorite_border_rounded,
+                  value: message.likesCount,
+                  color: textColor,
+                ),
+                const SizedBox(width: 10),
+                _PostMetricChip(
+                  icon: Icons.mode_comment_outlined,
+                  value: message.commentsCount,
+                  color: textColor,
+                ),
+                const SizedBox(width: 10),
+                _PostMetricChip(
+                  icon: Icons.repeat_rounded,
+                  value: message.repostsCount,
+                  color: textColor,
+                ),
+                const Spacer(),
+                InkWell(
+                  onTap: onShare,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.send_outlined, size: 16, color: textColor),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: onSave,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(Icons.bookmark_border_rounded, size: 16, color: textColor),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PostMetricChip extends StatelessWidget {
+  const _PostMetricChip({
+    required this.icon,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final int value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: color),
+        const SizedBox(width: 3),
+        Text(
+          _formatCount(value),
+          style: TextStyle(
+            color: color,
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _formatCount(int value) {
+  if (value >= 1000000) {
+    return '${(value / 1000000).toStringAsFixed(1)}M';
+  }
+  if (value >= 1000) {
+    return '${(value / 1000).toStringAsFixed(1)}K';
+  }
+  return '$value';
 }
