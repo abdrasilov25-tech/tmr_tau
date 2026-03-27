@@ -64,5 +64,7 @@
 	<string>Камера нужна, чтобы снять фото или видео для поста, объявления или истории.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Микрофон нужен при записи видео со звуком.</string>
+	<key>GMSApiKey</key>
+	<string>$(MAPS_API_KEY)</string>
 </dict>
 </plist>
