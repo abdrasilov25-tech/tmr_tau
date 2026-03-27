@@ -44,6 +44,9 @@ import 'features/stories/data/repositories/stories_repository_impl.dart';
 import 'features/stories/domain/repositories/stories_repository.dart';
 import 'features/settings/data/repositories/settings_repository_impl.dart';
 import 'features/settings/domain/repositories/settings_repository.dart';
+import 'features/map/data/datasources/map_remote_datasource.dart';
+import 'features/map/data/repositories/map_repository_impl.dart';
+import 'features/map/domain/repositories/map_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -85,6 +88,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final NotificationsRepository _notificationsRepository;
   late final PostRepository _postRepository;
   late final SettingsRepository _settingsRepository;
+  late final MapRepository _mapRepository;
   late final AppRouter _appRouter;
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
@@ -121,6 +125,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _storiesRepository = StoriesRepositoryImpl(_client);
     _notificationsRepository = NotificationsRepositoryImpl(_client);
     _postRepository = PostRepositoryImpl(_client);
+    _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
     _accountManager = AccountManager(
       widget.accountRepository,
       SessionRestorer(_client),
@@ -133,6 +138,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
       postRepository: _postRepository,
       commentsRepository: _commentsRepository,
       settingsRepository: _settingsRepository,
+      mapRepository: _mapRepository,
     );
   }
 
@@ -211,6 +217,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<SettingsRepository>.value(
           value: _settingsRepository,
         ),
+        RepositoryProvider<MapRepository>.value(value: _mapRepository),
       ],
       child: BlocProvider(
         create: (context) => AuthBloc(

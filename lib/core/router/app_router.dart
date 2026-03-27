@@ -62,6 +62,10 @@ import '../../features/settings/presentation/screens/terms_page.dart';
 import '../../features/settings/presentation/screens/privacy_policy_page.dart';
 import '../../features/settings/presentation/screens/delete_account_page.dart';
 import '../../features/settings/domain/repositories/settings_repository.dart';
+import '../../features/map/domain/repositories/map_repository.dart';
+import '../../features/map/domain/usecases/get_nearby_products.dart';
+import '../../features/map/presentation/bloc/map_bloc.dart';
+import '../../features/map/presentation/pages/map_page.dart';
 
 class AppRouter {
   AppRouter({
@@ -72,6 +76,7 @@ class AppRouter {
     required this.postRepository,
     required this.commentsRepository,
     required this.settingsRepository,
+    required this.mapRepository,
   });
 
   final FeedRepository feedRepository;
@@ -81,6 +86,7 @@ class AppRouter {
   final PostRepository postRepository;
   final CommentsRepository commentsRepository;
   final SettingsRepository settingsRepository;
+  final MapRepository mapRepository;
 
   late final GoRouter router = GoRouter(
     initialLocation: '/',
@@ -407,6 +413,19 @@ class AppRouter {
               StatefulShellBranch(
                 routes: [
                   GoRoute(
+                    path: 'map',
+                    builder: (context, state) => BlocProvider(
+                      create: (_) => MapBloc(
+                        GetNearbyProducts(mapRepository),
+                      ),
+                      child: const MapPage(),
+                    ),
+                  ),
+                ],
+              ),
+              StatefulShellBranch(
+                routes: [
+                  GoRoute(
                     path: 'chats',
                     builder: (context, state) => const ChatsPage(),
                   ),
@@ -518,6 +537,8 @@ class _MainShell extends StatelessWidget {
             ),
             child: NavigationBar(
               selectedIndex: navigationShell.currentIndex,
+              labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+              height: 56,
               onDestinationSelected: (index) {
                 navigationShell.goBranch(index);
                 if (index == 0) {
@@ -525,7 +546,7 @@ class _MainShell extends StatelessWidget {
                       .read<NotificationActivityPeekBus>()
                       .pulsePublicationsTab();
                 }
-                if (index == 2) {
+                if (index == 3) {
                   context.read<ChatUnreadBadgeController>().refresh();
                 }
               },
@@ -542,6 +563,11 @@ class _MainShell extends StatelessWidget {
                   icon: Icon(Icons.search_outlined, size: 26),
                   selectedIcon: Icon(Icons.search_rounded, size: 26),
                   label: 'Поиск',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.map_outlined, size: 26),
+                  selectedIcon: Icon(Icons.map_rounded, size: 26),
+                  label: 'Рядом',
                 ),
                 NavigationDestination(
                   icon: Icon(Icons.chat_bubble_outline_rounded, size: 26),
