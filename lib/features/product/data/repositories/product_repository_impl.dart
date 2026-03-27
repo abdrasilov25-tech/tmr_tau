@@ -466,6 +466,85 @@ class ProductRepositoryImpl implements ProductRepository {
     return ProductModel.fromJson(row);
   }
 
+  /// Четыре независимых запроса — раньше шли последовательно (до ~4× RTT); параллельно быстрее для поиска и ленты товаров.
+  Future<Set<String>> _likedProductIdsForUser(
+    String userId,
+    List<String> productIds,
+  ) async {
+    if (productIds.isEmpty) return {};
+    try {
+      final likes = await _client
+          .from(SupabaseConstants.productLikesTable)
+          .select('product_id')
+          .eq('user_id', userId)
+          .inFilter('product_id', productIds);
+      return (likes as List)
+          .map((e) => (e as Map)['product_id'] as String)
+          .toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Set<String>> _followingSellerIdsForUser(
+    String userId,
+    List<String> sellerIds,
+  ) async {
+    if (sellerIds.isEmpty) return {};
+    try {
+      final follows = await _client
+          .from(SupabaseConstants.followersTable)
+          .select('following_id')
+          .eq('follower_id', userId)
+          .inFilter('following_id', sellerIds);
+      return (follows as List)
+          .map((e) => (e as Map)['following_id'] as String)
+          .toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Set<String>> _repostedProductIdsForUser(
+    String userId,
+    List<String> productIds,
+  ) async {
+    if (productIds.isEmpty) return {};
+    try {
+      final repostsByMe = await _client
+          .from(SupabaseConstants.productRepostsTable)
+          .select('product_id')
+          .eq('user_id', userId)
+          .inFilter('product_id', productIds);
+      return (repostsByMe as List)
+          .map((e) => (e as Map)['product_id'] as String)
+          .toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<Map<String, int>> _repostCountsByProductId(
+    List<String> productIds,
+  ) async {
+    if (productIds.isEmpty) return {};
+    try {
+      final reposts = await _client
+          .from(SupabaseConstants.productRepostsTable)
+          .select('product_id')
+          .inFilter('product_id', productIds);
+      final repostCounts = <String, int>{};
+      for (final row in reposts as List) {
+        final map = row as Map<String, dynamic>;
+        final productId = map['product_id'] as String;
+        repostCounts[productId] = (repostCounts[productId] ?? 0) + 1;
+      }
+      return repostCounts;
+    } catch (_) {
+      return {};
+    }
+  }
+
   Future<List<ProductEntity>> _enrichWithUserState(
     List<ProductEntity> list,
     String? currentUserId,
@@ -474,51 +553,19 @@ class ProductRepositoryImpl implements ProductRepository {
     final ids = list.map((e) => e.id).toList();
     if (ids.isEmpty) return list;
     final sellerIds = list.map((e) => e.sellerId).toSet().toList();
-    Set<String> likedIds = {};
-    Set<String> followingIds = {};
-    Set<String> repostedIds = {};
-    final Map<String, int> repostCounts = {};
-    try {
-      final likes = await _client
-          .from(SupabaseConstants.productLikesTable)
-          .select('product_id')
-          .eq('user_id', currentUserId)
-          .inFilter('product_id', ids);
-      likedIds = (likes as List)
-          .map((e) => (e as Map)['product_id'] as String)
-          .toSet();
-    } catch (_) {}
-    try {
-      final follows = await _client
-          .from(SupabaseConstants.followersTable)
-          .select('following_id')
-          .eq('follower_id', currentUserId)
-          .inFilter('following_id', sellerIds);
-      followingIds = (follows as List)
-          .map((e) => (e as Map)['following_id'] as String)
-          .toSet();
-    } catch (_) {}
-    try {
-      final repostsByMe = await _client
-          .from(SupabaseConstants.productRepostsTable)
-          .select('product_id')
-          .eq('user_id', currentUserId)
-          .inFilter('product_id', ids);
-      repostedIds = (repostsByMe as List)
-          .map((e) => (e as Map)['product_id'] as String)
-          .toSet();
-    } catch (_) {}
-    try {
-      final reposts = await _client
-          .from(SupabaseConstants.productRepostsTable)
-          .select('product_id')
-          .inFilter('product_id', ids);
-      for (final row in reposts as List) {
-        final map = row as Map<String, dynamic>;
-        final productId = map['product_id'] as String;
-        repostCounts[productId] = (repostCounts[productId] ?? 0) + 1;
-      }
-    } catch (_) {}
+
+    final results = await Future.wait<Object>([
+      _likedProductIdsForUser(currentUserId, ids),
+      _followingSellerIdsForUser(currentUserId, sellerIds),
+      _repostedProductIdsForUser(currentUserId, ids),
+      _repostCountsByProductId(ids),
+    ]);
+
+    final likedIds = results[0] as Set<String>;
+    final followingIds = results[1] as Set<String>;
+    final repostedIds = results[2] as Set<String>;
+    final repostCounts = results[3] as Map<String, int>;
+
     return list
         .map(
           (p) => ProductModel.fromEntity(

@@ -25,7 +25,7 @@ class SearchPagingController extends ChangeNotifier {
     required ProductRepository productRepository,
     this.currentUserId,
     this.settingsRepository,
-    this.pageSize = 10,
+    this.pageSize = 20,
   }) : _productRepository = productRepository;
 
   final ProductRepository _productRepository;
