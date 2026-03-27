@@ -101,6 +101,11 @@ class _MainHomePageState extends State<MainHomePage> {
   String? _currentUserId;
   String? _loadedUserId;
 
+  /// Подписок больше не запрашиваем на каждый chunk ленты и второй раз для сторис — один запрос на сессию / после сброса.
+  List<String>? _followingIdsCache;
+  String? _followingIdsCacheUserId;
+  Future<List<String>>? _followingIdsLoadFuture;
+
   /// Последний индекс, для которого уже вызывали precache соседей (избегаем лишней работы при скролле).
   int? _lastPrecachedFeedIndex;
 
@@ -379,6 +384,7 @@ class _MainHomePageState extends State<MainHomePage> {
     _currentUserId = activeUserId;
     _loadedUserId = _currentUserId;
     _feedTab = _FeedTab.recommendations;
+    _invalidateFollowingIdsCache();
     if (showLoading) {
       setState(() => _initialLoading = true);
     }
@@ -412,7 +418,7 @@ class _MainHomePageState extends State<MainHomePage> {
 
   Future<void> _fetchPageForTab(_FeedTab tab, {required bool reset}) async {
     final repo = context.read<PostRepository>();
-    final followingIds = await _loadFollowingUserIds();
+    final followingIds = await _getFollowingUserIdsCached();
 
     if (tab == _FeedTab.recommendations) {
       if (reset) {
@@ -580,31 +586,52 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
-  Future<List<String>> _loadFollowingUserIds() async {
-    final uid = _currentUserId;
-    if (uid == null) return const [];
-    try {
-      final profiles =
-          await context.read<ProfileRepository>().getFollowingUsers(uid);
-      return profiles.map((p) => p.id).toList(growable: false);
-    } catch (_) {
-      return const [];
-    }
-  }
-
   Future<List<StoryGroupEntity>> _filterStoriesByFollowing(
     List<StoryGroupEntity> groups,
   ) async {
     final uid = _currentUserId;
     if (uid == null || groups.isEmpty) return groups;
     try {
-      final following = await context.read<ProfileRepository>().getFollowingUsers(uid);
-      final followingIds = following.map((u) => u.id).toSet();
+      final followingIds = await _getFollowingUserIdsCached();
+      final set = followingIds.toSet();
       return groups
-          .where((g) => g.userId == uid || followingIds.contains(g.userId))
+          .where((g) => g.userId == uid || set.contains(g.userId))
           .toList(growable: false);
     } catch (_) {
       return groups;
+    }
+  }
+
+  void _invalidateFollowingIdsCache() {
+    _followingIdsCache = null;
+    _followingIdsCacheUserId = null;
+    _followingIdsLoadFuture = null;
+  }
+
+  Future<List<String>> _getFollowingUserIdsCached() async {
+    final uid = _currentUserId;
+    if (uid == null) return const [];
+    if (_followingIdsCache != null && _followingIdsCacheUserId == uid) {
+      return _followingIdsCache!;
+    }
+    _followingIdsLoadFuture ??= _loadFollowingUserIdsForUser(uid);
+    return _followingIdsLoadFuture!;
+  }
+
+  Future<List<String>> _loadFollowingUserIdsForUser(String uid) async {
+    try {
+      final profiles =
+          await context.read<ProfileRepository>().getFollowingUsers(uid);
+      final ids = profiles.map((p) => p.id).toList(growable: false);
+      if (mounted && _currentUserId == uid) {
+        _followingIdsCache = ids;
+        _followingIdsCacheUserId = uid;
+      }
+      return ids;
+    } catch (_) {
+      return const [];
+    } finally {
+      _followingIdsLoadFuture = null;
     }
   }
 

@@ -53,7 +53,7 @@ abstract final class KazakhstanRegions {
     }
     final c = legacyCity?.trim();
     if (c != null && c.isNotEmpty) return c;
-    return 'Везде';
+    return 'Вся страна';
   }
 }
 

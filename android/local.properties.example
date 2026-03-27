@@ -1,0 +1,4 @@
+# Copy to local.properties (gitignored). Do not commit real keys.
+# sdk.dir is usually filled by Android Studio / Flutter; you can omit it if already present.
+#
+# MAPS_API_KEY=your_key_here
