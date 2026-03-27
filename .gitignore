@@ -54,6 +54,19 @@ AuthKey_*.p8
 !.env.example
 *.env
 
+# iOS local xcconfig secrets (copy from Secrets.xcconfig.example)
+ios/Flutter/Secrets.xcconfig
+
+# Apple Sign In client secret JWT (never commit)
+*.jwt
+apple_client_secret.jwt
+
+# Accidentally added JS deps in repo root
+node_modules/
+
+# Local AI / editor caches
+.claude/
+
 # Firebase iOS local config (avoid committing project keys)
 ios/Runner/GoogleService-Info.plist
 
