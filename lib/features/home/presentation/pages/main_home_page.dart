@@ -3,14 +3,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
-import 'package:video_player/video_player.dart';
+import '../widgets/feed_post_item.dart';
+import '../widgets/share_to_user_sheet.dart';
+import '../../../chat/data/models/shared_post_message.dart';
 
 import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/app_loading.dart';
-import '../../../../core/widgets/cached_avatar.dart';
-import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../chat/presentation/widgets/chat_stories_friends_strip.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -23,7 +22,6 @@ import '../../../notifications/presentation/notification_activity_peek_bus.dart'
 import '../../../notifications/presentation/widgets/notification_activity_peek_bar.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
-import '../../../post/presentation/widgets/post_photo_gallery.dart';
 
 /// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
 /// **Рекомендации** и **Подписки** — отдельные вертикальные ленты (свайп вверх/вниз),
@@ -749,12 +747,12 @@ class _MainHomePageState extends State<MainHomePage> {
       return;
     }
 
-    final pickedUser = await showModalBottomSheet<_UserRow>(
+    final pickedUser = await showModalBottomSheet<ShareUserRow>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.black,
       constraints: const BoxConstraints(maxWidth: 520),
-      builder: (ctx) => _ShareToUserSheet(
+      builder: (ctx) => ShareToUserSheet(
         currentUserId: _currentUserId!,
       ),
     );
@@ -764,18 +762,21 @@ class _MainHomePageState extends State<MainHomePage> {
     if (!mounted) return;
 
     // Реальная отправка сообщения в чат (так же, как это делает `ChatPage`).
-    // TODO: Чтобы это было «правильным» шеринговым типом, лучше хранить post_id отдельным полем.
     final senderId = _currentUserId!;
     final receiverId = pickedUser.userId;
     debugPrint('[MainHomePage] share post=${post.id} to user=$receiverId');
-    String enc(String value) => Uri.encodeComponent(value);
-    final primaryImage = post.displayImageUrls.isNotEmpty
-        ? post.displayImageUrls.first
-        : '';
-    final shareText =
-        '__post__|${enc(post.id)}|${enc(primaryImage)}|${enc(post.caption.trim())}|'
-        '${enc(post.userName ?? 'Пользователь')}|${enc(post.videoUrl ?? '')}|'
-        '${post.likesCount}|${post.commentsCount}|${post.repostsCount}';
+    final primaryImage =
+        post.displayImageUrls.isNotEmpty ? post.displayImageUrls.first : '';
+    final shareText = SharedPostMessage(
+      postId: post.id,
+      imageUrl: primaryImage,
+      caption: post.caption.trim(),
+      authorName: post.userName ?? 'Пользователь',
+      videoUrl: post.videoUrl ?? '',
+      likesCount: post.likesCount,
+      commentsCount: post.commentsCount,
+      repostsCount: post.repostsCount,
+    ).encode();
     try {
       await supa.Supabase.instance.client
           .from(SupabaseConstants.messagesTable)
@@ -850,7 +851,7 @@ class _MainHomePageState extends State<MainHomePage> {
         return SizedBox(
           height: itemHeight,
           width: double.infinity,
-          child: _InstagramPostItem(
+          child: FeedPostItem(
             height: itemHeight,
             post: post,
             currentUserId: _currentUserId,
@@ -989,7 +990,7 @@ class _MainHomePageState extends State<MainHomePage> {
                   ChatStoriesFriendsStrip(
                     groups: _storyGroups,
                     newStoriesByUserId: _newStoriesByUserId,
-                    storyNotesByUserId: const <String, String>{},
+                    storyNotesByUserId: _storyNotesByUserId,
                     enableNotes: false,
                     currentUserId: _currentUserId,
                     currentUserAvatarUrl: currentUserAvatarUrl,
@@ -1186,441 +1187,6 @@ class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
   }
 }
 
-class _InstagramPostItem extends StatefulWidget {
-  const _InstagramPostItem({
-    required this.height,
-    required this.post,
-    required this.currentUserId,
-    required this.onLike,
-    required this.onComment,
-    required this.onRepost,
-    required this.onSave,
-    required this.onShare,
-  });
-
-  final double height;
-  final PostEntity post;
-  final String? currentUserId;
-
-  final VoidCallback onLike;
-  final VoidCallback onComment;
-  final VoidCallback onRepost;
-  final VoidCallback onSave;
-  final VoidCallback onShare;
-
-  @override
-  State<_InstagramPostItem> createState() => _InstagramPostItemState();
-}
-
-class _InstagramPostItemState extends State<_InstagramPostItem> {
-  @override
-  Widget build(BuildContext context) {
-    final p = widget.post;
-    final mediaHeight = widget.height;
-
-    return SizedBox(
-      height: mediaHeight,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: DoubleTapLikeBurst(
-              onDoubleTapLike: widget.onLike,
-              shouldTriggerLike: () => !p.isLikedByMe,
-              showPersistentLikeIndicator: true,
-              isLiked: p.isLikedByMe,
-              child: _PostMedia(
-                imageUrls: p.displayImageUrls,
-                videoUrl: p.videoUrl,
-                fillHeight: mediaHeight,
-              ),
-            ),
-          ),
-          // Верхняя панель: автор.
-          Positioned(
-            left: 12,
-            right: 12,
-            top: 10,
-            child: SafeArea(
-              bottom: false,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  CachedAvatar(
-                    imageUrl: p.userAvatarUrl?.isNotEmpty == true
-                        ? '${p.userAvatarUrl}?uid=${p.userId}'
-                        : null,
-                    radius: 18,
-                    fallbackText: p.userName ?? 'П',
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      p.userName ?? 'Пользователь',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // Низ: описание + действия.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Описание поверх медиа (как в IG).
-                  if ((p.caption).trim().isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          p.caption.trim(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                            height: 1.2,
-                          ),
-                        ),
-                      ),
-                    ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.55),
-                      border: Border(
-                        top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        _ActionButton(
-                          icon: p.isLikedByMe ? Icons.favorite : Icons.favorite_border,
-                          iconColor: p.isLikedByMe ? Colors.redAccent : Colors.white,
-                          label: 'Лайк',
-                          count: p.likesCount,
-                          onTap: widget.onLike,
-                        ),
-                        _ActionButton(
-                          icon: Icons.chat_bubble_outline_rounded,
-                          iconColor: Colors.white,
-                          label: 'Коммент',
-                          count: p.commentsCount,
-                          onTap: widget.onComment,
-                        ),
-                        _ActionButton(
-                          icon: p.isRepostedByMe ? Icons.repeat : Icons.repeat_outlined,
-                          iconColor: p.isRepostedByMe ? Colors.cyanAccent : Colors.white,
-                          label: 'Репост',
-                          count: p.repostsCount,
-                          onTap: widget.onRepost,
-                        ),
-                        _ShareButton(
-                          onTap: widget.onShare,
-                          label: 'Поделиться',
-                        ),
-                        const Spacer(),
-                        _SaveButton(
-                          onTap: widget.onSave,
-                          isSaved: p.isSavedByMe,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PostMedia extends StatelessWidget {
-  const _PostMedia({
-    required this.imageUrls,
-    required this.videoUrl,
-    required this.fillHeight,
-  });
-
-  final List<String> imageUrls;
-  final String? videoUrl;
-  final double fillHeight;
-
-  @override
-  Widget build(BuildContext context) {
-    if (videoUrl != null && videoUrl!.isNotEmpty) {
-      return _VideoMedia(videoUrl: videoUrl!);
-    }
-
-    if (imageUrls.isNotEmpty) {
-      return PostNetworkPhotoGallery(
-        urls: imageUrls,
-        height: fillHeight,
-        borderRadius: 0,
-        viewportFraction: imageUrls.length > 1 ? 0.9 : 1,
-      );
-    }
-
-    return _MediaPlaceholder(type: _MediaPlaceholderType.neutral);
-  }
-}
-
-enum _MediaPlaceholderType { neutral, photo }
-
-class _MediaPlaceholder extends StatelessWidget {
-  const _MediaPlaceholder({required this.type});
-
-  final _MediaPlaceholderType type;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = type == _MediaPlaceholderType.photo ? 'Фото-заглушка' : 'Медиа-заглушка';
-    return Container(
-      color: Colors.black,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.image_outlined, color: Colors.white.withValues(alpha: 0.7), size: 56),
-            const SizedBox(height: 10),
-            Text(
-              text,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.75), fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _VideoMedia extends StatefulWidget {
-  const _VideoMedia({required this.videoUrl});
-
-  final String videoUrl;
-
-  @override
-  State<_VideoMedia> createState() => _VideoMediaState();
-}
-
-class _VideoMediaState extends State<_VideoMedia> {
-  late final VideoPlayerController _controller;
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..setLooping(true)
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() => _ready = true);
-        _controller.play();
-      });
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_ready) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    final size = _controller.value.size;
-    if (size.width <= 0 || size.height <= 0) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    return SizedBox.expand(
-      child: ClipRect(
-        child: FittedBox(
-          fit: BoxFit.cover,
-          child: SizedBox(
-            width: size.width,
-            height: size.height,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () {
-                setState(() {
-                  if (_controller.value.isPlaying) {
-                    _controller.pause();
-                  } else {
-                    _controller.play();
-                  }
-                });
-              },
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  VideoPlayer(_controller),
-                  if (!_controller.value.isPlaying)
-                    const Center(
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Padding(
-                          padding: EdgeInsets.all(14),
-                          child: Icon(
-                            Icons.play_arrow_rounded,
-                            color: Colors.white,
-                            size: 38,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatelessWidget {
-  const _ActionButton({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-    required this.count,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-  final int count;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-        child: SizedBox(
-          width: 52,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: iconColor, size: 20),
-              const SizedBox(height: 2),
-              Text(
-                '$count',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 10.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _SaveButton extends StatelessWidget {
-  const _SaveButton({required this.onTap, required this.isSaved});
-
-  final VoidCallback onTap;
-  final bool isSaved;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-        child: SizedBox(
-          width: 44,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                isSaved ? Icons.bookmark : Icons.bookmark_border,
-                color: Colors.white,
-                size: 21,
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                'Сохран.',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 9.5,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ShareButton extends StatelessWidget {
-  const _ShareButton({required this.onTap, required this.label});
-
-  final VoidCallback onTap;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 1),
-        child: SizedBox(
-          width: 52,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.send_outlined, color: Colors.white, size: 21),
-              const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.95),
-                  fontWeight: FontWeight.w800,
-                  fontSize: 10,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 enum _MediaType { text, photo, video }
 
@@ -1825,184 +1391,6 @@ class _PreviewPlaceholder extends StatelessWidget {
           'Медиа не выбрано',
           style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w800),
         ),
-      ),
-    );
-  }
-}
-
-class _UserRow {
-  const _UserRow({required this.userId, required this.name, this.avatarUrl});
-
-  final String userId;
-  final String name;
-  final String? avatarUrl;
-}
-
-class _ShareToUserSheet extends StatefulWidget {
-  const _ShareToUserSheet({required this.currentUserId});
-
-  final String currentUserId;
-
-  @override
-  State<_ShareToUserSheet> createState() => _ShareToUserSheetState();
-}
-
-class _ShareToUserSheetState extends State<_ShareToUserSheet> {
-  final _searchController = TextEditingController();
-  bool _loading = false;
-  String? _error;
-
-  List<_UserRow> _users = [];
-
-  Timer? _debounce;
-
-  @override
-  void initState() {
-    super.initState();
-    _load(''); // initial
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load(String q) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final client = supa.Supabase.instance.client;
-      final trimmed = q.trim();
-      final res = trimmed.isNotEmpty
-          ? await client
-              .from('users')
-              .select('id,name,avatar')
-              .neq('id', widget.currentUserId)
-              .ilike('name', '%$trimmed%')
-              .limit(20)
-          : await client
-              .from('users')
-              .select('id,name,avatar')
-              .neq('id', widget.currentUserId)
-              .limit(20);
-
-      final list = res as List<dynamic>;
-      final mapped = list.map((e) {
-        final m = e as Map<String, dynamic>;
-        return _UserRow(
-          userId: m['id'] as String,
-          name: (m['name'] as String?) ?? 'Пользователь',
-          avatarUrl: m['avatar'] as String?,
-        );
-      }).toList(growable: false);
-
-      if (!mounted) return;
-      setState(() {
-        _users = mapped;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 12,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Поделиться с другом',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.of(context).pop(),
-              )
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _searchController,
-            onChanged: (v) {
-              _debounce?.cancel();
-              _debounce = Timer(const Duration(milliseconds: 350), () => _load(v));
-            },
-            decoration: InputDecoration(
-              hintText: 'Поиск по имени...',
-              hintStyle: const TextStyle(color: Colors.white54),
-              filled: true,
-              fillColor: const Color(0xFF111827),
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.search_rounded, color: Colors.white70),
-            ),
-            style: const TextStyle(color: Colors.white),
-          ),
-          const SizedBox(height: 12),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(),
-            )
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Ошибка: $_error',
-                style: const TextStyle(color: Colors.redAccent),
-              ),
-            )
-          else if (_users.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Никто не найден',
-                style: TextStyle(color: Colors.white70),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.separated(
-                itemCount: _users.length,
-                separatorBuilder: (_, _) => const Divider(color: Colors.white12, height: 1),
-                itemBuilder: (context, index) {
-                  final u = _users[index];
-                  return ListTile(
-                    leading: CachedAvatar(
-                      imageUrl: u.avatarUrl?.isNotEmpty == true ? u.avatarUrl : null,
-                      radius: 20,
-                      fallbackText: u.name,
-                    ),
-                    title: Text(
-                      u.name,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white60),
-                    onTap: () => Navigator.of(context).pop(u),
-                  );
-                },
-              ),
-            ),
-        ],
       ),
     );
   }

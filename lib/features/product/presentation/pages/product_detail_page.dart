@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
+import '../../../cart/presentation/cart_notifier.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/products/deleted_product_bus.dart';
 import '../../../../core/utils/phone_launch.dart';
@@ -431,7 +433,9 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     peerId: _product.sellerId,
                     peerName: _product.sellerName ?? 'Продавец',
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
+                  _AddToCartButton(product: _product),
+                  const SizedBox(height: 12),
                   FilledButton.icon(
                     onPressed: _favoriteToggling || widget.productRepository == null
                         ? null
@@ -674,6 +678,48 @@ class _ProductCommentTile extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _AddToCartButton extends StatefulWidget {
+  const _AddToCartButton({required this.product});
+  final ProductEntity product;
+
+  @override
+  State<_AddToCartButton> createState() => _AddToCartButtonState();
+}
+
+class _AddToCartButtonState extends State<_AddToCartButton> {
+  bool _added = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final cart = context.watch<CartNotifier>();
+    final alreadyInCart =
+        cart.items.any((e) => e.product.id == widget.product.id);
+    return OutlinedButton.icon(
+      onPressed: () {
+        context.read<CartNotifier>().addItem(widget.product);
+        setState(() => _added = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Товар добавлен в корзину'),
+            action: SnackBarAction(
+              label: 'Перейти',
+              onPressed: () => context.push('/cart'),
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
+      icon: Icon(
+        alreadyInCart ? Icons.shopping_cart : Icons.add_shopping_cart_outlined,
+      ),
+      label: Text(alreadyInCart ? 'В корзине' : 'В корзину'),
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(vertical: 14),
       ),
     );
   }

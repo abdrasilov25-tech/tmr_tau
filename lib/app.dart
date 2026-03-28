@@ -20,6 +20,7 @@ import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
 import 'features/auth/domain/repositories/auth_repository.dart';
 import 'features/auth/presentation/bloc/auth_bloc.dart';
+import 'features/cart/presentation/cart_notifier.dart';
 import 'features/chat/presentation/chat_unread_badge_controller.dart';
 import 'features/comments/data/repositories/comments_repository_impl.dart';
 import 'features/comments/domain/repositories/comments_repository.dart';
@@ -31,6 +32,7 @@ import 'features/notifications/domain/repositories/notifications_repository.dart
 import 'features/notifications/presentation/notification_activity_peek_bus.dart';
 import 'features/post/data/repositories/post_repository_impl.dart';
 import 'features/post/domain/repositories/post_repository.dart';
+import 'features/post/domain/services/recommendation_service.dart';
 import 'features/product/data/repositories/categories_repository_impl.dart';
 import 'features/product/data/repositories/product_repository_impl.dart';
 import 'features/product/domain/repositories/categories_repository.dart';
@@ -87,12 +89,14 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final StoriesRepository _storiesRepository;
   late final NotificationsRepository _notificationsRepository;
   late final PostRepository _postRepository;
+  late final RecommendationService _recommendationService;
   late final SettingsRepository _settingsRepository;
   late final MapRepository _mapRepository;
   late final AppRouter _appRouter;
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
   late final ThemeIndexNotifier _themeIndexNotifier;
+  late final CartNotifier _cartNotifier;
   ChatUnreadBadgeController? _chatUnreadBadgeController;
   NotificationActivityPeekBus? _notificationActivityPeekBus;
 
@@ -102,6 +106,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     if (!widget.supabaseInitialized) {
       return;
     }
+    _cartNotifier = CartNotifier();
     _themeRepository = ThemeRepositoryImpl(widget.localReactionsStorage);
     _themeIndexNotifier = ThemeIndexNotifier(_themeRepository);
     _chatUnreadBadgeController =
@@ -125,6 +130,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _storiesRepository = StoriesRepositoryImpl(_client);
     _notificationsRepository = NotificationsRepositoryImpl(_client);
     _postRepository = PostRepositoryImpl(_client);
+    _recommendationService = RecommendationService(_postRepository);
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
     _accountManager = AccountManager(
       widget.accountRepository,
@@ -144,6 +150,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
 
   @override
   void dispose() {
+    _cartNotifier.dispose();
     _chatUnreadBadgeController?.dispose();
     _notificationActivityPeekBus?.dispose();
     super.dispose();
@@ -183,6 +190,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
           RepositoryProvider<LocalReactionsStorage>.value(
             value: widget.localReactionsStorage),
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
+        ChangeNotifierProvider<CartNotifier>.value(value: _cartNotifier),
         ChangeNotifierProvider<ChatUnreadBadgeController>.value(
           value: _chatUnreadBadgeController!,
         ),
@@ -214,6 +222,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
           value: _notificationActivityPeekBus!,
         ),
         RepositoryProvider<PostRepository>.value(value: _postRepository),
+        RepositoryProvider<RecommendationService>.value(
+          value: _recommendationService,
+        ),
         RepositoryProvider<SettingsRepository>.value(
           value: _settingsRepository,
         ),
@@ -276,6 +287,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
                     curr is AuthUnauthenticated || curr is AuthError,
                 listener: (context, state) {
                   context.read<ChatUnreadBadgeController>().clear();
+                  // Очищаем кэш рекомендаций при logout
+                  context.read<RecommendationService>().invalidateCache(null);
                 },
                 child: MaterialApp.router(
                   title: 'tmr_tau',

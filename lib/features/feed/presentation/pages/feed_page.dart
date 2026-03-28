@@ -267,9 +267,11 @@ class _StoriesStripState extends State<_StoriesStrip> {
             .getFollowingUsers(currentUserId);
         return profiles.map((p) => p.id).toSet();
       }
+      final followingFuture = followingIdsFuture();
+      final viewedFuture = viewedStoryIdsFuture();
       final list = await listFuture;
-      final followingIds = await followingIdsFuture();
-      final viewedStoryIds = await viewedStoryIdsFuture();
+      final followingIds = await followingFuture;
+      final viewedStoryIds = await viewedFuture;
       if (mounted) {
         setState(() {
           _groups = list;

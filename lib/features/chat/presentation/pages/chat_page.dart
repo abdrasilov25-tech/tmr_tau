@@ -15,6 +15,7 @@ import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
+import '../../data/models/shared_post_message.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/repositories/post_repository.dart';
@@ -38,7 +39,6 @@ class ChatPage extends StatefulWidget {
 
 class _ChatPageState extends State<ChatPage> {
   static const String _storyDmPrefix = '__story__';
-  static const String _postDmPrefix = '__post__';
   late final SupabaseClient _client;
   String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
@@ -331,7 +331,7 @@ class _ChatPageState extends State<ChatPage> {
     final text = (m['text'] ?? '').toString().trim();
     if (senderId != _currentUserId) return false;
     if (text.isEmpty) return false;
-    if (text.startsWith(_postDmPrefix) || text.startsWith(_storyDmPrefix)) {
+    if (SharedPostMessage.isSharedPost(text) || text.startsWith(_storyDmPrefix)) {
       return false;
     }
     return true;
@@ -668,7 +668,7 @@ class _ChatPageState extends State<ChatPage> {
                           final senderId = m['sender_id'] as String?;
                           final text = m['text'] as String? ?? '';
                           final structured = _parseStoryDirectMessage(text);
-                          final postStructured = _parsePostDirectMessage(text);
+                          final postStructured = SharedPostMessage.tryParse(text);
                           final isMe = senderId == me;
                           final isSelected =
                               messageId.isNotEmpty &&
@@ -940,34 +940,6 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  _PostDirectMessage? _parsePostDirectMessage(String text) {
-    if (!text.startsWith('$_postDmPrefix|')) return null;
-    final parts = text.split('|');
-    if (parts.length < 6) return null;
-    String decode(String value) {
-      try {
-        return Uri.decodeComponent(value);
-      } catch (_) {
-        return value;
-      }
-    }
-    final postId = decode(parts[1]);
-    if (postId.isEmpty) return null;
-    int parseCount(int index) {
-      if (parts.length <= index) return 0;
-      return int.tryParse(parts[index]) ?? 0;
-    }
-    return _PostDirectMessage(
-      postId: postId,
-      imageUrl: decode(parts[2]),
-      caption: decode(parts[3]),
-      authorName: decode(parts[4]),
-      videoUrl: decode(parts[5]),
-      likesCount: parseCount(6),
-      commentsCount: parseCount(7),
-      repostsCount: parseCount(8),
-    );
-  }
 
   Future<void> _openStoryFromMessage(String storyId) async {
     if (storyId.isEmpty) return;
@@ -1037,27 +1009,6 @@ class _StoryDirectMessage {
   final String payload;
 }
 
-class _PostDirectMessage {
-  const _PostDirectMessage({
-    required this.postId,
-    required this.imageUrl,
-    required this.caption,
-    required this.authorName,
-    required this.videoUrl,
-    required this.likesCount,
-    required this.commentsCount,
-    required this.repostsCount,
-  });
-
-  final String postId;
-  final String imageUrl;
-  final String caption;
-  final String authorName;
-  final String videoUrl;
-  final int likesCount;
-  final int commentsCount;
-  final int repostsCount;
-}
 
 class _StoryLinkedChatBubble extends StatelessWidget {
   const _StoryLinkedChatBubble({
@@ -1119,7 +1070,7 @@ class _PostLinkedChatBubble extends StatelessWidget {
     required this.onSave,
   });
 
-  final _PostDirectMessage message;
+  final SharedPostMessage message;
   final bool isMe;
   final VoidCallback onOpenPost;
   final Future<void> Function() onShare;

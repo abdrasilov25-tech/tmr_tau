@@ -21,13 +21,18 @@ class PostModel extends PostEntity {
     super.isDislikedByMe = false,
     super.isRepostedByMe = false,
     super.isSavedByMe = false,
+    // Recommendation fields
+    super.viewsCount = 0,
+    super.savedCount = 0,
+    super.category = '',
+    super.latitude,
+    super.longitude,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
     final rawKind = (json['kind'] as String?)?.trim().toLowerCase() ?? '';
-    final safeKind = rawKind == 'news'
-        ? 'news'
-        : 'publication';
+    final safeKind = rawKind == 'news' ? 'news' : 'publication';
+
     List<String> urls = const [];
     final rawUrls = json['image_urls'];
     if (rawUrls is List) {
@@ -36,6 +41,15 @@ class PostModel extends PostEntity {
           .where((s) => s.isNotEmpty)
           .toList();
     }
+
+    // Geo: stored as numeric in Postgres, arrives as num/double
+    double? lat;
+    double? lon;
+    final rawLat = json['latitude'];
+    final rawLon = json['longitude'];
+    if (rawLat != null) lat = (rawLat as num).toDouble();
+    if (rawLon != null) lon = (rawLon as num).toDouble();
+
     return PostModel(
       id: json['id'] as String,
       userId: json['user_id'] as String,
@@ -56,6 +70,12 @@ class PostModel extends PostEntity {
       isDislikedByMe: (json['is_disliked_by_me'] as bool?) ?? false,
       isRepostedByMe: (json['is_reposted_by_me'] as bool?) ?? false,
       isSavedByMe: (json['is_saved_by_me'] as bool?) ?? false,
+      // Recommendation fields (gracefully absent on old rows)
+      viewsCount: (json['views_count'] as int?) ?? 0,
+      savedCount: (json['saved_count'] as int?) ?? 0,
+      category: (json['category'] as String?) ?? '',
+      latitude: lat,
+      longitude: lon,
     );
   }
 }

@@ -15,24 +15,28 @@ final class NewsSuccess extends NewsState {
     this.posts, {
     this.hasMore = false,
     this.isLoadingMore = false,
+    this.currentUserId,
   });
   final List<PostEntity> posts;
   final bool hasMore;
   final bool isLoadingMore;
+  final String? currentUserId;
 
   NewsSuccess copyWith({
     List<PostEntity>? posts,
     bool? hasMore,
     bool? isLoadingMore,
+    String? currentUserId,
   }) =>
       NewsSuccess(
         posts ?? this.posts,
         hasMore: hasMore ?? this.hasMore,
         isLoadingMore: isLoadingMore ?? this.isLoadingMore,
+        currentUserId: currentUserId ?? this.currentUserId,
       );
 
   @override
-  List<Object?> get props => [posts, hasMore, isLoadingMore];
+  List<Object?> get props => [posts, hasMore, isLoadingMore, currentUserId];
 }
 
 final class NewsFailure extends NewsState {

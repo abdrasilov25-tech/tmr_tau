@@ -455,6 +455,7 @@ class _PostVideoPlayer extends StatefulWidget {
 
 class _PostVideoPlayerState extends State<_PostVideoPlayer> {
   late VideoPlayerController _controller;
+  bool _hasError = false;
 
   @override
   void initState() {
@@ -462,6 +463,8 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
     _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
       ..initialize().then((_) {
         if (mounted) setState(() {});
+      }).catchError((_) {
+        if (mounted) setState(() => _hasError = true);
       });
   }
 
@@ -473,6 +476,17 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    if (_hasError) {
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          color: Colors.grey.shade300,
+          child: Center(
+            child: Icon(Icons.videocam_off_outlined, color: Colors.grey.shade600, size: 40),
+          ),
+        ),
+      );
+    }
     if (!_controller.value.isInitialized) {
       return AspectRatio(
         aspectRatio: 16 / 9,

@@ -21,6 +21,12 @@ class PostEntity extends Equatable {
     this.isDislikedByMe = false,
     this.isRepostedByMe = false,
     this.isSavedByMe = false,
+    // Recommendation fields (optional, backward-compatible)
+    this.viewsCount = 0,
+    this.savedCount = 0,
+    this.category = '',
+    this.latitude,
+    this.longitude,
   });
 
   final String id;
@@ -43,6 +49,28 @@ class PostEntity extends Equatable {
   final bool isDislikedByMe;
   final bool isRepostedByMe;
   final bool isSavedByMe;
+
+  // ── Recommendation fields ──────────────────────────────────
+  /// Количество просмотров в ленте (из publication_feed_impressions).
+  final int viewsCount;
+
+  /// Денормализованный счётчик сохранений (из post_saves).
+  final int savedCount;
+
+  /// Свободная категория поста для персонализации.
+  final String category;
+
+  /// GPS-координаты поста (nullable = нет геопривязки).
+  final double? latitude;
+  final double? longitude;
+
+  /// `true` если у поста есть геопривязка.
+  bool get hasGeo => latitude != null && longitude != null;
+
+  /// Базовый engagement-score по формуле требований:
+  ///   views×1 + likes×3 + comments×5 + saves×7
+  double get engagementScore =>
+      viewsCount * 1.0 + likesCount * 3.0 + commentsCount * 5.0 + savedCount * 7.0;
 
   /// Все URL фото для карусели (мульти или одно из legacy `image_url`).
   List<String> get displayImageUrls {
@@ -73,6 +101,11 @@ class PostEntity extends Equatable {
     bool? isDislikedByMe,
     bool? isRepostedByMe,
     bool? isSavedByMe,
+    int? viewsCount,
+    int? savedCount,
+    String? category,
+    double? latitude,
+    double? longitude,
   }) {
     return PostEntity(
       id: id ?? this.id,
@@ -82,7 +115,8 @@ class PostEntity extends Equatable {
       imageUrls: clearImage ? const [] : (imageUrls ?? this.imageUrls),
       caption: caption ?? this.caption,
       videoUrl: clearVideo ? null : (videoUrl ?? this.videoUrl),
-      videoDurationSeconds: clearVideo ? 0 : (videoDurationSeconds ?? this.videoDurationSeconds),
+      videoDurationSeconds:
+          clearVideo ? 0 : (videoDurationSeconds ?? this.videoDurationSeconds),
       createdAt: createdAt ?? this.createdAt,
       likesCount: likesCount ?? this.likesCount,
       dislikesCount: dislikesCount ?? this.dislikesCount,
@@ -94,6 +128,11 @@ class PostEntity extends Equatable {
       isDislikedByMe: isDislikedByMe ?? this.isDislikedByMe,
       isRepostedByMe: isRepostedByMe ?? this.isRepostedByMe,
       isSavedByMe: isSavedByMe ?? this.isSavedByMe,
+      viewsCount: viewsCount ?? this.viewsCount,
+      savedCount: savedCount ?? this.savedCount,
+      category: category ?? this.category,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
     );
   }
 
@@ -118,5 +157,10 @@ class PostEntity extends Equatable {
         isDislikedByMe,
         isRepostedByMe,
         isSavedByMe,
+        viewsCount,
+        savedCount,
+        category,
+        latitude,
+        longitude,
       ];
 }

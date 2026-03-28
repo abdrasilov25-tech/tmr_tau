@@ -377,24 +377,52 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   Future<_RecommendationSignals> _loadRecommendationSignals(String userId) async {
-    final futures = await Future.wait([
+    final results = await Future.wait<Object>([
       _authorWeightsFromLikes(userId),
       _authorWeightsFromSaves(userId),
       _authorWeightsFromImpressions(userId),
       _hashtagAffinityFromLikes(userId),
+      _loadUserInterests(userId),
     ]);
-    final likes = futures[0];
-    final saves = futures[1];
-    final impressions = futures[2];
-    final tags = futures[3];
+    final likesW = results[0] as Map<String, double>;
+    final savesW = results[1] as Map<String, double>;
+    final impressionsW = results[2] as Map<String, double>;
+    final tags = results[3] as Map<String, double>;
+    final interests = results[4] as Set<String>;
 
     final author = <String, double>{};
-    _mergeScores(author, likes);
-    _mergeScores(author, saves);
-    _mergeScores(author, impressions);
+    _mergeScores(author, likesW);
+    _mergeScores(author, savesW);
+    _mergeScores(author, impressionsW);
     _normalize01(author);
 
-    return _RecommendationSignals(authorNorm: author, hashtagNorm: tags);
+    return _RecommendationSignals(
+      authorNorm: author,
+      hashtagNorm: tags,
+      interestCategories: interests,
+    );
+  }
+
+  /// Загружает интересы пользователя из колонки users.interests.
+  Future<Set<String>> _loadUserInterests(String userId) async {
+    try {
+      final res = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('interests')
+          .eq('id', userId)
+          .maybeSingle();
+      if (res == null) return {};
+      final raw = (res as Map<String, dynamic>)['interests'];
+      if (raw is List) {
+        return raw
+            .map((e) => e.toString().trim().toLowerCase())
+            .where((s) => s.isNotEmpty)
+            .toSet();
+      }
+    } catch (_) {
+      // interests column may not exist on older DB versions — safe to ignore
+    }
+    return {};
   }
 
   static List<PostEntity> _rankRecommendations(
@@ -418,6 +446,7 @@ class PostRepositoryImpl implements PostRepository {
     _RecommendationSignals signals,
     math.Random rng,
   ) {
+    // ── Персонализация (author + hashtag affinity) ────────────
     final a = signals.authorNorm[p.userId] ?? 0.0;
     final tags = _extractHashtags(p.caption);
     double t = 0;
@@ -427,13 +456,29 @@ class PostRepositoryImpl implements PostRepository {
       }
       t /= tags.length;
     }
-    final pop = math.log(1 + p.likesCount) / 12.0;
+
+    // ── Engagement score по формуле: views×1 + likes×3 + comments×5 + saves×7
+    // Log-compressed, чтобы вирусные посты не доминировали слишком сильно.
+    final rawEngagement =
+        p.viewsCount * 1.0 + p.likesCount * 3.0 + p.commentsCount * 5.0 + p.savedCount * 7.0;
+    final eng = math.log(1 + rawEngagement) / 15.0;
+
+    // ── Recency decay: половина веса через 4 дня ─────────────
     final ageH = DateTime.now().difference(p.createdAt).inHours;
     final recency = math.exp(-ageH / 96.0);
+
+    // ── Category affinity бонус ───────────────────────────────
+    final cat = p.category.trim().toLowerCase();
+    final catBonus =
+        (cat.isNotEmpty && signals.interestCategories.contains(cat)) ? 0.5 : 0.0;
+
+    // ── Итоговый score ────────────────────────────────────────
+    // Коэффициенты: author (4.2) > recency (1.8) > hashtag (2.5) > engagement (0.9) > random (0.35)
     return 4.2 * a +
         2.5 * t +
-        0.9 * pop +
+        0.9 * eng +
         1.8 * recency +
+        catBonus +
         0.35 * rng.nextDouble();
   }
 
@@ -1264,8 +1309,15 @@ class _RecommendationSignals {
   const _RecommendationSignals({
     required this.authorNorm,
     required this.hashtagNorm,
+    this.interestCategories = const {},
   });
 
+  /// Нормализованный вес автора по взаимодействиям пользователя.
   final Map<String, double> authorNorm;
+
+  /// Нормализованный вес хэштега по лайкам пользователя.
   final Map<String, double> hashtagNorm;
+
+  /// Категории из профиля пользователя (users.interests).
+  final Set<String> interestCategories;
 }
