@@ -66,6 +66,7 @@ import '../../features/map/domain/repositories/map_repository.dart';
 import '../../features/map/domain/usecases/get_nearby_products.dart';
 import '../../features/map/presentation/bloc/map_bloc.dart';
 import '../../features/map/presentation/pages/map_page.dart';
+import '../navigation/search_tab_activation_controller.dart';
 
 class AppRouter {
   AppRouter({
@@ -77,6 +78,7 @@ class AppRouter {
     required this.commentsRepository,
     required this.settingsRepository,
     required this.mapRepository,
+    required this.searchTabActivation,
   });
 
   final FeedRepository feedRepository;
@@ -87,6 +89,7 @@ class AppRouter {
   final CommentsRepository commentsRepository;
   final SettingsRepository settingsRepository;
   final MapRepository mapRepository;
+  final SearchTabActivationController searchTabActivation;
 
   late final GoRouter router = GoRouter(
     initialLocation: '/',
@@ -387,8 +390,10 @@ class AppRouter {
         },
         routes: [
           StatefulShellRoute.indexedStack(
-            builder: (context, state, navigationShell) =>
-                _MainShell(navigationShell: navigationShell),
+            builder: (context, state, navigationShell) => _MainShell(
+              navigationShell: navigationShell,
+              searchTabActivation: searchTabActivation,
+            ),
             branches: [
               StatefulShellBranch(
                 routes: [
@@ -414,11 +419,8 @@ class AppRouter {
                 routes: [
                   GoRoute(
                     path: 'map',
-                    builder: (context, state) => BlocProvider(
-                      create: (_) => MapBloc(
-                        GetNearbyProducts(mapRepository),
-                      ),
-                      child: const MapPage(),
+                    builder: (context, state) => _MapBranchHost(
+                      mapRepository: mapRepository,
                     ),
                   ),
                 ],
@@ -506,10 +508,53 @@ class _AuthCallbackPageState extends State<_AuthCallbackPage> {
   }
 }
 
+/// Один [MapBloc] на вкладку «Рядом»: не пересоздаём при перерисовке shell (тема и т.д.).
+class _MapBranchHost extends StatefulWidget {
+  const _MapBranchHost({required this.mapRepository});
+
+  final MapRepository mapRepository;
+
+  @override
+  State<_MapBranchHost> createState() => _MapBranchHostState();
+}
+
+class _MapBranchHostState extends State<_MapBranchHost>
+    with AutomaticKeepAliveClientMixin {
+  MapBloc? _bloc;
+
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _bloc ??= MapBloc(GetNearbyProducts(widget.mapRepository));
+  }
+
+  @override
+  void dispose() {
+    _bloc?.close();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return BlocProvider.value(
+      value: _bloc!,
+      child: const MapPage(),
+    );
+  }
+}
+
 class _MainShell extends StatelessWidget {
-  const _MainShell({required this.navigationShell});
+  const _MainShell({
+    required this.navigationShell,
+    required this.searchTabActivation,
+  });
 
   final StatefulNavigationShell navigationShell;
+  final SearchTabActivationController searchTabActivation;
 
   @override
   Widget build(BuildContext context) {
@@ -541,6 +586,9 @@ class _MainShell extends StatelessWidget {
               height: 56,
               onDestinationSelected: (index) {
                 navigationShell.goBranch(index);
+                if (index == 1) {
+                  searchTabActivation.markSearchTabSelected();
+                }
                 if (index == 0) {
                   context
                       .read<NotificationActivityPeekBus>()

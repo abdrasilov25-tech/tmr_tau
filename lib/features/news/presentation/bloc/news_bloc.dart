@@ -13,18 +13,38 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     on<NewsToggleLike>(_onToggleLike);
     on<NewsToggleRepost>(_onToggleRepost);
     on<NewsRefresh>(_onRefresh);
+    on<NewsCleared>(_onCleared);
   }
 
   final PostRepository _repository;
   static const int _pageSize = 20;
 
+  void _onCleared(NewsCleared event, Emitter<NewsState> emit) {
+    emit(NewsInitial());
+  }
+
   Future<void> _onLoaded(NewsLoaded event, Emitter<NewsState> emit) async {
-    emit(NewsLoading());
+    await _fetchFirstPage(
+      emit,
+      currentUserId: event.currentUserId,
+      silent: event.silent,
+    );
+  }
+
+  Future<void> _fetchFirstPage(
+    Emitter<NewsState> emit, {
+    required String? currentUserId,
+    required bool silent,
+  }) async {
+    final previous = state;
+    if (!silent || previous is! NewsSuccess) {
+      emit(NewsLoading());
+    }
     try {
       final list = await _repository.getNewsPosts(
         limit: _pageSize,
         offset: 0,
-        currentUserId: event.currentUserId,
+        currentUserId: currentUserId,
       );
       final newsOnly = list
           .where((p) => p.kind.trim().toLowerCase() == 'news')
@@ -33,7 +53,12 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
         emit(NewsSuccess(newsOnly, hasMore: list.length >= _pageSize));
       }
     } catch (e) {
-      if (!isClosed) emit(NewsFailure(e.toString()));
+      if (!isClosed) {
+        if (silent && previous is NewsSuccess) {
+          return;
+        }
+        emit(NewsFailure(e.toString()));
+      }
     }
   }
 
@@ -103,6 +128,10 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
   }
 
   Future<void> _onRefresh(NewsRefresh event, Emitter<NewsState> emit) async {
-    add(NewsLoaded(currentUserId: event.currentUserId));
+    await _fetchFirstPage(
+      emit,
+      currentUserId: event.currentUserId,
+      silent: true,
+    );
   }
 }

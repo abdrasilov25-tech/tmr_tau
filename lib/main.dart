@@ -28,6 +28,11 @@ Future<bool> _initializeSupabase(String url, String anonKey) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Меньше повторных декодирований при возврате на вкладки / свайпах по ленте.
+  final imageCache = PaintingBinding.instance.imageCache;
+  imageCache.maximumSize = 200;
+  imageCache.maximumSizeBytes = 120 * 1024 * 1024;
+
   await dotenv.load(fileName: '.env');
   final supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
   final supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';

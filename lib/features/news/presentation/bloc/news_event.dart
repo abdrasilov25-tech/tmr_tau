@@ -7,8 +7,15 @@ sealed class NewsEvent extends Equatable {
 }
 
 final class NewsLoaded extends NewsEvent {
-  const NewsLoaded({this.currentUserId});
+  const NewsLoaded({this.currentUserId, this.silent = false});
+
   final String? currentUserId;
+
+  /// Без полноэкранного [NewsLoading] — для pull-to-refresh и фоновой подгрузки.
+  final bool silent;
+
+  @override
+  List<Object?> get props => [currentUserId, silent];
 }
 
 final class NewsLoadMore extends NewsEvent {}
@@ -28,4 +35,8 @@ final class NewsToggleRepost extends NewsEvent {
 final class NewsRefresh extends NewsEvent {
   const NewsRefresh({this.currentUserId});
   final String? currentUserId;
+}
+
+final class NewsCleared extends NewsEvent {
+  const NewsCleared();
 }

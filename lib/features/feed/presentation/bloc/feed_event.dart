@@ -7,10 +7,15 @@ sealed class FeedEvent extends Equatable {
 }
 
 final class FeedLoaded extends FeedEvent {
-  const FeedLoaded({this.currentUserId});
+  const FeedLoaded({this.currentUserId, this.forceRefresh = false});
+
   final String? currentUserId;
+
+  /// Обход кэша первой страницы в [FeedRepository].
+  final bool forceRefresh;
+
   @override
-  List<Object?> get props => [currentUserId];
+  List<Object?> get props => [currentUserId, forceRefresh];
 }
 
 final class FeedLoadMore extends FeedEvent {

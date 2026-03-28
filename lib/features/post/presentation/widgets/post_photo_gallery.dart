@@ -72,21 +72,9 @@ class _PostNetworkPhotoGalleryState extends State<PostNetworkPhotoGallery> {
               itemCount: urls.length,
               onPageChanged: (i) => setState(() => _page = i),
               itemBuilder: (context, index) {
-                return GestureDetector(
+                return _NetworkGallerySlide(
+                  url: urls[index],
                   onTap: () => _openZoom(index),
-                  child: CachedNetworkImage(
-                    imageUrl: urls[index],
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    placeholder: (context, url) => Container(
-                      color: Colors.grey.shade200,
-                      child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                    ),
-                    errorWidget: (context, url, error) => Container(
-                      color: Colors.grey.shade200,
-                      child: Icon(Icons.broken_image_outlined, color: Colors.grey.shade500, size: 48),
-                    ),
-                  ),
                 );
               },
             ),
@@ -117,6 +105,53 @@ class _PostNetworkPhotoGalleryState extends State<PostNetworkPhotoGallery> {
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Сохраняем страницу карусели в памяти — при свайпе назад картинка не грузится заново с нуля.
+class _NetworkGallerySlide extends StatefulWidget {
+  const _NetworkGallerySlide({
+    required this.url,
+    required this.onTap,
+  });
+
+  final String url;
+  final VoidCallback onTap;
+
+  @override
+  State<_NetworkGallerySlide> createState() => _NetworkGallerySlideState();
+}
+
+class _NetworkGallerySlideState extends State<_NetworkGallerySlide>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final memW = (MediaQuery.sizeOf(context).width * dpr).round();
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: RepaintBoundary(
+        child: CachedNetworkImage(
+          imageUrl: widget.url,
+          fit: BoxFit.cover,
+          width: double.infinity,
+          memCacheWidth: memW,
+          fadeInDuration: Duration.zero,
+          fadeOutDuration: Duration.zero,
+          placeholder: (context, url) => ColoredBox(color: Colors.grey.shade900),
+          errorWidget: (context, url, error) => Container(
+            color: Colors.grey.shade200,
+            alignment: Alignment.center,
+            child: Icon(Icons.broken_image_outlined,
+                color: Colors.grey.shade500, size: 48),
+          ),
         ),
       ),
     );

@@ -94,12 +94,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     if (p != null && mounted) setState(() => _product = p);
   }
 
-  @override
-  void dispose() {
-    _commentController.dispose();
-    super.dispose();
-  }
-
   /// Проверяем, есть ли товар уже в избранном (чтобы показать «В избранном»).
   Future<void> _loadIsInFavorites() async {
     final repo = widget.productRepository;
@@ -111,6 +105,12 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         setState(() => _isInFavorites = list.any((p) => p.id == _product.id));
       }
     } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadComments() async {

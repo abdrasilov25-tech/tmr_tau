@@ -7,11 +7,15 @@ class CachedAvatar extends StatelessWidget {
     this.imageUrl,
     this.radius = 24,
     this.fallbackText,
+    this.enableLightboxOnTap = true,
   });
 
   final String? imageUrl;
   final double radius;
   final String? fallbackText;
+
+  /// Если false — тап не открывает полноэкранный просмотр (нужно для [UserAvatarTap] / перехода в профиль).
+  final bool enableLightboxOnTap;
 
   @override
   Widget build(BuildContext context) {
@@ -32,10 +36,43 @@ class CachedAvatar extends StatelessWidget {
     // Для разных аккаунтов мы используем уникальный URL (uid в query),
     // поэтому принудительная очистка кэша на каждом build не требуется.
     final url = rawUrl;
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final px = (radius * 2 * dpr).round();
+    final avatar = CircleAvatar(
+      radius: radius,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: url,
+          width: radius * 2,
+          height: radius * 2,
+          fit: BoxFit.cover,
+          memCacheWidth: px,
+          memCacheHeight: px,
+          fadeInDuration: Duration.zero,
+          fadeOutDuration: Duration.zero,
+          placeholder: (context, url) => Center(
+            child: Text(
+              fallback,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          errorWidget: (context, url, error) => Text(
+            fallback,
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+        ),
+      ),
+    );
+
+    if (!enableLightboxOnTap) {
+      return avatar;
+    }
+
     return GestureDetector(
       onTap: () {
-        final url = imageUrl;
-        if (url == null || url.isEmpty) return;
+        final u = imageUrl;
+        if (u == null || u.isEmpty) return;
         showDialog<void>(
           context: context,
           builder: (ctx) => Dialog(
@@ -45,7 +82,7 @@ class CachedAvatar extends StatelessWidget {
               aspectRatio: 1,
               child: InteractiveViewer(
                 child: Image.network(
-                  url,
+                  u,
                   fit: BoxFit.cover,
                 ),
               ),
@@ -53,33 +90,7 @@ class CachedAvatar extends StatelessWidget {
           ),
         );
       },
-      child: CircleAvatar(
-        radius: radius,
-        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-        // ClipOval гарантирует ровную круговую обрезку изображения без “квадратных” краёв.
-        child: ClipOval(
-          child: CachedNetworkImage(
-            imageUrl: url,
-            width: radius * 2,
-            height: radius * 2,
-            fit: BoxFit.cover,
-            memCacheWidth: (radius * 2 * MediaQuery.devicePixelRatioOf(context))
-                .round(),
-            memCacheHeight: (radius * 2 * MediaQuery.devicePixelRatioOf(context))
-                .round(),
-            placeholder: (context, url) => Center(
-              child: Text(
-                fallback,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
-            errorWidget: (context, url, error) => Text(
-              fallback,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-          ),
-        ),
-      ),
+      child: avatar,
     );
   }
 }

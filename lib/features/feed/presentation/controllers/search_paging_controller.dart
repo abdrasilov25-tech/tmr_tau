@@ -56,6 +56,20 @@ class SearchPagingController extends ChangeNotifier {
 
   int _requestVersion = 0;
 
+  /// Пустая выдача без запроса (смена аккаунта / сброс отложенной загрузки).
+  void resetListing() {
+    _requestVersion++;
+    _query = '';
+    _filters = const SearchFilters();
+    _cachedExcludeSellerIds = null;
+    _products.clear();
+    _items.clear();
+    _productOffset = 0;
+    _hasMoreProducts = true;
+    _isLoading = false;
+    notifyListeners();
+  }
+
   Future<void> loadInitial(String query, {SearchFilters? filters}) async {
     _requestVersion++;
     final localVersion = _requestVersion;
@@ -68,6 +82,7 @@ class SearchPagingController extends ChangeNotifier {
     _items.clear();
     _productOffset = 0;
     _hasMoreProducts = true;
+    _isLoading = true;
     notifyListeners();
 
     await _fetchPage(reset: true, requestVersion: localVersion);
@@ -92,7 +107,7 @@ class SearchPagingController extends ChangeNotifier {
     required bool reset,
     required int requestVersion,
   }) async {
-    if (_isLoading) return;
+    if (_isLoading && !reset) return;
     _isLoading = true;
     notifyListeners();
     try {

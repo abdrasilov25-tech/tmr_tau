@@ -15,12 +15,42 @@ class FeedRepositoryImpl implements FeedRepository {
   final ProfileRepository _profileRepository;
   final SettingsRepository _settingsRepository;
 
+  static const Duration _firstPageTtl = Duration(minutes: 5);
+
+  String? _cacheUserKey;
+  int? _cachedLimit;
+  DateTime? _cachedAt;
+  List<ProductEntity>? _cachedFirstPage;
+
+  String _feedCacheKey(String? userId) =>
+      (userId == null || userId.isEmpty) ? '__anon__' : userId;
+
+  @override
+  void invalidateFeedCache() {
+    _cachedFirstPage = null;
+    _cachedAt = null;
+    _cacheUserKey = null;
+    _cachedLimit = null;
+  }
+
   @override
   Future<List<ProductEntity>> getFeed({
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    bool forceRefresh = false,
   }) async {
+    final key = _feedCacheKey(currentUserId);
+    if (offset == 0 &&
+        !forceRefresh &&
+        _cachedFirstPage != null &&
+        _cachedAt != null &&
+        _cacheUserKey == key &&
+        _cachedLimit == limit &&
+        DateTime.now().difference(_cachedAt!) <= _firstPageTtl) {
+      return List<ProductEntity>.from(_cachedFirstPage!);
+    }
+
     var exclude = const <String>{};
     if (currentUserId != null && currentUserId.isNotEmpty) {
       try {
@@ -30,12 +60,19 @@ class FeedRepositoryImpl implements FeedRepository {
         );
       } catch (_) {}
     }
-    return _productRepository.getFeedProducts(
+    final list = await _productRepository.getFeedProducts(
       limit: limit,
       offset: offset,
       currentUserId: currentUserId,
       excludeSellerIds: exclude,
     );
+    if (offset == 0) {
+      _cachedFirstPage = List<ProductEntity>.from(list);
+      _cachedAt = DateTime.now();
+      _cacheUserKey = key;
+      _cachedLimit = limit;
+    }
+    return list;
   }
 
   @override

@@ -58,6 +58,7 @@ void main() {
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
           currentUserId: any(named: 'currentUserId'),
+          forceRefresh: any(named: 'forceRefresh'),
         )).thenAnswer((_) async => [
           product(id: 'p1'),
           product(id: 'p2'),
@@ -80,6 +81,7 @@ void main() {
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
           currentUserId: any(named: 'currentUserId'),
+          forceRefresh: any(named: 'forceRefresh'),
         )).thenThrow(Exception('Network error'));
         return FeedBloc(mockRepository, mockLocalReactions);
       },
@@ -99,6 +101,7 @@ void main() {
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
           currentUserId: any(named: 'currentUserId'),
+          forceRefresh: any(named: 'forceRefresh'),
         )).thenAnswer((_) async => [
           product(id: 'p1', isLikedByMe: false, likesCount: 5),
         ]);

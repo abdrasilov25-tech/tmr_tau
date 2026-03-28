@@ -24,6 +24,7 @@ import '../../../notifications/presentation/widgets/notification_activity_peek_b
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
+import '../widgets/user_avatar_tap.dart';
 
 /// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
 /// **Рекомендации** и **Подписки** — отдельные вертикальные ленты (свайп вверх/вниз),
@@ -52,7 +53,8 @@ enum _FeedTab {
 
 class _MainHomePageState extends State<MainHomePage> {
   static const int _pageSize = 10;
-  static const Duration _warmCacheTtl = Duration(seconds: 45);
+  /// Дольше, чем раньше: при возврате на вкладку «Публикации» не сбрасываем ленту.
+  static const Duration _warmCacheTtl = Duration(minutes: 45);
   static _MainHomeWarmCache? _warmCache;
 
   /// Отдельный вертикальный «экран» на вкладку — свайп как в TikTok.
@@ -136,9 +138,67 @@ class _MainHomePageState extends State<MainHomePage> {
   /// Сначала лента, потом сторис — иначе [_storeWarmCache] из параллельного [_loadStories]
   /// может сохранить кэш со списками ещё от прошлого пользователя.
   Future<void> _runInitialHomeLoad({required bool showLoading}) async {
-    await _loadInitial(showLoading: showLoading);
+    if (showLoading) {
+      await _loadInitial(showLoading: true);
+      if (!mounted) return;
+      await _loadStories();
+    } else {
+      // Уже показали кэш — не очищаем списки через _loadInitial (иначе лишний «пустой» экран и двойной запрос).
+      await _silentRefreshHome();
+    }
+  }
+
+  /// Фоновое обновление лент и сторис без сброса уже показанных данных.
+  Future<void> _silentRefreshHome() async {
     if (!mounted) return;
-    await _loadStories();
+    await Future.wait<void>([
+      _silentRefreshFeeds(),
+      _loadStories(),
+    ]);
+  }
+
+  Future<void> _silentRefreshFeeds() async {
+    try {
+      final repo = context.read<PostRepository>();
+      final followingIds = await _getFollowingUserIdsCached();
+      final rec = await repo.getPublicationsFeedRecommendations(
+        currentUserId: _currentUserId,
+        followingUserIds: followingIds,
+        limit: _pageSize,
+        discoveryDbOffset: 0,
+      );
+      final sub = await repo.getPublicationsFeedSubscriptions(
+        currentUserId: _currentUserId,
+        followingUserIds: followingIds,
+        limit: _pageSize,
+        offset: 0,
+      );
+      if (!mounted) return;
+      setState(() {
+        _postsRecommendations
+          ..clear()
+          ..addAll(rec.posts);
+        _cursorRecommendations = rec.nextOffset;
+        _hasMoreRecommendations =
+            rec.posts.isNotEmpty && rec.posts.length >= _pageSize;
+        _postsSubscriptions
+          ..clear()
+          ..addAll(sub.posts);
+        _cursorSubscriptions = sub.nextOffset;
+        _hasMoreSubscriptions =
+            sub.posts.isNotEmpty && sub.posts.length >= _pageSize;
+      });
+      _storeWarmCache();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _precacheFeedHead(_postsRecommendations);
+        _precacheFeedHead(_postsSubscriptions);
+        _lastPrecachedFeedIndex = null;
+        _precacheNeighborsForCurrentFeedPost();
+      });
+    } catch (_) {
+      // Оставляем последний успешный кэш на экране.
+    }
   }
 
   /// Смена аккаунта: сбрасываем общий warm-cache и перезагружаем данные.
@@ -863,6 +923,7 @@ class _MainHomePageState extends State<MainHomePage> {
         }
         final post = posts[index];
         return SizedBox(
+          key: ValueKey<String>(post.id),
           height: itemHeight,
           width: double.infinity,
           child: _InstagramPostItem(
@@ -1223,7 +1284,8 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
     final p = widget.post;
     final mediaHeight = widget.height;
 
-    return SizedBox(
+    return RepaintBoundary(
+      child: SizedBox(
       height: mediaHeight,
       child: Stack(
         children: [
@@ -1250,19 +1312,17 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  CachedAvatar(
-                    imageUrl: p.userAvatarUrl?.isNotEmpty == true
-                        ? '${p.userAvatarUrl}?uid=${p.userId}'
-                        : null,
+                  UserAvatarTap(
+                    userId: p.userId,
+                    avatarUrl: p.userAvatarUrl,
                     radius: 18,
-                    fallbackText: p.userName ?? 'П',
+                    currentUserId: widget.currentUserId,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      p.userName ?? 'Пользователь',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                    child: UsernameTap(
+                      userId: p.userId,
+                      username: p.userName ?? 'Пользователь',
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
@@ -1350,6 +1410,7 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
           ),
         ],
       ),
+    ),
     );
   }
 }

@@ -8,7 +8,6 @@ import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
-import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../bloc/news_bloc.dart';
 
@@ -37,20 +36,9 @@ class NewsFeedPage extends StatelessWidget {
     final userId = authState is AuthAuthenticated
         ? authState.user.id
         : context.read<AuthRepository>().currentUser?.id;
-    return BlocProvider(
-      create: (c) => NewsBloc(c.read<PostRepository>())..add(NewsLoaded(currentUserId: userId)),
-      child: BlocListener<AuthBloc, AuthState>(
-        listenWhen: (prev, curr) =>
-            curr is AuthAuthenticated &&
-            (prev is! AuthAuthenticated || prev.user.id != curr.user.id),
-        listener: (ctx, state) {
-          if (state is AuthAuthenticated) {
-            ctx.read<NewsBloc>().add(NewsRefresh(currentUserId: state.user.id));
-          }
-        },
-        child: Builder(
-          builder: (nested) {
-            return Scaffold(
+    return Builder(
+      builder: (nested) {
+        return Scaffold(
               backgroundColor: Colors.transparent,
               appBar: AppBar(
                 backgroundColor: Colors.transparent,
@@ -105,7 +93,9 @@ class NewsFeedPage extends StatelessWidget {
                             ),
                             const SizedBox(height: 16),
                             FilledButton(
-                              onPressed: () => context.read<NewsBloc>().add(NewsRefresh(currentUserId: userId)),
+                              onPressed: () => context.read<NewsBloc>().add(
+                                    NewsLoaded(currentUserId: userId),
+                                  ),
                               child: const Text('Повторить'),
                             ),
                           ],
@@ -190,9 +180,7 @@ class NewsFeedPage extends StatelessWidget {
                 ],
               ),
             );
-          },
-        ),
-      ),
+      },
     );
   }
 }

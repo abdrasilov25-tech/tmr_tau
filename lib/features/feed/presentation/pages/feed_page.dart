@@ -70,7 +70,10 @@ class _FeedPageState extends State<FeedPage> {
                     child: AppErrorView(
                       message: state.message,
                       onRetry: () => context.read<FeedBloc>().add(
-                            FeedLoaded(currentUserId: currentUserId),
+                            FeedLoaded(
+                              currentUserId: currentUserId,
+                              forceRefresh: true,
+                            ),
                           ),
                     ),
                   );

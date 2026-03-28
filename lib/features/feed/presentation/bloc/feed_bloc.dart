@@ -33,6 +33,7 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
         limit: _pageSize,
         offset: 0,
         currentUserId: event.currentUserId,
+        forceRefresh: event.forceRefresh,
       );
       list = _mergeLocalReactions(list);
       if (!isClosed) {

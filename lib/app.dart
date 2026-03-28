@@ -15,6 +15,7 @@ import 'core/theme/domain/theme_repository.dart';
 import 'core/theme/data/theme_repository_impl.dart';
 import 'core/theme/theme_index_notifier.dart';
 import 'core/router/app_router.dart';
+import 'core/navigation/search_tab_activation_controller.dart';
 import 'core/network/connectivity_host.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
@@ -26,6 +27,7 @@ import 'features/comments/domain/repositories/comments_repository.dart';
 import 'features/feed/data/repositories/feed_repository_impl.dart';
 import 'features/feed/domain/repositories/feed_repository.dart';
 import 'features/feed/presentation/bloc/feed_bloc.dart';
+import 'features/news/presentation/bloc/news_bloc.dart';
 import 'features/notifications/data/repositories/notifications_repository_impl.dart';
 import 'features/notifications/domain/repositories/notifications_repository.dart';
 import 'features/notifications/presentation/notification_activity_peek_bus.dart';
@@ -90,6 +92,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final SettingsRepository _settingsRepository;
   late final MapRepository _mapRepository;
   late final AppRouter _appRouter;
+  late final SearchTabActivationController _searchTabActivation;
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
   late final ThemeIndexNotifier _themeIndexNotifier;
@@ -126,6 +129,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _notificationsRepository = NotificationsRepositoryImpl(_client);
     _postRepository = PostRepositoryImpl(_client);
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
+    _searchTabActivation = SearchTabActivationController();
     _accountManager = AccountManager(
       widget.accountRepository,
       SessionRestorer(_client),
@@ -139,6 +143,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
       commentsRepository: _commentsRepository,
       settingsRepository: _settingsRepository,
       mapRepository: _mapRepository,
+      searchTabActivation: _searchTabActivation,
     );
   }
 
@@ -218,6 +223,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
           value: _settingsRepository,
         ),
         RepositoryProvider<MapRepository>.value(value: _mapRepository),
+        ChangeNotifierProvider<SearchTabActivationController>.value(
+          value: _searchTabActivation,
+        ),
       ],
       child: BlocProvider(
         create: (context) => AuthBloc(
@@ -256,33 +264,47 @@ class _TmrTauAppState extends State<TmrTauApp> {
               }
             }
           },
-          child: BlocProvider<FeedBloc>(
-            create: (context) => FeedBloc(
-              _feedRepository,
-              widget.localReactionsStorage,
-            ),
-            child: BlocListener<AuthBloc, AuthState>(
-              listenWhen: (prev, curr) =>
-                  curr is AuthAuthenticated && (prev is! AuthAuthenticated || prev.user.id != curr.user.id),
-              listener: (context, state) {
-                if (state is AuthAuthenticated) {
-                  context.read<FeedBloc>().add(FeedLoaded(currentUserId: state.user.id));
-                  context.read<ChatUnreadBadgeController>().refresh();
-                }
-              },
+          child: BlocProvider<NewsBloc>(
+            create: (context) => NewsBloc(context.read<PostRepository>()),
+            child: BlocProvider<FeedBloc>(
+              create: (context) => FeedBloc(
+                _feedRepository,
+                widget.localReactionsStorage,
+              ),
               child: BlocListener<AuthBloc, AuthState>(
-                listenWhen: (prev, curr) =>
-                    curr is AuthUnauthenticated || curr is AuthError,
-                listener: (context, state) {
-                  widget.chatListStorage.setActiveAccountId(null);
-                  widget.chatStoryListStorage.setActiveAccountId(null);
-                  context.read<ChatUnreadBadgeController>().clear();
+                listenWhen: (prev, curr) {
+                  if (curr is! AuthAuthenticated) return false;
+                  if (prev is! AuthAuthenticated) return true;
+                  return prev.user.id != curr.user.id;
                 },
-                child: MaterialApp.router(
-                  title: 'tmr_tau',
-                  debugShowCheckedModeBanner: false,
-                  theme: AppTheme.light,
-                  routerConfig: _appRouter.router,
+                listener: (context, state) {
+                  if (state is AuthAuthenticated) {
+                    context.read<FeedBloc>().add(
+                          FeedLoaded(currentUserId: state.user.id),
+                        );
+                    context.read<NewsBloc>().add(
+                          NewsLoaded(currentUserId: state.user.id),
+                        );
+                    context.read<ChatUnreadBadgeController>().refresh();
+                  }
+                },
+                child: BlocListener<AuthBloc, AuthState>(
+                  listenWhen: (prev, curr) =>
+                      curr is AuthUnauthenticated || curr is AuthError,
+                  listener: (context, state) {
+                    widget.chatListStorage.setActiveAccountId(null);
+                    widget.chatStoryListStorage.setActiveAccountId(null);
+                    context.read<ChatUnreadBadgeController>().clear();
+                    context.read<NewsBloc>().add(const NewsCleared());
+                    context.read<FeedRepository>().invalidateFeedCache();
+                    context.read<SearchTabActivationController>().reset();
+                  },
+                  child: MaterialApp.router(
+                    title: 'tmr_tau',
+                    debugShowCheckedModeBanner: false,
+                    theme: AppTheme.light,
+                    routerConfig: _appRouter.router,
+                  ),
                 ),
               ),
             ),

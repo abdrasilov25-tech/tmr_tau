@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../../../core/products/deleted_product_bus.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+
+import '../../../../core/navigation/search_tab_activation_controller.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -41,6 +43,8 @@ class _SearchPageState extends State<SearchPage> {
   final _queryController = TextEditingController();
   final _scrollController = ScrollController();
   late final SearchPagingController _pagingController;
+  late final SearchTabActivationController _searchActivation;
+  bool _productSearchStarted = false;
   SearchPreferencesStorage? _searchStorage;
   List<CategoryEntity> _categories = const [];
   List<String> _history = const [];
@@ -61,6 +65,8 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void initState() {
     super.initState();
+    _searchActivation = context.read<SearchTabActivationController>();
+    _searchActivation.addListener(_onSearchActivationChanged);
     _pagingController = SearchPagingController(
       productRepository: widget.productRepository,
       currentUserId: _currentUserId,
@@ -69,8 +75,13 @@ class _SearchPageState extends State<SearchPage> {
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _pagingController.loadInitial('');
       _bootstrapSearchUx();
+      // Deep link /home/search: нижний NavigationBar не вызывал onDestinationSelected.
+      final path = GoRouter.of(context).state.uri.path;
+      if (path.endsWith('/search')) {
+        _searchActivation.markSearchTabSelected();
+      }
+      _tryStartDeferredProductLoad();
     });
     _deletedProductSub = deletedProductIdsStream.listen((id) {
       if (!mounted) return;
@@ -78,8 +89,27 @@ class _SearchPageState extends State<SearchPage> {
     });
   }
 
+  void _onSearchActivationChanged() {
+    if (!mounted) return;
+    if (!_searchActivation.productsLoadPrimed) {
+      _productSearchStarted = false;
+      _pagingController.resetListing();
+      setState(() {});
+      return;
+    }
+    _tryStartDeferredProductLoad();
+  }
+
+  void _tryStartDeferredProductLoad() {
+    if (_productSearchStarted) return;
+    if (!_searchActivation.productsLoadPrimed) return;
+    _productSearchStarted = true;
+    unawaited(_pagingController.loadInitial(''));
+  }
+
   @override
   void dispose() {
+    _searchActivation.removeListener(_onSearchActivationChanged);
     _deletedProductSub?.cancel();
     _debounce?.cancel();
     _queryController.dispose();
@@ -309,7 +339,19 @@ class _SearchPageState extends State<SearchPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BlocListener<AuthBloc, AuthState>(
+      listenWhen: (prev, curr) =>
+          prev is AuthAuthenticated &&
+          curr is AuthAuthenticated &&
+          prev.user.id != curr.user.id,
+      listener: (context, state) {
+        _productSearchStarted = false;
+        _pagingController.resetListing();
+        if (_searchActivation.productsLoadPrimed) {
+          _tryStartDeferredProductLoad();
+        }
+      },
+      child: Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -413,6 +455,7 @@ class _SearchPageState extends State<SearchPage> {
             style: TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
+      ),
       ),
     );
   }
