@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:collection/collection.dart';
 import 'package:equatable/equatable.dart';
 import 'package:postgrest/postgrest.dart';
 import '../../../../core/storage/local_reactions_storage.dart';
@@ -107,7 +108,9 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       FeedToggleLike event, Emitter<FeedState> emit) async {
     final current = state;
     if (current is! FeedSuccess) return;
-    final p = current.products.firstWhere((e) => e.id == event.productId);
+    final p =
+        current.products.firstWhereOrNull((e) => e.id == event.productId);
+    if (p == null) return;
     final isNowLiked = !p.isLikedByMe;
     await _localReactions.setLiked(event.productId, isNowLiked);
     final updated = current.products.map((p) {
@@ -153,7 +156,9 @@ class FeedBloc extends Bloc<FeedEvent, FeedState> {
       FeedToggleRepost event, Emitter<FeedState> emit) async {
     final current = state;
     if (current is! FeedSuccess) return;
-    final p = current.products.firstWhere((e) => e.id == event.productId);
+    final p =
+        current.products.firstWhereOrNull((e) => e.id == event.productId);
+    if (p == null) return;
     final isNowReposted = !p.isRepostedByMe;
     await _localReactions.setReposted(event.productId, isNowReposted);
     final updated = current.products.map((p) {

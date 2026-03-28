@@ -1,0 +1,105 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": { "id": "astana", "name": "Астана" },
+      "geometry": { "type": "Point", "coordinates": [71.4491, 51.1694] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "almaty_city", "name": "Алматы" },
+      "geometry": { "type": "Point", "coordinates": [76.8512, 43.2220] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "shymkent", "name": "Шымкент" },
+      "geometry": { "type": "Point", "coordinates": [69.5869, 42.3155] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "abai", "name": "Абайская область" },
+      "geometry": { "type": "Point", "coordinates": [80.2275, 50.4111] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "akmola", "name": "Акмолинская область" },
+      "geometry": { "type": "Point", "coordinates": [69.3833, 53.2833] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "aktobe", "name": "Актюбинская область" },
+      "geometry": { "type": "Point", "coordinates": [57.2070, 50.2839] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "almaty_reg", "name": "Алматинская область" },
+      "geometry": { "type": "Point", "coordinates": [78.3739, 45.0156] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "atyrau", "name": "Атырауская область" },
+      "geometry": { "type": "Point", "coordinates": [51.8833, 47.1167] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "vko", "name": "Восточно-Казахстанская область" },
+      "geometry": { "type": "Point", "coordinates": [82.6289, 49.9481] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "zhambyl", "name": "Жамбылская область" },
+      "geometry": { "type": "Point", "coordinates": [71.3667, 42.9000] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "zhetysu", "name": "Жетысуская область" },
+      "geometry": { "type": "Point", "coordinates": [78.3739, 45.0156] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "zko", "name": "Западно-Казахстанская область" },
+      "geometry": { "type": "Point", "coordinates": [51.3667, 51.2333] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "karaganda", "name": "Карагандинская область" },
+      "geometry": { "type": "Point", "coordinates": [73.1041, 49.8014] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "kostanay", "name": "Костанайская область" },
+      "geometry": { "type": "Point", "coordinates": [63.6246, 53.2144] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "kyzylorda", "name": "Кызылординская область" },
+      "geometry": { "type": "Point", "coordinates": [65.4999, 44.8479] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "mangystau", "name": "Мангистауская область" },
+      "geometry": { "type": "Point", "coordinates": [51.1500, 43.6500] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "pavlodar", "name": "Павлодарская область" },
+      "geometry": { "type": "Point", "coordinates": [76.9674, 52.2871] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "sko", "name": "Северо-Казахстанская область" },
+      "geometry": { "type": "Point", "coordinates": [69.1500, 54.8667] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "turkestan", "name": "Туркестанская область" },
+      "geometry": { "type": "Point", "coordinates": [68.2517, 43.2973] }
+    },
+    {
+      "type": "Feature",
+      "properties": { "id": "ulytau", "name": "Улытауская область" },
+      "geometry": { "type": "Point", "coordinates": [67.7000, 47.7833] }
+    }
+  ]
+}
