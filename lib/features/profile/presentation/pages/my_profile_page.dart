@@ -205,9 +205,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
       var myStoryNote = '';
       try {
         final me = await supa.Supabase.instance.client
-            .from(SupabaseConstants.usersTable)
+            .from(SupabaseConstants.userStorySettingsTable)
             .select('story_note')
-            .eq('id', uid)
+            .eq('user_id', uid)
             .maybeSingle();
         myStoryNote = (me?['story_note'] ?? '').toString().trim();
       } catch (_) {}
@@ -511,7 +511,20 @@ class _MyProfilePageState extends State<MyProfilePage> {
             curr is AuthAuthenticated &&
             (prev is! AuthAuthenticated || prev.user.id != curr.user.id),
         listener: (context, state) {
-          if (state is AuthAuthenticated) _load();
+          if (state is! AuthAuthenticated) return;
+          _warmCache = null;
+          setState(() {
+            _profile = null;
+            _newsPosts = [];
+            _publicationPosts = [];
+            _videoPosts = [];
+            _storyGroups = [];
+            _newStoriesByUserId = {};
+            _myStoryNote = '';
+            _loading = true;
+            _autoReloadTriggeredForPublications = false;
+          });
+          unawaited(_load(showLoading: false));
         },
         child: BlocBuilder<AuthBloc, AuthState>(
           builder: (context, state) {

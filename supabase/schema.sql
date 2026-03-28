@@ -458,7 +458,11 @@ drop policy if exists "Users select" on public.users;
 drop policy if exists "Users update own" on public.users;
 drop policy if exists "Users insert own" on public.users;
 create policy "Users select" on public.users for select using (true);
-create policy "Users update own" on public.users for update using (auth.uid() = id);
+create policy "Users update own"
+  on public.users
+  for update
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
 create policy "Users insert own" on public.users for insert with check (auth.uid() = id);
 
 drop policy if exists "Products select" on public.products;
@@ -1080,6 +1084,57 @@ end;
 $$;
 
 grant execute on function public.increment_publication_feed_impression(uuid, int, boolean) to authenticated;
+
+-- ============== Заметка к сторис (RLS, не users.story_note) ==============
+-- См. migrations/20260327140000_user_story_settings.sql
+create table if not exists public.user_story_settings (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  story_note text not null default '',
+  note_location text not null default '',
+  share_location boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+alter table public.user_story_settings enable row level security;
+drop policy if exists "user_story_settings_select_allowed" on public.user_story_settings;
+drop policy if exists "user_story_settings_insert_own" on public.user_story_settings;
+drop policy if exists "user_story_settings_update_own" on public.user_story_settings;
+drop policy if exists "user_story_settings_delete_own" on public.user_story_settings;
+create policy "user_story_settings_select_allowed"
+  on public.user_story_settings for select
+  using (
+    auth.uid() = user_id
+    or exists (
+      select 1
+      from public.followers f
+      where f.follower_id = auth.uid()
+        and f.following_id = user_story_settings.user_id
+    )
+    or exists (
+      select 1
+      from public.messages m
+      where (m.sender_id = auth.uid() and m.receiver_id = user_story_settings.user_id)
+         or (m.receiver_id = auth.uid() and m.sender_id = user_story_settings.user_id)
+    )
+    or exists (
+      select 1
+      from public.chat_group_members m1
+      join public.chat_group_members m2 on m1.group_id = m2.group_id
+      where m1.user_id = auth.uid()
+        and m2.user_id = user_story_settings.user_id
+        and m1.user_id <> m2.user_id
+    )
+  );
+create policy "user_story_settings_insert_own"
+  on public.user_story_settings for insert
+  with check (auth.uid() = user_id);
+create policy "user_story_settings_update_own"
+  on public.user_story_settings for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+create policy "user_story_settings_delete_own"
+  on public.user_story_settings for delete
+  using (auth.uid() = user_id);
+grant select, insert, update, delete on public.user_story_settings to authenticated;
 
 -- ============== Платное продвижение товаров (см. migrations/20250322140000_product_promotions.sql) ==============
 -- Колонки: promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count;

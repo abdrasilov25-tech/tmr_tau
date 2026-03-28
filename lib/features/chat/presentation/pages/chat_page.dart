@@ -40,7 +40,6 @@ class _ChatPageState extends State<ChatPage> {
   static const String _storyDmPrefix = '__story__';
   static const String _postDmPrefix = '__post__';
   late final SupabaseClient _client;
-  String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
   final ScrollController _messagesScrollController = ScrollController();
   bool _sending = false;
@@ -58,19 +57,25 @@ class _ChatPageState extends State<ChatPage> {
   void initState() {
     super.initState();
     _client = Supabase.instance.client;
-    final authState = context.read<AuthBloc>().state;
-    if (authState is AuthAuthenticated) {
-      _currentUserId = authState.user.id;
-    }
     if (widget.markReadOnOpen) {
-      context
-          .read<ChatListStorage>()
-          .setLastReadAt(widget.peerId, DateTime.now())
-          .then((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        context.read<ChatUnreadBadgeController>().refresh();
+        if (_me() == null) return;
+        context
+            .read<ChatListStorage>()
+            .setLastReadAt(widget.peerId, DateTime.now())
+            .then((_) {
+          if (!mounted) return;
+          context.read<ChatUnreadBadgeController>().refresh();
+        });
       });
     }
+  }
+
+  /// Актуальный id сессии (после смены аккаунта не остаётся «залипшим» в initState).
+  String? _me() {
+    final s = context.read<AuthBloc>().state;
+    return s is AuthAuthenticated ? s.user.id : null;
   }
 
   @override
@@ -88,11 +93,10 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  Stream<List<Map<String, dynamic>>> _messagesStream() {
-    if (_currentUserId == null) {
+  Stream<List<Map<String, dynamic>>> _messagesStream(String? me) {
+    if (me == null) {
       return const Stream.empty();
     }
-    final me = _currentUserId!;
     final peer = widget.peerId;
     final hiddenIds = context.read<ChatListStorage>().getHiddenMessageIds(peer);
     // Стримим только сообщения, где текущий пользователь участвует как отправитель или получатель.
@@ -136,13 +140,14 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _sendMessage() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _currentUserId == null || _sending) return;
+    final uid = _me();
+    if (text.isEmpty || uid == null || _sending) return;
     setState(() {
       _sending = true;
     });
     try {
       await _client.from(SupabaseConstants.messagesTable).insert({
-        'sender_id': _currentUserId,
+        'sender_id': uid,
         'receiver_id': widget.peerId,
         'text': text,
       });
@@ -219,7 +224,8 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _deleteSelectedMessages() async {
-    if (_selectedMessageIds.isEmpty || _currentUserId == null) return;
+    final uid = _me();
+    if (_selectedMessageIds.isEmpty || uid == null) return;
     final selected = _selectedMessageIds.toList(growable: false);
     final chatStorage = context.read<ChatListStorage>();
     final unreadController = context.read<ChatUnreadBadgeController>();
@@ -230,11 +236,11 @@ class _ChatPageState extends State<ChatPage> {
           .delete()
           .inFilter('id', selected)
           .or(
-            'and(sender_id.eq.${_currentUserId!},receiver_id.eq.${widget.peerId}),'
-            'and(sender_id.eq.${widget.peerId},receiver_id.eq.${_currentUserId!})',
+            'and(sender_id.eq.$uid,receiver_id.eq.${widget.peerId}),'
+            'and(sender_id.eq.${widget.peerId},receiver_id.eq.$uid)',
           );
       if (!mounted) return;
-      await chatStorage.clearPeerState(widget.peerId);
+      await chatStorage.clearPeerState('direct:${widget.peerId}');
       setState(() {
         _selectedMessageIds.clear();
         _selectionMode = false;
@@ -252,7 +258,8 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _deleteAllMessagesInDialog() async {
-    if (_currentUserId == null) return;
+    final uid = _me();
+    if (uid == null) return;
     final chatStorage = context.read<ChatListStorage>();
     final unreadController = context.read<ChatUnreadBadgeController>();
     final messenger = ScaffoldMessenger.of(context);
@@ -262,16 +269,16 @@ class _ChatPageState extends State<ChatPage> {
       await _client
           .from(SupabaseConstants.messagesTable)
           .delete()
-          .eq('sender_id', _currentUserId!)
+          .eq('sender_id', uid)
           .eq('receiver_id', widget.peerId);
       await _client
           .from(SupabaseConstants.messagesTable)
           .delete()
           .eq('sender_id', widget.peerId)
-          .eq('receiver_id', _currentUserId!);
+          .eq('receiver_id', uid);
     }
     if (!mounted) return;
-    await chatStorage.clearPeerState(widget.peerId);
+    await chatStorage.clearPeerState('direct:${widget.peerId}');
     setState(() {
       _selectedMessageIds.clear();
       _selectionMode = false;
@@ -323,13 +330,14 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   bool _canEditSelectedMessage() {
-    if (_currentUserId == null) return false;
+    final uid = _me();
+    if (uid == null) return false;
     final selected = _selectedMessages();
     if (selected.length != 1) return false;
     final m = selected.first;
     final senderId = (m['sender_id'] ?? '').toString();
     final text = (m['text'] ?? '').toString().trim();
-    if (senderId != _currentUserId) return false;
+    if (senderId != uid) return false;
     if (text.isEmpty) return false;
     if (text.startsWith(_postDmPrefix) || text.startsWith(_storyDmPrefix)) {
       return false;
@@ -339,7 +347,8 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _editSelectedMessage() async {
     final selected = _selectedMessages();
-    if (selected.length != 1 || _currentUserId == null) return;
+    final uid = _me();
+    if (selected.length != 1 || uid == null) return;
     final message = selected.first;
     final messageId = (message['id'] ?? '').toString();
     final oldText = (message['text'] ?? '').toString();
@@ -377,7 +386,7 @@ class _ChatPageState extends State<ChatPage> {
           .from(SupabaseConstants.messagesTable)
           .update({'text': nextText})
           .eq('id', messageId)
-          .eq('sender_id', _currentUserId!)
+          .eq('sender_id', uid)
           .eq('receiver_id', widget.peerId);
       if (!mounted) return;
       setState(() {
@@ -513,6 +522,7 @@ class _ChatPageState extends State<ChatPage> {
       );
     }
 
+    final sessionUid = authState.user.id;
     final themeNotifier = context.read<ThemeIndexNotifier>();
 
     return ListenableBuilder(
@@ -587,7 +597,8 @@ class _ChatPageState extends State<ChatPage> {
                   children: [
                     Expanded(
                       child: StreamBuilder<List<Map<String, dynamic>>>(
-                        stream: _messagesStream(),
+                        key: ValueKey<String>('dm_${sessionUid}_${widget.peerId}'),
+                        stream: _messagesStream(sessionUid),
                         builder: (context, snapshot) {
                       final messages = snapshot.data ?? const [];
                       if (snapshot.connectionState ==
@@ -612,7 +623,7 @@ class _ChatPageState extends State<ChatPage> {
                           ),
                         );
                       }
-                      final me = _currentUserId;
+                      final me = sessionUid;
                       _latestDialogMessages = messages;
                       WidgetsBinding.instance.addPostFrameCallback((_) {
                         if (!mounted || !_messagesScrollController.hasClients) return;
@@ -731,7 +742,7 @@ class _ChatPageState extends State<ChatPage> {
                                       },
                                       onSave: () async {
                                         if (_selectionMode) return;
-                                        if (_currentUserId == null) return;
+                                        if (sessionUid.isEmpty) return;
                                         final postRepo =
                                             context.read<PostRepository>();
                                         final messenger =
@@ -739,7 +750,7 @@ class _ChatPageState extends State<ChatPage> {
                                         try {
                                           await postRepo.toggleSave(
                                             postStructured.postId,
-                                            _currentUserId!,
+                                            sessionUid,
                                           );
                                           if (!mounted) return;
                                           messenger.showSnackBar(

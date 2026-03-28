@@ -186,6 +186,14 @@ class ProfileRepositoryImpl implements ProfileRepository {
         .toSet()
         .toList();
 
+    final myFollowingRes = await _client
+        .from(SupabaseConstants.followersTable)
+        .select('following_id')
+        .eq('follower_id', followingId);
+    final myFollowingIds = (myFollowingRes as List)
+        .map((e) => (e as Map)['following_id'] as String)
+        .toSet();
+
     final List<SellerProfileEntity> result = [];
     for (final id in followerIds) {
       final userRes = await _client
@@ -203,7 +211,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           bio: m['bio'] as String?,
           followersCount: m['followers_count'] as int? ?? 0,
           followingCount: 0,
-          isFollowingByMe: false,
+          isFollowingByMe: myFollowingIds.contains(id),
           products: const [],
           isVerified: false,
         ),

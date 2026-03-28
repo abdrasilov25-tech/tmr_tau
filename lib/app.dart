@@ -232,11 +232,10 @@ class _TmrTauAppState extends State<TmrTauApp> {
           },
           listener: (context, state) async {
             if (state is AuthAuthenticated) {
-              // При входе/переключении аккаунта очищаем локальные лайки/репосты и состояние чатов,
-              // чтобы прошлый аккаунт не «перетекал» в новый.
+              widget.chatListStorage.setActiveAccountId(state.user.id);
+              widget.chatStoryListStorage.setActiveAccountId(state.user.id);
+              // Лайки/репосты в ленте — общий кэш до пользователя; чаты изолированы по accountId в storage.
               await widget.localReactionsStorage.clearReactions();
-              await widget.chatListStorage.clearAll();
-              await widget.chatStoryListStorage.clearAll();
               if (!context.mounted) return;
               final session =
                   supa.Supabase.instance.client.auth.currentSession;
@@ -275,6 +274,8 @@ class _TmrTauAppState extends State<TmrTauApp> {
                 listenWhen: (prev, curr) =>
                     curr is AuthUnauthenticated || curr is AuthError,
                 listener: (context, state) {
+                  widget.chatListStorage.setActiveAccountId(null);
+                  widget.chatStoryListStorage.setActiveAccountId(null);
                   context.read<ChatUnreadBadgeController>().clear();
                 },
                 child: MaterialApp.router(

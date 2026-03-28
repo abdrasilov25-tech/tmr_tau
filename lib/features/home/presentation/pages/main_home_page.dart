@@ -99,7 +99,6 @@ class _MainHomePageState extends State<MainHomePage> {
   Map<String, String> _storyNotesByUserId = const {};
 
   String? _currentUserId;
-  String? _loadedUserId;
 
   /// Подписок больше не запрашиваем на каждый chunk ленты и второй раз для сторис — один запрос на сессию / после сброса.
   List<String>? _followingIdsCache;
@@ -130,9 +129,26 @@ class _MainHomePageState extends State<MainHomePage> {
     // Defer heavy network calls until after first frame to improve perceived startup.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      unawaited(_loadInitial(showLoading: !canUseCache));
-      unawaited(_loadStories());
+      unawaited(_runInitialHomeLoad(showLoading: !canUseCache));
     });
+  }
+
+  /// Сначала лента, потом сторис — иначе [_storeWarmCache] из параллельного [_loadStories]
+  /// может сохранить кэш со списками ещё от прошлого пользователя.
+  Future<void> _runInitialHomeLoad({required bool showLoading}) async {
+    await _loadInitial(showLoading: showLoading);
+    if (!mounted) return;
+    await _loadStories();
+  }
+
+  /// Смена аккаунта: сбрасываем общий warm-cache и перезагружаем данные.
+  Future<void> _reloadHomeAfterAuthUserChange() async {
+    _warmCache = null;
+    _invalidateFollowingIdsCache();
+    _cancelImpressionTimer();
+    await _loadInitial(showLoading: true);
+    if (!mounted) return;
+    await _loadStories();
   }
 
   @override
@@ -382,7 +398,6 @@ class _MainHomePageState extends State<MainHomePage> {
     final activeUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
     _currentUserId = activeUserId;
-    _loadedUserId = _currentUserId;
     _feedTab = _FeedTab.recommendations;
     _invalidateFollowingIdsCache();
     if (showLoading) {
@@ -553,12 +568,12 @@ class _MainHomePageState extends State<MainHomePage> {
       if (ids.isNotEmpty) {
         try {
           final rows = await supa.Supabase.instance.client
-              .from(SupabaseConstants.usersTable)
-              .select('id,story_note')
-              .inFilter('id', ids.toList(growable: false));
+              .from(SupabaseConstants.userStorySettingsTable)
+              .select('user_id,story_note')
+              .inFilter('user_id', ids.toList(growable: false));
           for (final row in (rows as List<dynamic>)) {
             final map = row as Map<String, dynamic>;
-            final id = (map['id'] ?? '').toString();
+            final id = (map['user_id'] ?? '').toString();
             final note = (map['story_note'] ?? '').toString().trim();
             if (id.isNotEmpty && note.isNotEmpty) {
               notesMap[id] = note;
@@ -942,19 +957,11 @@ class _MainHomePageState extends State<MainHomePage> {
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
-    final authState = context.read<AuthBloc>().state;
-    final activeUserId =
+    final authState = context.watch<AuthBloc>().state;
+    final sessionUid =
         authState is AuthAuthenticated ? authState.user.id : null;
     final currentUserAvatarUrl =
         authState is AuthAuthenticated ? authState.user.avatarUrl : null;
-    if (activeUserId != _loadedUserId && !_initialLoading) {
-      _currentUserId = activeUserId;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _loadInitial();
-        _loadStories();
-      });
-    }
     return Scaffold(
       appBar: AppBar(
         elevation: 0,
@@ -977,9 +984,7 @@ class _MainHomePageState extends State<MainHomePage> {
                 prev.user.id != curr.user.id),
         listener: (context, state) {
           if (state is AuthAuthenticated) {
-            _currentUserId = state.user.id;
-            _loadInitial();
-            _loadStories();
+            unawaited(_reloadHomeAfterAuthUserChange());
           }
         },
         child: _initialLoading
@@ -991,7 +996,7 @@ class _MainHomePageState extends State<MainHomePage> {
                     newStoriesByUserId: _newStoriesByUserId,
                     storyNotesByUserId: const <String, String>{},
                     enableNotes: false,
-                    currentUserId: _currentUserId,
+                    currentUserId: sessionUid,
                     currentUserAvatarUrl: currentUserAvatarUrl,
                     onOwnNoteTap: (_) {},
                     onAddStoryTap: _openAddStoryAndRefresh,

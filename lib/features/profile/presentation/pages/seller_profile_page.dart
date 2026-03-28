@@ -286,6 +286,8 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   bool _loadingPublications = true;
   String? _currentUserId;
   bool _isMutualFollow = false;
+  /// Подписчик подписан на вас, а вы на него ещё нет (как подпись в Instagram).
+  bool _peerFollowsMe = false;
   List<SellerProfileEntity> _commonFollowers = const [];
 
   @override
@@ -297,6 +299,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     }
     _loadPublications();
     _loadMutualFollow();
+    _loadPeerFollowsMe();
     _loadCommonFollowers();
   }
 
@@ -306,6 +309,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     if (oldWidget.profile.id != widget.profile.id ||
         oldWidget.profile.isFollowingByMe != widget.profile.isFollowingByMe) {
       _loadMutualFollow();
+      _loadPeerFollowsMe();
       _loadCommonFollowers();
     }
   }
@@ -326,6 +330,28 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loadingPublications = false);
+    }
+  }
+
+  Future<void> _loadPeerFollowsMe() async {
+    final me = _currentUserId;
+    if (me == null || me == widget.profile.id) {
+      if (!mounted) return;
+      setState(() => _peerFollowsMe = false);
+      return;
+    }
+    try {
+      final peerFollowsMe = await Supabase.instance.client
+          .from(SupabaseConstants.followersTable)
+          .select('follower_id')
+          .eq('follower_id', widget.profile.id)
+          .eq('following_id', me)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() => _peerFollowsMe = peerFollowsMe != null);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _peerFollowsMe = false);
     }
   }
 
@@ -652,6 +678,16 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                   ),
                 ],
                 if (_currentUserId != null && _currentUserId != profile.id) ...[
+                  if (!profile.isFollowingByMe && _peerFollowsMe) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Подписан на вас',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: ThemedContentSurface.profileTextSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Row(
                     children: [
@@ -674,6 +710,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                       );
                                       if (!mounted) return;
                                       await _loadMutualFollow();
+                                      await _loadPeerFollowsMe();
                                     },
                                     child: Text(
                                       _isMutualFollow
@@ -698,8 +735,13 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                       );
                                       if (!mounted) return;
                                       await _loadMutualFollow();
+                                      await _loadPeerFollowsMe();
                                     },
-                                    child: const Text('Подписаться'),
+                                    child: Text(
+                                      _peerFollowsMe
+                                          ? 'Подписаться в ответ'
+                                          : 'Подписаться',
+                                    ),
                                   )),
                       ),
                       const SizedBox(width: 12),

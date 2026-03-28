@@ -3,6 +3,8 @@ class SupabaseConstants {
   SupabaseConstants._();
 
   static const String usersTable = 'users';
+  /// Заметка к сторис и локация (RLS: см. migrations/20260327140000_user_story_settings.sql).
+  static const String userStorySettingsTable = 'user_story_settings';
   static const String categoriesTable = 'categories';
   static const String productsTable = 'products';
   static const String productLikesTable = 'product_likes';

@@ -48,6 +48,13 @@ Future<void> main() async {
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
   final chatStoryListStorage = ChatStoryListStorage(prefs);
+  if (supabaseOk) {
+    final sessionUid = Supabase.instance.client.auth.currentUser?.id;
+    chatListStorage.setActiveAccountId(sessionUid);
+    chatStoryListStorage.setActiveAccountId(sessionUid);
+    await chatListStorage.clearLegacyGlobalKeys();
+    await chatStoryListStorage.clearLegacyGlobalKeys();
+  }
   const secureStorage = FlutterSecureStorage();
   final multiAccountStorage = MultiAccountStorage(prefs, secureStorage);
   final accountRepository = AccountRepositoryImpl(prefs);
