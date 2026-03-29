@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../../../core/formatting/compact_count_format.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/app_loading.dart';
@@ -437,6 +438,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
               bio: m['bio'] as String?,
               followersCount: 0,
               followingCount: 0,
+              totalReceivedPostLikes: 0,
               isFollowingByMe: true,
               products: const [],
               isVerified: false,
@@ -598,30 +600,39 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                 ],
                 const SizedBox(height: 16),
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
-                      '${profile.followersCount} подписчиков',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: ThemedContentSurface.profileTextSecondary,
-                          ),
+                    Expanded(
+                      child: _SellerTikTokStat(
+                        value: '${profile.followersCount}',
+                        label: 'подписчиков',
+                      ),
                     ),
-                    const SizedBox(width: 24),
-                    Text(
-                      '${profile.followingCount} подписок',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: ThemedContentSurface.profileTextSecondary,
-                          ),
+                    Expanded(
+                      child: _SellerTikTokStat(
+                        value: '${profile.followingCount}',
+                        label: 'подписок',
+                      ),
                     ),
-                    const SizedBox(width: 24),
-                    Text(
-                      '${profile.products.length} товаров',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: ThemedContentSurface.profileTextSecondary,
-                          ),
+                    Expanded(
+                      child: _SellerTikTokStat(
+                        value: formatCompactCount(
+                          profile.totalReceivedPostLikes,
+                        ),
+                        label: 'лайки',
+                      ),
                     ),
                   ],
                 ),
+                if (profile.products.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    '${profile.products.length} товаров',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: ThemedContentSurface.profileTextSecondary,
+                        ),
+                  ),
+                ],
                 if (_commonFollowers.isNotEmpty) ...[
                   const SizedBox(height: 10),
                   InkWell(
@@ -1032,6 +1043,41 @@ class _ProfilePublicationsGrid extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _SellerTikTokStat extends StatelessWidget {
+  const _SellerTikTokStat({
+    required this.value,
+    required this.label,
+  });
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Text(
+          value,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: ThemedContentSurface.profileTextPrimary,
+              ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: ThemedContentSurface.profileTextSecondary,
+                fontWeight: FontWeight.w500,
+              ),
+        ),
+      ],
     );
   }
 }

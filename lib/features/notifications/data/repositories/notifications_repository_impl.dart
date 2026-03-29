@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/notification_entity.dart';
+import '../../domain/entities/top_user_rank_entity.dart';
 import '../../domain/entities/notification_unread_summary.dart';
 import '../../domain/repositories/notifications_repository.dart';
 import '../models/notification_model.dart';
@@ -157,5 +158,40 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
       totalUnread: totalUnread,
       previewAvatarUrls: avatarUrls,
     );
+  }
+
+  @override
+  Future<List<TopUserRankEntity>> getTopUsersByLikes({int limit = 20}) async {
+    dynamic res;
+    try {
+      res = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar, followers_count, total_received_post_likes')
+          .order('total_received_post_likes', ascending: false)
+          .order('followers_count', ascending: false)
+          .limit(limit);
+    } on PostgrestException catch (_) {
+      // Fallback for old schema without total_received_post_likes.
+      res = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar, followers_count')
+          .order('followers_count', ascending: false)
+          .limit(limit);
+    }
+    return (res as List)
+        .map((raw) {
+          final m = Map<String, dynamic>.from(raw as Map);
+          return TopUserRankEntity(
+            userId: (m['id'] as String?) ?? '',
+            name: (m['name'] as String?)?.trim().isNotEmpty == true
+                ? (m['name'] as String)
+                : 'Пользователь',
+            avatarUrl: m['avatar'] as String?,
+            followersCount: (m['followers_count'] as num?)?.toInt() ?? 0,
+            totalLikes: (m['total_received_post_likes'] as num?)?.toInt() ?? 0,
+          );
+        })
+        .where((e) => e.userId.isNotEmpty)
+        .toList(growable: false);
   }
 }

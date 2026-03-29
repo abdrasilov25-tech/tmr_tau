@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -295,10 +296,14 @@ class _MiniAvatarStack extends StatelessWidget {
                     width: size,
                     height: size,
                     fit: BoxFit.cover,
-                    memCacheWidth:
-                        (size * MediaQuery.devicePixelRatioOf(context)).round(),
-                    memCacheHeight:
-                        (size * MediaQuery.devicePixelRatioOf(context)).round(),
+                    memCacheWidth: math.max(
+                      1,
+                      (size * MediaQuery.devicePixelRatioOf(context)).round(),
+                    ),
+                    memCacheHeight: math.max(
+                      1,
+                      (size * MediaQuery.devicePixelRatioOf(context)).round(),
+                    ),
                     placeholder: (context, url) => ColoredBox(
                       color: Theme.of(context)
                           .colorScheme

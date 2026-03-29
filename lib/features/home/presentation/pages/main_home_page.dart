@@ -1103,24 +1103,33 @@ class _MainHomePageState extends State<MainHomePage> {
                     },
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-                    child: SegmentedButton<_FeedTab>(
-                      segments: const [
-                        ButtonSegment(
-                          value: _FeedTab.recommendations,
-                          label: Text('Рекомендации'),
+                    padding: const EdgeInsets.fromLTRB(6, 2, 4, 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: _PublicationFeedTabStrip(
+                              selected: _feedTab,
+                              onChanged: _onFeedTabChanged,
+                            ),
+                          ),
                         ),
-                        ButtonSegment(
-                          value: _FeedTab.subscriptions,
-                          label: Text('Подписки'),
+                        IconButton(
+                          tooltip: 'Поиск людей и видео',
+                          icon: Icon(
+                            Icons.search_rounded,
+                            size: 26,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withValues(alpha: 0.72),
+                          ),
+                          onPressed: () =>
+                              context.push('/discover-publications'),
                         ),
                       ],
-                      selected: {_feedTab},
-                      onSelectionChanged: (Set<_FeedTab> selection) {
-                        if (selection.isEmpty) return;
-                        _onFeedTabChanged(selection.first);
-                      },
-                      emptySelectionAllowed: false,
                     ),
                   ),
                   Expanded(
@@ -1155,6 +1164,96 @@ class _MainHomePageState extends State<MainHomePage> {
                   ),
                 ],
               ),
+      ),
+    );
+  }
+}
+
+/// Компактные подписи вкладок ленты — слева, без крупного SegmentedButton.
+class _PublicationFeedTabStrip extends StatelessWidget {
+  const _PublicationFeedTabStrip({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final _FeedTab selected;
+  final ValueChanged<_FeedTab> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final subtle = scheme.onSurface.withValues(alpha: 0.55);
+    return Wrap(
+      spacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        _PublicationFeedTabLabel(
+          label: 'Рекомендации',
+          selected: selected == _FeedTab.recommendations,
+          subtleColor: subtle,
+          scheme: scheme,
+          onTap: () => onChanged(_FeedTab.recommendations),
+        ),
+        Text('·', style: TextStyle(color: subtle, fontSize: 12)),
+        _PublicationFeedTabLabel(
+          label: 'Подписки',
+          selected: selected == _FeedTab.subscriptions,
+          subtleColor: subtle,
+          scheme: scheme,
+          onTap: () => onChanged(_FeedTab.subscriptions),
+        ),
+      ],
+    );
+  }
+}
+
+class _PublicationFeedTabLabel extends StatelessWidget {
+  const _PublicationFeedTabLabel({
+    required this.label,
+    required this.selected,
+    required this.subtleColor,
+    required this.scheme,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final Color subtleColor;
+  final ColorScheme scheme;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: selected ? scheme.onSurface : subtleColor,
+                letterSpacing: -0.1,
+              ),
+            ),
+            const SizedBox(height: 2),
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              height: 2,
+              width: selected ? 22 : 0,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(2),
+                color: selected ? scheme.primary.withValues(alpha: 0.85) : Colors.transparent,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

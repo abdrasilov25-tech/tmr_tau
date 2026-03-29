@@ -17,6 +17,7 @@ import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/formatting/compact_count_format.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
@@ -51,7 +52,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
   List<PostEntity> _newsPosts = [];
   List<PostEntity> _publicationPosts = [];
   List<PostEntity> _videoPosts = [];
-  List<PostEntity> _likedPosts = [];
   bool _loading = true;
   late int _tabIndex;
   bool _updatingAvatar = false;
@@ -64,11 +64,15 @@ class _MyProfilePageState extends State<MyProfilePage> {
   Map<String, bool> _newStoriesByUserId = const {};
   String _myStoryNote = '';
   StreamSubscription<String>? _deletedProductSub;
+  supa.RealtimeChannel? _totalLikesChannel;
 
   @override
   void initState() {
     super.initState();
-    _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 5);
+    var initialTab = widget.initialTabIndex ?? 2;
+    if (initialTab > 4) initialTab = 4;
+    if (initialTab < 0) initialTab = 0;
+    _tabIndex = initialTab;
     final authState = context.read<AuthBloc>().state;
     final uid = authState is AuthAuthenticated ? authState.user.id : null;
     final cache = _warmCache;
@@ -81,13 +85,19 @@ class _MyProfilePageState extends State<MyProfilePage> {
       _newsPosts = List<PostEntity>.from(cache.newsPosts);
       _publicationPosts = List<PostEntity>.from(cache.publicationPosts);
       _videoPosts = List<PostEntity>.from(cache.videoPosts);
-      _likedPosts = List<PostEntity>.from(cache.likedPosts);
       _storyGroups = List<StoryGroupEntity>.from(cache.storyGroups);
       _newStoriesByUserId = Map<String, bool>.from(cache.newStoriesByUserId);
       _myStoryNote = cache.myStoryNote;
       _loading = false;
     }
     _load(showLoading: !canUseCache);
+    if (canUseCache) {
+      final uidForLikes = uid;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_attachTotalLikesChannel(uidForLikes));
+      });
+    }
     unawaited(_loadHiddenPostIds());
     _deletedProductSub = deletedProductIdsStream.listen((_) {
       if (mounted) _load(showLoading: false);
@@ -97,7 +107,50 @@ class _MyProfilePageState extends State<MyProfilePage> {
   @override
   void dispose() {
     _deletedProductSub?.cancel();
+    unawaited(_detachTotalLikesChannel());
     super.dispose();
+  }
+
+  Future<void> _detachTotalLikesChannel() async {
+    final ch = _totalLikesChannel;
+    _totalLikesChannel = null;
+    if (ch != null) {
+      await supa.Supabase.instance.client.removeChannel(ch);
+    }
+  }
+
+  Future<void> _attachTotalLikesChannel(String uid) async {
+    await _detachTotalLikesChannel();
+    final ch =
+        supa.Supabase.instance.client.channel('profile_total_likes_$uid');
+    _totalLikesChannel = ch;
+    ch
+        .onPostgresChanges(
+          event: supa.PostgresChangeEvent.update,
+          schema: 'public',
+          table: SupabaseConstants.usersTable,
+          filter: supa.PostgresChangeFilter(
+            type: supa.PostgresChangeFilterType.eq,
+            column: 'id',
+            value: uid,
+          ),
+          callback: (payload) {
+            final raw = payload.newRecord['total_received_post_likes'];
+            if (raw == null) return;
+            final v = raw is int ? raw : (raw as num).toInt();
+            if (!mounted) return;
+            setState(() {
+              if (_profile != null) {
+                _profile = _profile!.copyWith(totalReceivedPostLikes: v);
+              }
+            });
+            final auth = context.read<AuthBloc>().state;
+            if (auth is AuthAuthenticated && auth.user.id == uid) {
+              _storeWarmCache(uid);
+            }
+          },
+        )
+        .subscribe();
   }
 
   Future<void> _changeAvatar() async {
@@ -194,7 +247,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
       newsPosts: List<PostEntity>.from(_newsPosts),
       publicationPosts: List<PostEntity>.from(_publicationPosts),
       videoPosts: List<PostEntity>.from(_videoPosts),
-      likedPosts: List<PostEntity>.from(_likedPosts),
       storyGroups: List<StoryGroupEntity>.from(_storyGroups),
       newStoriesByUserId: Map<String, bool>.from(_newStoriesByUserId),
       myStoryNote: _myStoryNote,
@@ -225,14 +277,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
       final postsFuture = postRepo
           .getPostsByUser(uid, currentUserId: uid)
           .timeout(const Duration(seconds: 12));
-      final likedPostsFuture =
-          postRepo.getLikedPublications(uid, limit: 100).timeout(
-                const Duration(seconds: 10),
-              );
       final profile = await profileFuture;
       if (!mounted || requestId != _loadRequestId) return;
       final posts = await postsFuture;
-      final likedPosts = await likedPostsFuture;
       if (!mounted || requestId != _loadRequestId) return;
       final newsPosts = posts
           .where((p) => p.kind.trim().toLowerCase() == 'news' && !_isVideoPost(p))
@@ -281,11 +328,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   isFollowingByMe: profile.isFollowingByMe,
                   products: profile.products,
                   isVerified: profile.isVerified,
+                  totalReceivedPostLikes: profile.totalReceivedPostLikes,
                 );
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
           _videoPosts = videoPosts;
-          _likedPosts = likedPosts;
           _myStoryNote = myStoryNote;
           _loading = false;
           if (publicationPosts.isNotEmpty) {
@@ -293,6 +340,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           }
         });
         _storeWarmCache(uid);
+        unawaited(_attachTotalLikesChannel(uid));
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -612,7 +660,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
             _newsPosts = [];
             _publicationPosts = [];
             _videoPosts = [];
-            _likedPosts = [];
             _storyGroups = [];
             _newStoriesByUserId = {};
             _myStoryNote = '';
@@ -650,8 +697,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           final visiblePublicationPosts =
               _publicationPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
           final visibleVideoPosts = _videoPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
-          final visibleLikedPosts = _likedPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
-          final privatePosts = [..._newsPosts, ..._publicationPosts, ..._videoPosts, ..._likedPosts]
+          final privatePosts = [..._newsPosts, ..._publicationPosts, ..._videoPosts]
               .where(_isPostHidden)
               .fold<Map<String, PostEntity>>(<String, PostEntity>{}, (acc, p) {
                 acc[p.id] = p;
@@ -666,7 +712,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
             newsPosts: visibleNewsPosts,
             publicationPosts: visiblePublicationPosts,
             videoPosts: visibleVideoPosts,
-            likedPosts: visibleLikedPosts,
             privatePosts: privatePosts,
             tabIndex: _tabIndex,
             onTabChanged: (i) => setState(() => _tabIndex = i),
@@ -1089,7 +1134,6 @@ class _ProfileContent extends StatelessWidget {
     required this.newsPosts,
     required this.publicationPosts,
     required this.videoPosts,
-    required this.likedPosts,
     required this.privatePosts,
     required this.tabIndex,
     required this.onTabChanged,
@@ -1113,7 +1157,6 @@ class _ProfileContent extends StatelessWidget {
   final List<PostEntity> newsPosts;
   final List<PostEntity> publicationPosts;
   final List<PostEntity> videoPosts;
-  final List<PostEntity> likedPosts;
   final List<PostEntity> privatePosts;
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
@@ -1434,6 +1477,16 @@ class _ProfileContent extends StatelessWidget {
                                 onTap: () => context.push('/following'),
                               ),
                             ),
+                            _statDivider(),
+                            Expanded(
+                              child: _StatItem(
+                                value: profile?.totalReceivedPostLikes ?? 0,
+                                displayValue: formatCompactCount(
+                                  profile?.totalReceivedPostLikes ?? 0,
+                                ),
+                                label: 'лайки',
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -1476,15 +1529,6 @@ class _ProfileContent extends StatelessWidget {
                                               onEmptyAction: onCreateVideo,
                                               onHidePost: onHidePost,
                                             )
-                                          : tabIndex == 4
-                                              ? _PostsGrid(
-                                                  posts: likedPosts,
-                                                  emptyTitle: 'Нет лайкнутых публикаций',
-                                                  emptyActionLabel:
-                                                      'Перейти к публикациям',
-                                                  onEmptyAction: onCreatePublication,
-                                                  onHidePost: onHidePost,
-                                                )
                                           : _PostsGrid(
                                               posts: privatePosts,
                                               emptyTitle: 'Нет приватных публикаций',
@@ -1582,20 +1626,10 @@ class _ProfileTabBar extends StatelessWidget {
           Expanded(
             child: _ProfileTabChip(
               selected: tabIndex == 4,
-              icon: Icons.favorite_border_rounded,
-              label: '',
-              compact: true,
-              onTap: () => onChanged(4),
-            ),
-          ),
-          const SizedBox(width: 3),
-          Expanded(
-            child: _ProfileTabChip(
-              selected: tabIndex == 5,
               icon: Icons.lock_outline_rounded,
               label: '',
               compact: true,
-              onTap: () => onChanged(5),
+              onTap: () => onChanged(4),
             ),
           ),
         ],
@@ -1697,10 +1731,12 @@ class _StatItem extends StatelessWidget {
   const _StatItem({
     required this.value,
     required this.label,
+    this.displayValue,
     this.onTap,
   });
 
   final int value;
+  final String? displayValue;
   final String label;
   final VoidCallback? onTap;
 
@@ -1709,7 +1745,7 @@ class _StatItem extends StatelessWidget {
     final content = Column(
       children: [
         Text(
-          '$value',
+          displayValue ?? '$value',
           style: const TextStyle(
             fontWeight: FontWeight.w700,
             fontSize: 18,
@@ -1941,7 +1977,6 @@ class _MyProfileWarmCache {
     required this.newsPosts,
     required this.publicationPosts,
     required this.videoPosts,
-    required this.likedPosts,
     required this.storyGroups,
     required this.newStoriesByUserId,
     required this.myStoryNote,
@@ -1953,7 +1988,6 @@ class _MyProfileWarmCache {
   final List<PostEntity> newsPosts;
   final List<PostEntity> publicationPosts;
   final List<PostEntity> videoPosts;
-  final List<PostEntity> likedPosts;
   final List<StoryGroupEntity> storyGroups;
   final Map<String, bool> newStoriesByUserId;
   final String myStoryNote;

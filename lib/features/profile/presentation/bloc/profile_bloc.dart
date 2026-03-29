@@ -47,6 +47,7 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
           ? current.profile.followersCount - 1
           : current.profile.followersCount + 1,
       followingCount: current.profile.followingCount,
+      totalReceivedPostLikes: current.profile.totalReceivedPostLikes,
       isFollowingByMe: !current.profile.isFollowingByMe,
       products: current.profile.products,
       isVerified: current.profile.isVerified,

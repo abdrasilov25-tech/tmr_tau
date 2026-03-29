@@ -1038,41 +1038,27 @@ class PostRepositoryImpl implements PostRepository {
     int limit = 10,
     DateTime? lastCreatedAt,
     String? currentUserId,
+    bool videoPublicationsOnly = false,
   }) async {
     final normalizedQuery = query.trim();
     final hasQuery = normalizedQuery.isNotEmpty;
     try {
-      final res = await (lastCreatedAt == null
-          ? (hasQuery
-              ? _client
-                  .from(SupabaseConstants.postsTable)
-                  .select('*, users!user_id(name, avatar)')
-                  .eq('kind', 'publication')
-                  .ilike('caption', '%$normalizedQuery%')
-                  .order('created_at', ascending: false)
-                  .limit(limit)
-              : _client
-                  .from(SupabaseConstants.postsTable)
-                  .select('*, users!user_id(name, avatar)')
-                  .eq('kind', 'publication')
-                  .order('created_at', ascending: false)
-                  .limit(limit))
-          : (hasQuery
-              ? _client
-                  .from(SupabaseConstants.postsTable)
-                  .select('*, users!user_id(name, avatar)')
-                  .eq('kind', 'publication')
-                  .ilike('caption', '%$normalizedQuery%')
-                  .lt('created_at', lastCreatedAt.toIso8601String())
-                  .order('created_at', ascending: false)
-                  .limit(limit)
-              : _client
-                  .from(SupabaseConstants.postsTable)
-                  .select('*, users!user_id(name, avatar)')
-                  .eq('kind', 'publication')
-                  .lt('created_at', lastCreatedAt.toIso8601String())
-                  .order('created_at', ascending: false)
-                  .limit(limit)));
+      dynamic qb = _client
+          .from(SupabaseConstants.postsTable)
+          .select('*, users!user_id(name, avatar)')
+          .eq('kind', 'publication');
+      if (videoPublicationsOnly) {
+        qb = qb.not('video_url', 'is', null).neq('video_url', '');
+      }
+      if (hasQuery) {
+        qb = qb.ilike('caption', '%$normalizedQuery%');
+      }
+      if (lastCreatedAt != null) {
+        qb = qb.lt('created_at', lastCreatedAt.toIso8601String());
+      }
+      final res = await qb
+          .order('created_at', ascending: false)
+          .limit(limit);
 
       final list = (res as List)
           .map((e) => _mapPost(e as Map<String, dynamic>))

@@ -1,15 +1,20 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/formatting/compact_count_format.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../comments/domain/repositories/comments_repository.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../product/domain/repositories/product_repository.dart';
 import '../../domain/entities/notification_entity.dart';
+import '../../domain/entities/top_user_rank_entity.dart';
 import '../../domain/repositories/notifications_repository.dart';
 import '../notification_activity_peek_bus.dart';
 
@@ -35,6 +40,9 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   bool _markingAll = false;
   String? _error;
   List<NotificationEntity> _items = const [];
+  List<TopUserRankEntity> _topUsers = const [];
+  supa.RealtimeChannel? _topUsersChannel;
+  Timer? _topUsersRefreshDebounce;
 
   static const _groupableTypes = {
     'post_like',
@@ -47,7 +55,55 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   @override
   void initState() {
     super.initState();
+    _attachTopUsersRealtime();
     _load();
+  }
+
+  @override
+  void dispose() {
+    _topUsersRefreshDebounce?.cancel();
+    _detachTopUsersRealtime();
+    super.dispose();
+  }
+
+  void _attachTopUsersRealtime() {
+    _detachTopUsersRealtime();
+    final ch = supa.Supabase.instance.client.channel('top_users_realtime');
+    _topUsersChannel = ch;
+    ch
+        .onPostgresChanges(
+          event: supa.PostgresChangeEvent.update,
+          schema: 'public',
+          table: 'users',
+          callback: (_) => _scheduleTopUsersRefresh(),
+        )
+        .subscribe();
+  }
+
+  void _detachTopUsersRealtime() {
+    final ch = _topUsersChannel;
+    _topUsersChannel = null;
+    if (ch != null) {
+      supa.Supabase.instance.client.removeChannel(ch);
+    }
+  }
+
+  void _scheduleTopUsersRefresh() {
+    _topUsersRefreshDebounce?.cancel();
+    _topUsersRefreshDebounce = Timer(const Duration(milliseconds: 450), () {
+      if (!mounted) return;
+      _loadTopUsersOnly();
+    });
+  }
+
+  Future<void> _loadTopUsersOnly() async {
+    try {
+      final top = await context.read<NotificationsRepository>().getTopUsersByLikes(limit: 12);
+      if (!mounted) return;
+      setState(() => _topUsers = top);
+    } catch (_) {
+      // Не ломаем экран уведомлений, если realtime-подгрузка не удалась.
+    }
   }
 
   Future<void> _load() async {
@@ -67,9 +123,11 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     try {
       final repo = context.read<NotificationsRepository>();
       final list = await repo.getNotifications(userId);
+      final top = await repo.getTopUsersByLikes(limit: 12);
       if (!mounted) return;
       setState(() {
         _items = list;
+        _topUsers = top;
         _loading = false;
       });
       final hadUnread = list.any((n) => !n.isRead);
@@ -344,7 +402,13 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
                       child: ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.only(bottom: 24),
-                        children: _buildGroupedList(context),
+                        children: [
+                          if (_topUsers.isNotEmpty) ...[
+                            _TopUsersByLikesCard(users: _topUsers),
+                            const SizedBox(height: 4),
+                          ],
+                          ..._buildGroupedList(context),
+                        ],
                       ),
                     ),
     );
@@ -530,6 +594,186 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     if (body == null || body.isEmpty) return null;
     final match = RegExp(r'\[post:([a-fA-F0-9\-]{36})\]').firstMatch(body);
     return match?.group(1);
+  }
+}
+
+class _TopUsersByLikesCard extends StatelessWidget {
+  const _TopUsersByLikesCard({required this.users});
+
+  final List<TopUserRankEntity> users;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 6),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF232A3B),
+              Color(0xFF1B1E2B),
+            ],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 24,
+              offset: const Offset(0, 10),
+              spreadRadius: -8,
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.emoji_events_rounded, color: Color(0xFFFFC400)),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Топ пользователей',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Рейтинг по лайкам публикаций',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.75),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                height: 128,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  clipBehavior: Clip.none,
+                  itemCount: users.length,
+                  separatorBuilder: (context, index) => const SizedBox(width: 10),
+                  itemBuilder: (context, index) {
+                    final u = users[index];
+                    return _TopUserTile(
+                      rank: index + 1,
+                      user: u,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopUserTile extends StatelessWidget {
+  const _TopUserTile({
+    required this.rank,
+    required this.user,
+  });
+
+  final int rank;
+  final TopUserRankEntity user;
+
+  Color _rankColor(int r) {
+    if (r == 1) return const Color(0xFFFFD54F);
+    if (r == 2) return const Color(0xFFCFD8DC);
+    if (r == 3) return const Color(0xFFFFB74D);
+    return Colors.white.withValues(alpha: 0.85);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          final auth = context.read<AuthBloc>().state;
+          final myId = auth is AuthAuthenticated ? auth.user.id : null;
+          if (myId != null && myId == user.userId) {
+            context.push('/home/profile');
+            return;
+          }
+          context.push('/profile/${user.userId}');
+        },
+        child: Ink(
+          width: 92,
+          height: 128,
+          padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: Colors.white.withValues(alpha: 0.07),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.center,
+            child: SizedBox(
+              width: 76,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '#$rank',
+                    style: TextStyle(
+                      color: _rankColor(rank),
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                      height: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  CachedAvatar(
+                    imageUrl: user.avatarUrl,
+                    radius: 16,
+                    fallbackText: user.name,
+                    enableLightboxOnTap: false,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    user.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      height: 1.15,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${formatCompactCount(user.totalLikes)} лайков',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.78),
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w500,
+                      height: 1.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

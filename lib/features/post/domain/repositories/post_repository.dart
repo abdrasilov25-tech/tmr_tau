@@ -81,6 +81,8 @@ abstract class PostRepository {
     int limit = 10,
     DateTime? lastCreatedAt,
     String? currentUserId,
+    /// Только публикации с видео (режим «как в TikTok»).
+    bool videoPublicationsOnly = false,
   });
   Future<PostEntity?> getPostById(String postId, {String? currentUserId});
   Future<void> updatePost({

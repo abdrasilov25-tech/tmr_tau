@@ -8,17 +8,54 @@ class ProfileRepositoryImpl implements ProfileRepository {
   ProfileRepositoryImpl(this._client);
   final SupabaseClient _client;
 
+  Future<int> _sumLikesFromPosts(String userId) async {
+    try {
+      final res = await _client
+          .from(SupabaseConstants.postsTable)
+          .select('likes_count')
+          .eq('user_id', userId);
+      var sum = 0;
+      for (final e in res as List) {
+        final m = Map<String, dynamic>.from(e as Map);
+        sum += (m['likes_count'] as int? ?? 0);
+      }
+      return sum;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   @override
   Future<SellerProfileEntity?> getSellerProfile(String sellerId,
       {String? currentUserId}) async {
-    // Явный список колонок — совместимость со старой схемой без following_count, is_verified
-    final userRes = await _client
-        .from(SupabaseConstants.usersTable)
-        .select('id, name, avatar, bio, followers_count')
-        .eq('id', sellerId)
-        .maybeSingle();
-    if (userRes == null) return null;
-    final userMap = Map<String, dynamic>.from(userRes as Map);
+    late final Map<String, dynamic> userMap;
+    var totalReceivedPostLikes = 0;
+    try {
+      final userRes = await _client
+          .from(SupabaseConstants.usersTable)
+          .select(
+            'id, name, avatar, bio, followers_count, is_verified, total_received_post_likes',
+          )
+          .eq('id', sellerId)
+          .maybeSingle();
+      if (userRes == null) return null;
+      userMap = Map<String, dynamic>.from(userRes as Map);
+      final v = userMap['total_received_post_likes'];
+      if (v is int) {
+        totalReceivedPostLikes = v;
+      } else if (v is num) {
+        totalReceivedPostLikes = v.toInt();
+      }
+    } on PostgrestException catch (_) {
+      final userRes = await _client
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar, bio, followers_count, is_verified')
+          .eq('id', sellerId)
+          .maybeSingle();
+      if (userRes == null) return null;
+      userMap = Map<String, dynamic>.from(userRes as Map);
+      totalReceivedPostLikes = await _sumLikesFromPosts(sellerId);
+    }
 
     // Считаем количество подписчиков и подписок на основе таблицы followers,
     // чтобы цифры всегда были актуальными.
@@ -57,6 +94,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       bio: userMap['bio'] as String?,
       followersCount: followersCount,
       followingCount: followingCount,
+      totalReceivedPostLikes: totalReceivedPostLikes,
       isFollowingByMe: isFollowingByMe,
       products: products,
       isVerified: userMap['is_verified'] as bool? ?? false,
@@ -81,6 +119,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           bio: m['bio'] as String?,
           followersCount: m['followers_count'] as int? ?? 0,
           followingCount: m['following_count'] as int? ?? 0,
+          totalReceivedPostLikes: 0,
           isFollowingByMe: false,
           products: const [],
           isVerified: true,
@@ -103,8 +142,11 @@ class ProfileRepositoryImpl implements ProfileRepository {
       // Поиск по имени и по bio (как в Instagram). is_verified может отсутствовать в БД.
       final res = await _client
           .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio')
-          .or('name.ilike.%$safe%,bio.ilike.%$safe%')
+          .select('id, name, avatar, bio, followers_count')
+          .or(
+            'name.ilike.%$safe%,bio.ilike.%$safe%,telegram_username.ilike.%$safe%',
+          )
+          .order('followers_count', ascending: false)
           .limit(limit);
       final list = res as List;
       return list.map((e) {
@@ -115,8 +157,9 @@ class ProfileRepositoryImpl implements ProfileRepository {
           name: name != null ? name.toString() : 'Пользователь',
           avatarUrl: (m['avatar'] ?? m['Avatar']) as String?,
           bio: (m['bio'] ?? m['Bio']) as String?,
-          followersCount: 0,
+          followersCount: m['followers_count'] as int? ?? 0,
           followingCount: 0,
+          totalReceivedPostLikes: 0,
           isFollowingByMe: false,
           products: const [],
           isVerified: (m['is_verified'] ?? m['isVerified']) as bool? ?? false,
@@ -162,6 +205,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           bio: m['bio'] as String?,
           followersCount: m['followers_count'] as int? ?? 0,
           followingCount: 0,
+          totalReceivedPostLikes: 0,
           isFollowingByMe: true,
           products: const [],
           isVerified: false,
@@ -211,6 +255,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           bio: m['bio'] as String?,
           followersCount: m['followers_count'] as int? ?? 0,
           followingCount: 0,
+          totalReceivedPostLikes: 0,
           isFollowingByMe: myFollowingIds.contains(id),
           products: const [],
           isVerified: false,

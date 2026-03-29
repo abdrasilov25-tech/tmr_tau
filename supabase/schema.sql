@@ -25,6 +25,7 @@ alter table public.users add column if not exists city text default '';
 alter table public.users add column if not exists instagram_url text default '';
 alter table public.users add column if not exists telegram_username text default '';
 alter table public.users add column if not exists website_url text default '';
+alter table public.users add column if not exists total_received_post_likes int not null default 0;
 -- Backfill missing rows in public.users from auth.users (safe on repeated runs).
 insert into public.users (id, name)
 select au.id, coalesce(nullif(au.email, ''), 'Пользователь')
@@ -615,6 +616,41 @@ drop trigger if exists on_post_like on public.post_likes;
 create trigger on_post_like after insert or delete on public.post_likes for each row execute procedure public.update_post_likes_count();
 drop trigger if exists on_post_comment on public.post_comments;
 create trigger on_post_comment after insert or delete on public.post_comments for each row execute procedure public.update_post_comments_count();
+
+create or replace function public.apply_post_like_delta_to_author()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  author_id uuid;
+begin
+  if tg_op = 'INSERT' then
+    select user_id into author_id from public.posts where id = new.post_id;
+    if author_id is not null then
+      update public.users
+      set total_received_post_likes = total_received_post_likes + 1
+      where id = author_id;
+    end if;
+    return new;
+  elsif tg_op = 'DELETE' then
+    select user_id into author_id from public.posts where id = old.post_id;
+    if author_id is not null then
+      update public.users
+      set total_received_post_likes = greatest(0, total_received_post_likes - 1)
+      where id = author_id;
+    end if;
+    return old;
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists trg_post_like_total_received on public.post_likes;
+create trigger trg_post_like_total_received
+  after insert or delete on public.post_likes
+  for each row execute procedure public.apply_post_like_delta_to_author();
 
 -- ============== Create profile on signup ==============
 create or replace function public.handle_new_user()

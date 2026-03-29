@@ -9,6 +9,8 @@ class SellerProfileEntity extends Equatable {
     this.bio,
     this.followersCount = 0,
     this.followingCount = 0,
+    /// Сумма лайков по всем публикациям пользователя (как «Лайки» в TikTok).
+    this.totalReceivedPostLikes = 0,
     this.isFollowingByMe = false,
     this.products = const [],
     this.isVerified = false,
@@ -20,11 +22,49 @@ class SellerProfileEntity extends Equatable {
   final String? bio;
   final int followersCount;
   final int followingCount;
+  final int totalReceivedPostLikes;
   final bool isFollowingByMe;
   final List<ProductEntity> products;
   final bool isVerified;
 
+  SellerProfileEntity copyWith({
+    String? id,
+    String? name,
+    String? avatarUrl,
+    String? bio,
+    int? followersCount,
+    int? followingCount,
+    int? totalReceivedPostLikes,
+    bool? isFollowingByMe,
+    List<ProductEntity>? products,
+    bool? isVerified,
+  }) {
+    return SellerProfileEntity(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      bio: bio ?? this.bio,
+      followersCount: followersCount ?? this.followersCount,
+      followingCount: followingCount ?? this.followingCount,
+      totalReceivedPostLikes:
+          totalReceivedPostLikes ?? this.totalReceivedPostLikes,
+      isFollowingByMe: isFollowingByMe ?? this.isFollowingByMe,
+      products: products ?? this.products,
+      isVerified: isVerified ?? this.isVerified,
+    );
+  }
+
   @override
-  List<Object?> get props =>
-      [id, name, avatarUrl, bio, followersCount, followingCount, isFollowingByMe, isVerified];
+  List<Object?> get props => [
+        id,
+        name,
+        avatarUrl,
+        bio,
+        followersCount,
+        followingCount,
+        totalReceivedPostLikes,
+        isFollowingByMe,
+        products,
+        isVerified,
+      ];
 }

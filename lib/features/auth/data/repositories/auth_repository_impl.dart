@@ -115,11 +115,12 @@ class AuthRepositoryImpl implements AuthRepository {
     if (webClientId.isNotEmpty) {
       queryParams['client_id'] = webClientId;
     }
-    await _client.auth.signInWithOAuth(
+    final launched = await _client.auth.signInWithOAuth(
       OAuthProvider.google,
       redirectTo: OAuthEnvConfig.redirectTo,
       queryParams: queryParams,
     );
+    if (!launched) return;
     final authUser = await _waitForOAuthUser();
     final uid = authUser?.id;
     if (uid == null) return;
@@ -142,10 +143,11 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<void> signInWithApple() async {
-    await _client.auth.signInWithOAuth(
+    final launched = await _client.auth.signInWithOAuth(
       OAuthProvider.apple,
       redirectTo: OAuthEnvConfig.redirectTo,
     );
+    if (!launched) return;
     final authUser = await _waitForOAuthUser();
     final uid = authUser?.id;
     if (uid == null) return;
@@ -234,7 +236,7 @@ class AuthRepositoryImpl implements AuthRepository {
     await _dataSource.signOut();
   }
 
-  Future<User?> _waitForOAuthUser({Duration timeout = const Duration(seconds: 90)}) async {
+  Future<User?> _waitForOAuthUser({Duration timeout = const Duration(seconds: 20)}) async {
     final existing = _client.auth.currentUser;
     if (existing != null) return existing;
 

@@ -42,6 +42,7 @@ import '../../features/chat/presentation/pages/channel_page.dart';
 import '../../features/chat/presentation/pages/group_chat_info_page.dart';
 import '../../features/orders/presentation/pages/orders_page.dart';
 import '../../features/home/presentation/pages/main_home_page.dart';
+import '../../features/home/presentation/pages/publication_discover_search_page.dart';
 import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
 import '../../features/stories/presentation/pages/add_story_page.dart';
@@ -321,6 +322,10 @@ class AppRouter {
       GoRoute(
         path: '/home-main',
         builder: (context, state) => const MainHomePage(),
+      ),
+      GoRoute(
+        path: '/discover-publications',
+        builder: (context, state) => const PublicationDiscoverSearchPage(),
       ),
       GoRoute(
         path: '/chat/:peerId',

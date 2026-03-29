@@ -72,7 +72,6 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   Future<void> _onSignInWithGoogleRequested(AuthSignInWithGoogleRequested event, Emitter<AuthState> emit) async {
-    emit(AuthLoading());
     try {
       await _authRepository.signInWithGoogle();
       final user = _authRepository.currentUser;
@@ -86,9 +85,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
             avatarUrl: user.avatarUrl,
           ),
         );
+        if (!isClosed) emit(AuthAuthenticated(user));
       }
-      if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
+      if (_isOAuthCancelled(e)) {
+        if (!isClosed) emit(AuthUnauthenticated());
+        return;
+      }
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
     }
   }
@@ -97,7 +100,6 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     AuthSignInWithAppleRequested event,
     Emitter<AuthState> emit,
   ) async {
-    emit(AuthLoading());
     try {
       await _authRepository.signInWithApple();
       final user = _authRepository.currentUser;
@@ -111,9 +113,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
             avatarUrl: user.avatarUrl,
           ),
         );
+        if (!isClosed) emit(AuthAuthenticated(user));
       }
-      if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
     } catch (e) {
+      if (_isOAuthCancelled(e)) {
+        if (!isClosed) emit(AuthUnauthenticated());
+        return;
+      }
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
     }
   }
@@ -190,6 +196,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       return 'Нет аккаунта с таким email. Зарегистрируйтесь.';
     }
     return e.toString();
+  }
+
+  static bool _isOAuthCancelled(Object e) {
+    final s = e.toString().toLowerCase();
+    return s.contains('cancel') ||
+        s.contains('canceled') ||
+        s.contains('cancelled') ||
+        s.contains('aborted') ||
+        s.contains('access_denied');
   }
 
   Future<void> _onSignOutRequested(AuthSignOutRequested event, Emitter<AuthState> emit) async {

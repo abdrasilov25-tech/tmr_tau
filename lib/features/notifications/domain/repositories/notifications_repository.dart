@@ -1,4 +1,5 @@
 import '../entities/notification_entity.dart';
+import '../entities/top_user_rank_entity.dart';
 import '../entities/notification_unread_summary.dart';
 
 abstract class NotificationsRepository {
@@ -10,4 +11,6 @@ abstract class NotificationsRepository {
   Future<int> getUnreadCount(String userId);
   /// Непрочитанные: счётчики по типам и превью аватаров (все непрочитанные из выборки).
   Future<NotificationUnreadSummary> getUnreadSummary(String userId);
+  /// Топ пользователей по суммарным лайкам публикаций.
+  Future<List<TopUserRankEntity>> getTopUsersByLikes({int limit = 20});
 }

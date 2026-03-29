@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
@@ -37,7 +39,8 @@ class CachedAvatar extends StatelessWidget {
     // поэтому принудительная очистка кэша на каждом build не требуется.
     final url = rawUrl;
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final px = (radius * 2 * dpr).round();
+    // CachedNetworkImage требует memCache* > 0; при нулевом радиусе/DPR избегаем падения.
+    final px = math.max(1, (radius * 2 * dpr).round());
     final avatar = CircleAvatar(
       radius: radius,
       backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,

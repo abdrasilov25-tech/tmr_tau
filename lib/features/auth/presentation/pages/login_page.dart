@@ -49,6 +49,8 @@ class _LoginPageState extends State<LoginPage>
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
   bool _lampOn = false;
+  bool _googleInProgress = false;
+  bool _appleInProgress = false;
   bool _authHandled = false;
   List<AccountModel> _quickAccounts = const [];
   late AnimationController _scaleController;
@@ -177,6 +179,14 @@ class _LoginPageState extends State<LoginPage>
   Widget _buildScrollContent() {
     return BlocConsumer<AuthBloc, AuthState>(
       listener: (context, state) {
+        if (state is! AuthLoading) {
+          if (_googleInProgress || _appleInProgress) {
+            setState(() {
+              _googleInProgress = false;
+              _appleInProgress = false;
+            });
+          }
+        }
         if (state is AuthAuthenticated) {
           if (_authHandled) return;
           _authHandled = true;
@@ -239,6 +249,9 @@ class _LoginPageState extends State<LoginPage>
       },
       builder: (context, state) {
         final loading = state is AuthLoading;
+        final oauthLoading = _googleInProgress || _appleInProgress;
+        final googleLoading = _googleInProgress;
+        final appleLoading = _appleInProgress;
         final appleAvailable = !kIsWeb &&
             (defaultTargetPlatform == TargetPlatform.iOS ||
                 defaultTargetPlatform == TargetPlatform.macOS);
@@ -335,7 +348,7 @@ class _LoginPageState extends State<LoginPage>
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
-                    onPressed: loading
+                    onPressed: loading || oauthLoading
                         ? null
                         : () {
                             final email = _emailController.text.trim();
@@ -366,32 +379,52 @@ class _LoginPageState extends State<LoginPage>
                   onTapDown: () => _scaleController.forward(),
                   onTapUp: () => _scaleController.reverse(),
                   onTapCancel: () => _scaleController.reverse(),
-                  onPressed: loading ? null : _submit,
+                  onPressed: loading || oauthLoading ? null : _submit,
                   loading: loading,
                 ),
                 if (appleAvailable) ...[
                   const SizedBox(height: 12),
                   FilledButton.tonal(
-                    onPressed: loading
+                    onPressed: loading || oauthLoading
                         ? null
                         : () {
+                            setState(() {
+                              _appleInProgress = true;
+                              _googleInProgress = false;
+                            });
                             context
                                 .read<AuthBloc>()
                                 .add(const AuthSignInWithAppleRequested());
                           },
-                    child: const Text('Продолжить с Apple'),
+                    child: appleLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Продолжить с Apple'),
                   ),
                 ],
                 const SizedBox(height: 12),
                 FilledButton.tonal(
-                  onPressed: loading
+                  onPressed: loading || oauthLoading
                       ? null
                       : () {
+                          setState(() {
+                            _googleInProgress = true;
+                            _appleInProgress = false;
+                          });
                           context
                               .read<AuthBloc>()
                               .add(const AuthSignInWithGoogleRequested());
                         },
-                  child: const Text('Продолжить с Google'),
+                  child: googleLoading
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Продолжить с Google'),
                 ),
                 const SizedBox(height: 12),
                 TextButton(
