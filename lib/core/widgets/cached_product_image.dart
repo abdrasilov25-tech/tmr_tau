@@ -12,8 +12,6 @@ class CachedProductImage extends StatelessWidget {
     /// Ограничение декодирования в пикселях (для ленты — ширина экрана × DPR).
     this.memCacheWidth,
     this.memCacheHeight,
-    /// В ленте не крутим индикатор на каждой карточке — только плейсхолдер.
-    this.compactPlaceholder = false,
   });
 
   final String imageUrl;
@@ -23,7 +21,6 @@ class CachedProductImage extends StatelessWidget {
   final BorderRadius? borderRadius;
   final int? memCacheWidth;
   final int? memCacheHeight;
-  final bool compactPlaceholder;
 
   @override
   Widget build(BuildContext context) {
@@ -43,11 +40,10 @@ class CachedProductImage extends StatelessWidget {
             fit: fit,
             memCacheWidth: memCacheWidth,
             memCacheHeight: memCacheHeight,
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
             placeholder: (context, url) => Container(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: compactPlaceholder
-                  ? const SizedBox.expand()
-                  : const Center(child: CircularProgressIndicator()),
             ),
             errorWidget: (context, url, error) => Container(
               color: Theme.of(context).colorScheme.surfaceContainerHighest,

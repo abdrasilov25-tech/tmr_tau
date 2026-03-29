@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/post_entity.dart';
 import '../../domain/repositories/post_repository.dart';
+import '../widgets/post_grid_engagement_overlay.dart';
 
 class SavedPublicationsPage extends StatefulWidget {
   const SavedPublicationsPage({super.key});
@@ -63,54 +65,85 @@ class _SavedPublicationsPageState extends State<SavedPublicationsPage> {
                 )
               : RefreshIndicator(
                   onRefresh: _load,
-                  child: GridView.builder(
-                    padding: const EdgeInsets.all(8),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 3,
-                      childAspectRatio: 0.85,
-                      crossAxisSpacing: 4,
-                      mainAxisSpacing: 4,
-                    ),
-                    itemCount: _posts.length,
-                    itemBuilder: (context, index) {
-                      final p = _posts[index];
-                      final hasVideo = p.videoUrl != null && p.videoUrl!.isNotEmpty;
-                      return GestureDetector(
-                        onTap: () => context.push('/post/${p.id}', extra: p),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            if (p.imageUrl.isNotEmpty)
-                              Image.network(
-                                p.imageUrl,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, error, stackTrace) => Container(
-                                  color: Colors.grey.shade200,
-                                  child: const Icon(Icons.broken_image_outlined),
-                                ),
-                              )
-                            else
-                              Container(
-                                color: Colors.grey.shade300,
-                                child: Icon(
-                                  hasVideo
-                                      ? Icons.videocam_rounded
-                                      : Icons.article_outlined,
-                                  color: Colors.white70,
-                                  size: 30,
-                                ),
-                              ),
-                            if (hasVideo)
-                              const Align(
-                                alignment: Alignment.center,
-                                child: Icon(
-                                  Icons.play_circle_fill_rounded,
-                                  color: Colors.white70,
-                                  size: 34,
-                                ),
-                              ),
-                          ],
+                  child: Builder(
+                    builder: (context) {
+                      final dpr = MediaQuery.devicePixelRatioOf(context);
+                      final gridThumbPx = (MediaQuery.sizeOf(context).width /
+                              3 *
+                              dpr)
+                          .round()
+                          .clamp(64, 2048);
+                      return GridView.builder(
+                        padding: const EdgeInsets.all(8),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          childAspectRatio: 0.85,
+                          crossAxisSpacing: 4,
+                          mainAxisSpacing: 4,
                         ),
+                        itemCount: _posts.length,
+                        itemBuilder: (context, index) {
+                          final p = _posts[index];
+                          final hasVideo =
+                              PostGridEngagementOverlay.isProbablyVideoPost(p);
+                          late final Widget media;
+                          if (p.imageUrl.isNotEmpty) {
+                            media = CachedNetworkImage(
+                              imageUrl: p.imageUrl,
+                              fit: BoxFit.cover,
+                              memCacheWidth: gridThumbPx,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              placeholder: (_, __) =>
+                                  ColoredBox(color: Colors.grey.shade200),
+                              errorWidget: (_, __, ___) => Container(
+                                color: Colors.grey.shade200,
+                                child:
+                                    const Icon(Icons.broken_image_outlined),
+                              ),
+                            );
+                          } else {
+                            media = ColoredBox(
+                              color: Colors.grey.shade300,
+                              child: Icon(
+                                hasVideo
+                                    ? Icons.videocam_rounded
+                                    : Icons.article_outlined,
+                                color: Colors.white70,
+                                size: 30,
+                              ),
+                            );
+                          }
+                          return GestureDetector(
+                            onTap: () =>
+                                context.push('/post/${p.id}', extra: p),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Positioned.fill(child: media),
+                                if (hasVideo && p.imageUrl.isNotEmpty)
+                                  const Align(
+                                    alignment: Alignment.center,
+                                    child: Icon(
+                                      Icons.play_circle_fill_rounded,
+                                      color: Colors.white70,
+                                      size: 34,
+                                    ),
+                                  ),
+                                Positioned(
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  child: PostGridEngagementOverlay(
+                                    post: p,
+                                    showViewCount: hasVideo,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
                       );
                     },
                   ),

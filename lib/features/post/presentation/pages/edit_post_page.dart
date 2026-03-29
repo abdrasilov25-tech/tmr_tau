@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -374,12 +375,17 @@ class _EditPostPageState extends State<EditPostPage> {
                                 height: double.infinity,
                                 fit: BoxFit.cover,
                               )
-                            : Image.network(
-                                widget.post.imageUrl,
+                            : CachedNetworkImage(
+                                imageUrl: widget.post.imageUrl,
                                 width: double.infinity,
                                 height: double.infinity,
                                 fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) => Container(
+                                fadeInDuration: Duration.zero,
+                                fadeOutDuration: Duration.zero,
+                                placeholder: (_, __) =>
+                                    ColoredBox(color: Colors.grey.shade100),
+                                errorWidget: (context, error, stackTrace) =>
+                                    Container(
                                   color: Colors.grey.shade200,
                                   child: const Icon(
                                     Icons.broken_image_outlined,

@@ -14,6 +14,7 @@ class PostEntity extends Equatable {
     this.likesCount = 0,
     this.dislikesCount = 0,
     this.commentsCount = 0,
+    this.viewsCount = 0,
     this.repostsCount = 0,
     this.userName,
     this.userAvatarUrl,
@@ -36,6 +37,8 @@ class PostEntity extends Equatable {
   final int likesCount;
   final int dislikesCount;
   final int commentsCount;
+  /// Просмотры видео/публикации (denormalized из impressions).
+  final int viewsCount;
   final int repostsCount;
   final String? userName;
   final String? userAvatarUrl;
@@ -66,6 +69,7 @@ class PostEntity extends Equatable {
     int? likesCount,
     int? dislikesCount,
     int? commentsCount,
+    int? viewsCount,
     int? repostsCount,
     String? userName,
     String? userAvatarUrl,
@@ -87,6 +91,7 @@ class PostEntity extends Equatable {
       likesCount: likesCount ?? this.likesCount,
       dislikesCount: dislikesCount ?? this.dislikesCount,
       commentsCount: commentsCount ?? this.commentsCount,
+      viewsCount: viewsCount ?? this.viewsCount,
       repostsCount: repostsCount ?? this.repostsCount,
       userName: userName ?? this.userName,
       userAvatarUrl: userAvatarUrl ?? this.userAvatarUrl,
@@ -111,6 +116,7 @@ class PostEntity extends Equatable {
         likesCount,
         dislikesCount,
         commentsCount,
+        viewsCount,
         repostsCount,
         userName,
         userAvatarUrl,

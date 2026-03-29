@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:tmr_tau/core/media/cached_video_controller.dart';
 import 'package:video_player/video_player.dart';
 
 /// Управляемый видеоплеер для ленты публикаций.
@@ -47,7 +50,7 @@ class FeedVideoPlayer extends StatefulWidget {
 }
 
 class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
-  late VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   bool _initialized = false;
   bool _error = false;
   bool _showPlayIcon = false;
@@ -55,23 +58,22 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   @override
   void initState() {
     super.initState();
-    _initController();
+    unawaited(_initController());
   }
 
   Future<void> _initController() async {
-    _controller = VideoPlayerController.networkUrl(
-      Uri.parse(widget.videoUrl),
-    );
-
     try {
-      await _controller.initialize();
-      _controller.setLooping(widget.looping);
-      _controller.setVolume(0); // muted по умолчанию как в Instagram
-
-      if (mounted) {
-        setState(() => _initialized = true);
-        if (widget.isActive) _controller.play();
+      final controller = await createCachedVideoController(widget.videoUrl);
+      await controller.initialize();
+      controller.setLooping(widget.looping);
+      controller.setVolume(0);
+      if (!mounted) {
+        await controller.dispose();
+        return;
       }
+      _controller = controller;
+      setState(() => _initialized = true);
+      if (widget.isActive) controller.play();
     } catch (_) {
       if (mounted) setState(() => _error = true);
     }
@@ -80,56 +82,57 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   @override
   void didUpdateWidget(FeedVideoPlayer old) {
     super.didUpdateWidget(old);
-    if (!_initialized) return;
-
-    // Авто-play/pause при смене активной страницы
-    if (widget.isActive != old.isActive) {
-      if (widget.isActive) {
-        _controller.play();
-      } else {
-        _controller.pause();
-        // Сбрасываем позицию для «свежего» просмотра при возврате
-        _controller.seekTo(Duration.zero);
-      }
-    }
-
-    // Видео сменилось (нужно пересоздать контроллер)
     if (widget.videoUrl != old.videoUrl) {
-      _controller.dispose();
+      _controller?.dispose();
+      _controller = null;
       setState(() {
         _initialized = false;
         _error = false;
       });
-      _initController();
+      unawaited(_initController());
+      return;
+    }
+    if (!_initialized) return;
+    final c = _controller;
+    if (c == null) return;
+
+    if (widget.isActive != old.isActive) {
+      if (widget.isActive) {
+        c.play();
+      } else {
+        c.pause();
+        c.seekTo(Duration.zero);
+      }
     }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _controller?.dispose();
     super.dispose();
   }
 
   void _toggleMute() {
-    if (!_initialized) return;
-    final isMuted = _controller.value.volume == 0;
-    _controller.setVolume(isMuted ? 1.0 : 0);
+    final c = _controller;
+    if (!_initialized || c == null) return;
+    final isMuted = c.value.volume == 0;
+    c.setVolume(isMuted ? 1.0 : 0);
     setState(() {});
   }
 
   void _togglePlay() {
-    if (!_initialized) return;
+    final c = _controller;
+    if (!_initialized || c == null) return;
     setState(() {
-      if (_controller.value.isPlaying) {
-        _controller.pause();
+      if (c.value.isPlaying) {
+        c.pause();
         _showPlayIcon = true;
       } else {
-        _controller.play();
+        c.play();
         _showPlayIcon = false;
       }
     });
 
-    // Скрываем иконку паузы через секунду
     if (_showPlayIcon) {
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted) setState(() => _showPlayIcon = false);
@@ -141,7 +144,8 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   Widget build(BuildContext context) {
     if (_error) return const _VideoErrorPlaceholder();
 
-    if (!_initialized) {
+    final c = _controller;
+    if (!_initialized || c == null || !c.value.isInitialized) {
       return const AspectRatio(
         aspectRatio: 9 / 16,
         child: ColoredBox(
@@ -156,7 +160,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
       );
     }
 
-    final ratio = widget.aspectRatio ?? _controller.value.aspectRatio;
+    final ratio = widget.aspectRatio ?? c.value.aspectRatio;
 
     return GestureDetector(
       onTap: () {
@@ -168,16 +172,13 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
         child: Stack(
           alignment: Alignment.center,
           children: [
-            // Само видео
-            VideoPlayer(_controller),
-
-            // Прогресс-бар снизу
+            VideoPlayer(c),
             Positioned(
               bottom: 0,
               left: 0,
               right: 0,
               child: VideoProgressIndicator(
-                _controller,
+                c,
                 allowScrubbing: false,
                 colors: const VideoProgressColors(
                   playedColor: Colors.white,
@@ -187,8 +188,6 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                 padding: EdgeInsets.zero,
               ),
             ),
-
-            // Иконка паузы/плея при тапе
             if (widget.showControls && _showPlayIcon)
               AnimatedOpacity(
                 opacity: _showPlayIcon ? 1 : 0,
@@ -200,7 +199,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    _controller.value.isPlaying
+                    c.value.isPlaying
                         ? Icons.pause_rounded
                         : Icons.play_arrow_rounded,
                     color: Colors.white,
@@ -208,8 +207,6 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                   ),
                 ),
               ),
-
-            // Кнопка mute/unmute в правом нижнем углу
             Positioned(
               bottom: 12,
               right: 12,
@@ -222,7 +219,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Icon(
-                    _controller.value.volume == 0
+                    c.value.volume == 0
                         ? Icons.volume_off_rounded
                         : Icons.volume_up_rounded,
                     color: Colors.white,

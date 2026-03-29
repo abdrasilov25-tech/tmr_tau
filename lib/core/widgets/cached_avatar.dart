@@ -81,9 +81,15 @@ class CachedAvatar extends StatelessWidget {
             child: AspectRatio(
               aspectRatio: 1,
               child: InteractiveViewer(
-                child: Image.network(
-                  u,
+                child: CachedNetworkImage(
+                  imageUrl: u,
                   fit: BoxFit.cover,
+                  fadeInDuration: Duration.zero,
+                  fadeOutDuration: Duration.zero,
+                  placeholder: (_, __) =>
+                      const ColoredBox(color: Colors.black26),
+                  errorWidget: (_, __, ___) =>
+                      const ColoredBox(color: Colors.black54),
                 ),
               ),
             ),

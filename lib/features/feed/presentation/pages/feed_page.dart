@@ -618,7 +618,6 @@ class _ProductCard extends StatelessWidget {
                       width: double.infinity,
                       height: double.infinity,
                       memCacheWidth: (w * dpr).round(),
-                      compactPlaceholder: true,
                     ),
                     Positioned(
                       top: 10,

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -14,6 +15,7 @@ import '../../../../core/constants/supabase_constants.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_grid_engagement_overlay.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../domain/entities/seller_profile_entity.dart';
@@ -529,9 +531,15 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                         child: AspectRatio(
                           aspectRatio: 1,
                           child: InteractiveViewer(
-                            child: Image.network(
-                              imageUrl,
+                            child: CachedNetworkImage(
+                              imageUrl: imageUrl,
                               fit: BoxFit.cover,
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              placeholder: (_, __) =>
+                                  const ColoredBox(color: Colors.black26),
+                              errorWidget: (_, __, ___) =>
+                                  const ColoredBox(color: Colors.black54),
                             ),
                           ),
                         ),
@@ -949,6 +957,9 @@ class _ProfilePublicationsGrid extends StatelessWidget {
         ),
       );
     }
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final gridThumbPx =
+        (MediaQuery.sizeOf(context).width / 3 * dpr).round().clamp(64, 2048);
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -962,37 +973,63 @@ class _ProfilePublicationsGrid extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, index) {
         final p = posts[index];
-        final hasVideo = p.videoUrl != null && p.videoUrl!.isNotEmpty;
+        final hasVideo = PostGridEngagementOverlay.isProbablyVideoPost(p);
+        late final Widget content;
         if (p.imageUrl.isEmpty && !hasVideo) {
-          return Container(
+          content = ColoredBox(
             color: Colors.grey.shade200,
             child: const Center(child: Icon(Icons.person_outline_rounded)),
           );
-        }
-        if (hasVideo && p.imageUrl.isEmpty) {
-          return Container(
+        } else if (hasVideo && p.imageUrl.isEmpty) {
+          content = ColoredBox(
             color: Colors.grey.shade300,
             child: const Center(
-              child: Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
+              child:
+                  Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
             ),
           );
+        } else {
+          content = Stack(
+            fit: StackFit.expand,
+            children: [
+              CachedNetworkImage(
+                imageUrl: p.imageUrl,
+                fit: BoxFit.cover,
+                memCacheWidth: gridThumbPx,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
+                placeholder: (_, __) =>
+                    ColoredBox(color: Colors.grey.shade200),
+                errorWidget: (_, __, ___) => Container(
+                  color: Colors.grey.shade200,
+                  child: const Icon(Icons.broken_image_outlined),
+                ),
+              ),
+              if (hasVideo)
+                const Center(
+                  child:
+                      Icon(Icons.play_circle_fill, size: 34, color: Colors.white70),
+                ),
+            ],
+          );
         }
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              p.imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => Container(
-                color: Colors.grey.shade200,
-                child: const Icon(Icons.broken_image_outlined),
+        return GestureDetector(
+          onTap: () => context.push('/post/${p.id}', extra: p),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(child: content),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: PostGridEngagementOverlay(
+                  post: p,
+                  showViewCount: hasVideo,
+                ),
               ),
-            ),
-            if (hasVideo)
-              const Center(
-                child: Icon(Icons.play_circle_fill, size: 34, color: Colors.white70),
-              ),
-          ],
+            ],
+          ),
         );
       },
     );

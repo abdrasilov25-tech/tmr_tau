@@ -7,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:video_player/video_player.dart';
 
+import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
@@ -76,6 +77,9 @@ class _MainHomePageState extends State<MainHomePage> {
 
   bool _initialLoading = true;
   bool _isLoadingMore = false;
+  bool _isFetchingRecommendations = false;
+  bool _isFetchingSubscriptions = false;
+  DateTime? _lastLoadMoreAt;
 
   _FeedTab _feedTab = _FeedTab.recommendations;
 
@@ -492,76 +496,91 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   Future<void> _fetchPageForTab(_FeedTab tab, {required bool reset}) async {
+    if (tab == _FeedTab.recommendations) {
+      if (_isFetchingRecommendations) return;
+      _isFetchingRecommendations = true;
+    } else {
+      if (_isFetchingSubscriptions) return;
+      _isFetchingSubscriptions = true;
+    }
     final repo = context.read<PostRepository>();
     final followingIds = await _getFollowingUserIdsCached();
 
-    if (tab == _FeedTab.recommendations) {
-      if (reset) {
-        _cursorRecommendations = 0;
+    try {
+      if (tab == _FeedTab.recommendations) {
+        if (reset) {
+          _cursorRecommendations = 0;
+        }
+        final page = await repo.getPublicationsFeedRecommendations(
+          currentUserId: _currentUserId,
+          followingUserIds: followingIds,
+          limit: _pageSize,
+          discoveryDbOffset: _cursorRecommendations,
+        );
+        if (!mounted) return;
+        setState(() {
+          if (reset) {
+            _postsRecommendations
+              ..clear()
+              ..addAll(page.posts);
+          } else {
+            final existingIds = _postsRecommendations.map((p) => p.id).toSet();
+            for (final p in page.posts) {
+              if (existingIds.add(p.id)) {
+                _postsRecommendations.add(p);
+              }
+            }
+          }
+          _cursorRecommendations = page.nextOffset;
+          _hasMoreRecommendations =
+              page.posts.isNotEmpty && page.posts.length >= _pageSize;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (_feedTab != _FeedTab.recommendations) return;
+          _syncVisiblePostForImpression();
+          _ensureImpressionTimer();
+        });
+        _schedulePrecacheAfterFeedUpdate(_FeedTab.recommendations);
+        return;
       }
-      final page = await repo.getPublicationsFeedRecommendations(
+
+      // Подписки
+      if (reset) {
+        _cursorSubscriptions = 0;
+      }
+      final page = await repo.getPublicationsFeedSubscriptions(
         currentUserId: _currentUserId,
         followingUserIds: followingIds,
         limit: _pageSize,
-        discoveryDbOffset: _cursorRecommendations,
+        offset: _cursorSubscriptions,
       );
       if (!mounted) return;
       setState(() {
         if (reset) {
-          _postsRecommendations
+          _postsSubscriptions
             ..clear()
             ..addAll(page.posts);
         } else {
-          final existingIds = _postsRecommendations.map((p) => p.id).toSet();
+          final existingIds = _postsSubscriptions.map((p) => p.id).toSet();
           for (final p in page.posts) {
             if (existingIds.add(p.id)) {
-              _postsRecommendations.add(p);
+              _postsSubscriptions.add(p);
             }
           }
         }
-        _cursorRecommendations = page.nextOffset;
-        _hasMoreRecommendations =
+        _cursorSubscriptions = page.nextOffset;
+        _hasMoreSubscriptions =
             page.posts.isNotEmpty && page.posts.length >= _pageSize;
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        if (_feedTab != _FeedTab.recommendations) return;
-        _syncVisiblePostForImpression();
-        _ensureImpressionTimer();
-      });
-      _schedulePrecacheAfterFeedUpdate(_FeedTab.recommendations);
-      return;
-    }
-
-    // Подписки
-    if (reset) {
-      _cursorSubscriptions = 0;
-    }
-    final page = await repo.getPublicationsFeedSubscriptions(
-      currentUserId: _currentUserId,
-      followingUserIds: followingIds,
-      limit: _pageSize,
-      offset: _cursorSubscriptions,
-    );
-    if (!mounted) return;
-    setState(() {
-      if (reset) {
-        _postsSubscriptions
-          ..clear()
-          ..addAll(page.posts);
+      _schedulePrecacheAfterFeedUpdate(_FeedTab.subscriptions);
+    } finally {
+      if (tab == _FeedTab.recommendations) {
+        _isFetchingRecommendations = false;
       } else {
-        final existingIds = _postsSubscriptions.map((p) => p.id).toSet();
-        for (final p in page.posts) {
-          if (existingIds.add(p.id)) {
-            _postsSubscriptions.add(p);
-          }
-        }
+        _isFetchingSubscriptions = false;
       }
-      _cursorSubscriptions = page.nextOffset;
-      _hasMoreSubscriptions =
-          page.posts.isNotEmpty && page.posts.length >= _pageSize;
-    });
-    _schedulePrecacheAfterFeedUpdate(_FeedTab.subscriptions);
+    }
   }
 
   void _onFeedTabChanged(_FeedTab tab) {
@@ -596,7 +615,13 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   Future<void> _loadMore() async {
-    if (!_hasMore) return;
+    if (!_hasMore || _isLoadingMore) return;
+    final now = DateTime.now();
+    final last = _lastLoadMoreAt;
+    if (last != null && now.difference(last) < const Duration(milliseconds: 350)) {
+      return;
+    }
+    _lastLoadMoreAt = now;
     setState(() => _isLoadingMore = true);
     try {
       await _fetchPageForTab(_feedTab, reset: false);
@@ -1018,11 +1043,14 @@ class _MainHomePageState extends State<MainHomePage> {
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
-    final authState = context.watch<AuthBloc>().state;
-    final sessionUid =
-        authState is AuthAuthenticated ? authState.user.id : null;
-    final currentUserAvatarUrl =
-        authState is AuthAuthenticated ? authState.user.avatarUrl : null;
+    final sessionUid = context.select<AuthBloc, String?>((b) {
+      final s = b.state;
+      return s is AuthAuthenticated ? s.user.id : null;
+    });
+    final currentUserAvatarUrl = context.select<AuthBloc, String?>((b) {
+      final s = b.state;
+      return s is AuthAuthenticated ? s.user.avatarUrl : null;
+    });
     return Scaffold(
       appBar: AppBar(
         elevation: 0,
@@ -1034,7 +1062,7 @@ class _MainHomePageState extends State<MainHomePage> {
         centerTitle: true,
         actions: [
           const NotificationActivityPeekBar(),
-          _FeedNotificationsButton(),
+          const _FeedNotificationsButton(),
           const SizedBox(width: 6),
         ],
       ),
@@ -1161,6 +1189,8 @@ class _MainHomeWarmCache {
 }
 
 class _FeedNotificationsButton extends StatefulWidget {
+  const _FeedNotificationsButton();
+
   @override
   State<_FeedNotificationsButton> createState() =>
       _FeedNotificationsButtonState();
@@ -1252,7 +1282,7 @@ class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
   }
 }
 
-class _InstagramPostItem extends StatefulWidget {
+class _InstagramPostItem extends StatelessWidget {
   const _InstagramPostItem({
     required this.height,
     required this.post,
@@ -1275,74 +1305,71 @@ class _InstagramPostItem extends StatefulWidget {
   final VoidCallback onShare;
 
   @override
-  State<_InstagramPostItem> createState() => _InstagramPostItemState();
-}
-
-class _InstagramPostItemState extends State<_InstagramPostItem> {
-  @override
   Widget build(BuildContext context) {
-    final p = widget.post;
-    final mediaHeight = widget.height;
+    final p = post;
+    final mediaHeight = height;
 
     return RepaintBoundary(
       child: SizedBox(
-      height: mediaHeight,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: DoubleTapLikeBurst(
-              onDoubleTapLike: widget.onLike,
-              shouldTriggerLike: () => !p.isLikedByMe,
-              showPersistentLikeIndicator: true,
-              isLiked: p.isLikedByMe,
-              child: _PostMedia(
-                imageUrls: p.displayImageUrls,
-                videoUrl: p.videoUrl,
-                fillHeight: mediaHeight,
+        height: mediaHeight,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DoubleTapLikeBurst(
+                onDoubleTapLike: onLike,
+                shouldTriggerLike: () => !p.isLikedByMe,
+                showPersistentLikeIndicator: true,
+                isLiked: p.isLikedByMe,
+                child: _PostMedia(
+                  imageUrls: p.displayImageUrls,
+                  videoUrl: p.videoUrl,
+                  fillHeight: mediaHeight,
+                ),
               ),
             ),
-          ),
-          // Верхняя панель: автор.
-          Positioned(
-            left: 12,
-            right: 12,
-            top: 10,
-            child: SafeArea(
-              bottom: false,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  UserAvatarTap(
-                    userId: p.userId,
-                    avatarUrl: p.userAvatarUrl,
-                    radius: 18,
-                    currentUserId: widget.currentUserId,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: UsernameTap(
+            // Верхняя панель: автор.
+            Positioned(
+              left: 12,
+              right: 12,
+              top: 10,
+              child: SafeArea(
+                bottom: false,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    UserAvatarTap(
                       userId: p.userId,
-                      username: p.userName ?? 'Пользователь',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w800,
+                      avatarUrl: p.userAvatarUrl,
+                      radius: 18,
+                      currentUserId: currentUserId,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: UsernameTap(
+                        userId: p.userId,
+                        username: p.userName ?? 'Пользователь',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          // Низ: описание + действия.
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Padding(
-              padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+            // Низ: описание + действия.
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).padding.bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                   // Описание поверх медиа (как в IG).
                   if ((p.caption).trim().isNotEmpty)
                     Padding(
@@ -1369,48 +1396,107 @@ class _InstagramPostItemState extends State<_InstagramPostItem> {
                         top: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
                       ),
                     ),
-                    child: Row(
-                      children: [
-                        _ActionButton(
-                          icon: p.isLikedByMe ? Icons.favorite : Icons.favorite_border,
-                          iconColor: p.isLikedByMe ? Colors.redAccent : Colors.white,
-                          label: 'Лайк',
-                          count: p.likesCount,
-                          onTap: widget.onLike,
-                        ),
-                        _ActionButton(
-                          icon: Icons.chat_bubble_outline_rounded,
-                          iconColor: Colors.white,
-                          label: 'Коммент',
-                          count: p.commentsCount,
-                          onTap: widget.onComment,
-                        ),
-                        _ActionButton(
-                          icon: p.isRepostedByMe ? Icons.repeat : Icons.repeat_outlined,
-                          iconColor: p.isRepostedByMe ? Colors.cyanAccent : Colors.white,
-                          label: 'Репост',
-                          count: p.repostsCount,
-                          onTap: widget.onRepost,
-                        ),
-                        _ShareButton(
-                          onTap: widget.onShare,
-                          label: 'Поделиться',
-                        ),
-                        const Spacer(),
-                        _SaveButton(
-                          onTap: widget.onSave,
-                          isSaved: p.isSavedByMe,
-                        ),
-                      ],
+                    child: _PostActionsBar(
+                      isLikedByMe: p.isLikedByMe,
+                      likesCount: p.likesCount,
+                      commentsCount: p.commentsCount,
+                      repostsCount: p.repostsCount,
+                      viewsCount: p.viewsCount,
+                      showViews: (p.videoUrl ?? '').trim().isNotEmpty,
+                      isRepostedByMe: p.isRepostedByMe,
+                      isSavedByMe: p.isSavedByMe,
+                      onLike: onLike,
+                      onComment: onComment,
+                      onRepost: onRepost,
+                      onShare: onShare,
+                      onSave: onSave,
                     ),
                   ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
-    ),
+    );
+  }
+}
+
+class _PostActionsBar extends StatelessWidget {
+  const _PostActionsBar({
+    required this.isLikedByMe,
+    required this.likesCount,
+    required this.commentsCount,
+    required this.repostsCount,
+    required this.viewsCount,
+    required this.showViews,
+    required this.isRepostedByMe,
+    required this.isSavedByMe,
+    required this.onLike,
+    required this.onComment,
+    required this.onRepost,
+    required this.onShare,
+    required this.onSave,
+  });
+
+  final bool isLikedByMe;
+  final int likesCount;
+  final int commentsCount;
+  final int repostsCount;
+  final int viewsCount;
+  final bool showViews;
+  final bool isRepostedByMe;
+  final bool isSavedByMe;
+  final VoidCallback onLike;
+  final VoidCallback onComment;
+  final VoidCallback onRepost;
+  final VoidCallback onShare;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _ActionButton(
+          icon: isLikedByMe ? Icons.favorite : Icons.favorite_border,
+          iconColor: isLikedByMe ? Colors.redAccent : Colors.white,
+          label: 'Лайк',
+          count: likesCount,
+          onTap: onLike,
+        ),
+        _ActionButton(
+          icon: Icons.chat_bubble_outline_rounded,
+          iconColor: Colors.white,
+          label: 'Коммент',
+          count: commentsCount,
+          onTap: onComment,
+        ),
+        if (showViews)
+          _ActionButton(
+            icon: Icons.play_arrow_rounded,
+            iconColor: Colors.white,
+            label: 'Просмотр',
+            count: viewsCount,
+            onTap: () {},
+          ),
+        _ActionButton(
+          icon: isRepostedByMe ? Icons.repeat : Icons.repeat_outlined,
+          iconColor: isRepostedByMe ? Colors.cyanAccent : Colors.white,
+          label: 'Репост',
+          count: repostsCount,
+          onTap: onRepost,
+        ),
+        _ShareButton(
+          onTap: onShare,
+          label: 'Поделиться',
+        ),
+        const Spacer(),
+        _SaveButton(
+          onTap: onSave,
+          isSaved: isSavedByMe,
+        ),
+      ],
     );
   }
 }
@@ -1484,33 +1570,45 @@ class _VideoMedia extends StatefulWidget {
 }
 
 class _VideoMediaState extends State<_VideoMedia> {
-  late final VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   bool _ready = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..setLooping(true)
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() => _ready = true);
-        _controller.play();
-      });
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    try {
+      final c = await createCachedVideoController(widget.videoUrl);
+      await c.initialize();
+      c.setLooping(true);
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      _controller = c;
+      setState(() => _ready = true);
+      c.play();
+    } catch (_) {
+      if (mounted) setState(() => _ready = false);
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    unawaited(_controller?.dispose());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_ready) {
+    final controller = _controller;
+    if (!_ready || controller == null || !controller.value.isInitialized) {
       return const Center(child: CircularProgressIndicator());
     }
-    final size = _controller.value.size;
+    final size = controller.value.size;
     if (size.width <= 0 || size.height <= 0) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -1525,18 +1623,18 @@ class _VideoMediaState extends State<_VideoMedia> {
               behavior: HitTestBehavior.opaque,
               onTap: () {
                 setState(() {
-                  if (_controller.value.isPlaying) {
-                    _controller.pause();
+                  if (controller.value.isPlaying) {
+                    controller.pause();
                   } else {
-                    _controller.play();
+                    controller.play();
                   }
                 });
               },
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  VideoPlayer(_controller),
-                  if (!_controller.value.isPlaying)
+                  VideoPlayer(controller),
+                  if (!controller.value.isPlaying)
                     const Center(
                       child: DecoratedBox(
                         decoration: BoxDecoration(

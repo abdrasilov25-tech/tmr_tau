@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -11,6 +12,7 @@ import '../../../../core/products/deleted_product_bus.dart';
 import '../../../../core/accounts/account_manager.dart';
 import '../../../../core/accounts/account_model.dart';
 import '../../../../core/storage/multi_account_storage.dart';
+import '../../../../core/storage/hidden_posts_storage.dart';
 import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
@@ -28,6 +30,7 @@ import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_grid_engagement_overlay.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -42,16 +45,20 @@ class MyProfilePage extends StatefulWidget {
 }
 
 class _MyProfilePageState extends State<MyProfilePage> {
-  static const Duration _warmCacheTtl = Duration(seconds: 45);
+  static const Duration _warmCacheTtl = Duration(minutes: 30);
   static _MyProfileWarmCache? _warmCache;
   SellerProfileEntity? _profile;
   List<PostEntity> _newsPosts = [];
   List<PostEntity> _publicationPosts = [];
   List<PostEntity> _videoPosts = [];
+  List<PostEntity> _likedPosts = [];
   bool _loading = true;
   late int _tabIndex;
   bool _updatingAvatar = false;
   bool _isSwitchingAccount = false;
+  bool _isLoadingProfileData = false;
+  int _loadRequestId = 0;
+  Set<String> _hiddenPostIds = const <String>{};
   bool _autoReloadTriggeredForPublications = false;
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
@@ -61,7 +68,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
   @override
   void initState() {
     super.initState();
-    _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 3);
+    _tabIndex = (widget.initialTabIndex ?? 2).clamp(0, 5);
     final authState = context.read<AuthBloc>().state;
     final uid = authState is AuthAuthenticated ? authState.user.id : null;
     final cache = _warmCache;
@@ -74,12 +81,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
       _newsPosts = List<PostEntity>.from(cache.newsPosts);
       _publicationPosts = List<PostEntity>.from(cache.publicationPosts);
       _videoPosts = List<PostEntity>.from(cache.videoPosts);
+      _likedPosts = List<PostEntity>.from(cache.likedPosts);
       _storyGroups = List<StoryGroupEntity>.from(cache.storyGroups);
       _newStoriesByUserId = Map<String, bool>.from(cache.newStoriesByUserId);
       _myStoryNote = cache.myStoryNote;
       _loading = false;
     }
     _load(showLoading: !canUseCache);
+    unawaited(_loadHiddenPostIds());
     _deletedProductSub = deletedProductIdsStream.listen((_) {
       if (mounted) _load(showLoading: false);
     });
@@ -150,6 +159,33 @@ class _MyProfilePageState extends State<MyProfilePage> {
     }
   }
 
+  Future<void> _loadHiddenPostIds() async {
+    final hidden = await HiddenPostsStorage.getHiddenPostIds();
+    if (!mounted) return;
+    setState(() => _hiddenPostIds = hidden);
+  }
+
+  bool _isPostHidden(PostEntity post) => _hiddenPostIds.contains(post.id);
+
+  Future<void> _onHidePost(PostEntity post) async {
+    await HiddenPostsStorage.hidePost(post.id);
+    if (!mounted) return;
+    setState(() {
+      _hiddenPostIds = {..._hiddenPostIds, post.id};
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Пост скрыт. Теперь он в разделе "Приватные".')),
+    );
+  }
+
+  Future<void> _onUnhidePost(PostEntity post) async {
+    await HiddenPostsStorage.unhidePost(post.id);
+    if (!mounted) return;
+    setState(() {
+      _hiddenPostIds = {..._hiddenPostIds}..remove(post.id);
+    });
+  }
+
   void _storeWarmCache(String uid) {
     _warmCache = _MyProfileWarmCache(
       createdAt: DateTime.now(),
@@ -158,6 +194,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
       newsPosts: List<PostEntity>.from(_newsPosts),
       publicationPosts: List<PostEntity>.from(_publicationPosts),
       videoPosts: List<PostEntity>.from(_videoPosts),
+      likedPosts: List<PostEntity>.from(_likedPosts),
       storyGroups: List<StoryGroupEntity>.from(_storyGroups),
       newStoriesByUserId: Map<String, bool>.from(_newStoriesByUserId),
       myStoryNote: _myStoryNote,
@@ -165,22 +202,38 @@ class _MyProfilePageState extends State<MyProfilePage> {
   }
 
   Future<void> _load({bool showLoading = true}) async {
+    if (_isLoadingProfileData) {
+      // Не запускаем параллельные одинаковые загрузки — это дает лишние rebuild и гонки.
+      return;
+    }
     final state = context.read<AuthBloc>().state;
     if (state is! AuthAuthenticated) {
       setState(() => _loading = false);
       return;
     }
     final uid = state.user.id;
+    final requestId = ++_loadRequestId;
+    _isLoadingProfileData = true;
     if (showLoading) {
       setState(() => _loading = true);
     }
     try {
       final repo = context.read<ProfileRepository>();
       final postRepo = context.read<PostRepository>();
-      final profile = await repo.getSellerProfile(uid);
-      if (!mounted) return;
-      final posts =
-          await postRepo.getPostsByUser(uid, currentUserId: uid);
+      final profileFuture =
+          repo.getSellerProfile(uid).timeout(const Duration(seconds: 10));
+      final postsFuture = postRepo
+          .getPostsByUser(uid, currentUserId: uid)
+          .timeout(const Duration(seconds: 12));
+      final likedPostsFuture =
+          postRepo.getLikedPublications(uid, limit: 100).timeout(
+                const Duration(seconds: 10),
+              );
+      final profile = await profileFuture;
+      if (!mounted || requestId != _loadRequestId) return;
+      final posts = await postsFuture;
+      final likedPosts = await likedPostsFuture;
+      if (!mounted || requestId != _loadRequestId) return;
       final newsPosts = posts
           .where((p) => p.kind.trim().toLowerCase() == 'news' && !_isVideoPost(p))
           .toList(growable: false);
@@ -194,13 +247,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
               query: '',
               limit: 100,
               currentUserId: uid,
-            );
+            ).timeout(const Duration(seconds: 12));
         publicationPosts = publicationFeed
             .where((p) => p.userId == uid && !_isVideoPost(p))
             .toList(growable: false);
       }
       // Подсчитываем актуальное количество подписок через followers.
-      final followingUsers = await repo.getFollowingUsers(uid);
+      final followingUsers =
+          await repo.getFollowingUsers(uid).timeout(const Duration(seconds: 10));
       final followingCount = followingUsers.length;
       var myStoryNote = '';
       try {
@@ -211,8 +265,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
             .maybeSingle();
         myStoryNote = (me?['story_note'] ?? '').toString().trim();
       } catch (_) {}
-      await _loadProfileStories(uid, showLoading: false);
-      if (mounted) {
+      await _loadProfileStories(uid, showLoading: false)
+          .timeout(const Duration(seconds: 12));
+      if (mounted && requestId == _loadRequestId) {
         setState(() {
           _profile = profile == null
               ? null
@@ -230,6 +285,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
           _videoPosts = videoPosts;
+          _likedPosts = likedPosts;
           _myStoryNote = myStoryNote;
           _loading = false;
           if (publicationPosts.isNotEmpty) {
@@ -240,6 +296,10 @@ class _MyProfilePageState extends State<MyProfilePage> {
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    } finally {
+      if (requestId == _loadRequestId) {
+        _isLoadingProfileData = false;
+      }
     }
   }
 
@@ -307,11 +367,17 @@ class _MyProfilePageState extends State<MyProfilePage> {
         nextMap[g.userId] = lastSeenAt == null || latestStoryAt.isAfter(lastSeenAt);
       }
       if (!mounted) return;
-      setState(() {
-        _storyGroups = groups;
-        _newStoriesByUserId = nextMap;
-        _loading = false;
-      });
+      final hasStoriesChanged = !_sameStoryGroups(_storyGroups, groups) ||
+          !_sameStoryFlags(_newStoriesByUserId, nextMap);
+      if (hasStoriesChanged) {
+        setState(() {
+          _storyGroups = groups;
+          _newStoriesByUserId = nextMap;
+          _loading = false;
+        });
+      } else if (_loading) {
+        setState(() => _loading = false);
+      }
       _storeWarmCache(uid);
     } catch (_) {
       if (!mounted) return;
@@ -319,6 +385,34 @@ class _MyProfilePageState extends State<MyProfilePage> {
         setState(() => _loading = false);
       }
     }
+  }
+
+  bool _sameStoryGroups(
+    List<StoryGroupEntity> a,
+    List<StoryGroupEntity> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].userId != b[i].userId) return false;
+      final aFirst = a[i].stories.isNotEmpty ? a[i].stories.first.id : '';
+      final bFirst = b[i].stories.isNotEmpty ? b[i].stories.first.id : '';
+      if (aFirst != bFirst) return false;
+      if (a[i].stories.length != b[i].stories.length) return false;
+    }
+    return true;
+  }
+
+  bool _sameStoryFlags(
+    Map<String, bool> a,
+    Map<String, bool> b,
+  ) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (b[entry.key] != entry.value) return false;
+    }
+    return true;
   }
 
   void _showAddChoice() {
@@ -352,8 +446,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
               ),
               ListTile(
                 leading: const Icon(Icons.article_outlined, size: 28),
-                title: const Text('Новость'),
-                subtitle: const Text('Фото или короткое видео в ленту новостей'),
+                title: const Text('Публикация'),
+                subtitle: const Text('Фото или короткое видео в ленту публикаций'),
                 onTap: () {
                   Navigator.pop(context);
                   unawaited(_openCreateNewsAndRefresh());
@@ -425,7 +519,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             ),
             ListTile(
               leading: const Icon(Icons.article_outlined),
-              title: const Text('Новость'),
+              title: const Text('Публикация'),
               onTap: () {
                 Navigator.pop(sheetContext);
                 unawaited(_openCreateNewsAndRefresh());
@@ -518,10 +612,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
             _newsPosts = [];
             _publicationPosts = [];
             _videoPosts = [];
+            _likedPosts = [];
             _storyGroups = [];
             _newStoriesByUserId = {};
             _myStoryNote = '';
-            _loading = true;
+            _loading = false;
             _autoReloadTriggeredForPublications = false;
           });
           unawaited(_load(showLoading: false));
@@ -551,16 +646,35 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 (g) => g?.userId == user.id,
                 orElse: () => null,
               );
+          final visibleNewsPosts = _newsPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+          final visiblePublicationPosts =
+              _publicationPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+          final visibleVideoPosts = _videoPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+          final visibleLikedPosts = _likedPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+          final privatePosts = [..._newsPosts, ..._publicationPosts, ..._videoPosts, ..._likedPosts]
+              .where(_isPostHidden)
+              .fold<Map<String, PostEntity>>(<String, PostEntity>{}, (acc, p) {
+                acc[p.id] = p;
+                return acc;
+              })
+              .values
+              .toList(growable: false)
+            ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
           return _ProfileContent(
             user: user,
             profile: _profile,
-            newsPosts: _newsPosts,
-            publicationPosts: _publicationPosts,
-            videoPosts: _videoPosts,
+            newsPosts: visibleNewsPosts,
+            publicationPosts: visiblePublicationPosts,
+            videoPosts: visibleVideoPosts,
+            likedPosts: visibleLikedPosts,
+            privatePosts: privatePosts,
             tabIndex: _tabIndex,
             onTabChanged: (i) => setState(() => _tabIndex = i),
             onRefresh: _load,
             onAddTap: _showAddChoice,
+            onOpenAccountSwitcher: () => _showAccountSwitcher(context, user),
+            onHidePost: _onHidePost,
+            onUnhidePost: _onUnhidePost,
             onAvatarTap: _changeAvatar,
             updatingAvatar: _updatingAvatar,
             ownStoryGroup: ownGroup,
@@ -975,10 +1089,15 @@ class _ProfileContent extends StatelessWidget {
     required this.newsPosts,
     required this.publicationPosts,
     required this.videoPosts,
+    required this.likedPosts,
+    required this.privatePosts,
     required this.tabIndex,
     required this.onTabChanged,
     required this.onRefresh,
     required this.onAddTap,
+    required this.onOpenAccountSwitcher,
+    required this.onHidePost,
+    required this.onUnhidePost,
     required this.onAvatarTap,
     required this.updatingAvatar,
     required this.ownStoryGroup,
@@ -994,10 +1113,15 @@ class _ProfileContent extends StatelessWidget {
   final List<PostEntity> newsPosts;
   final List<PostEntity> publicationPosts;
   final List<PostEntity> videoPosts;
+  final List<PostEntity> likedPosts;
+  final List<PostEntity> privatePosts;
   final int tabIndex;
   final ValueChanged<int> onTabChanged;
   final VoidCallback onRefresh;
   final VoidCallback onAddTap;
+  final VoidCallback onOpenAccountSwitcher;
+  final Future<void> Function(PostEntity post) onHidePost;
+  final Future<void> Function(PostEntity post) onUnhidePost;
   final VoidCallback onAvatarTap;
   final bool updatingAvatar;
   final StoryGroupEntity? ownStoryGroup;
@@ -1107,9 +1231,20 @@ class _ProfileContent extends StatelessWidget {
                                               child: AspectRatio(
                                                 aspectRatio: 1,
                                                 child: InteractiveViewer(
-                                                  child: Image.network(
-                                                    imageUrl,
+                                                  child: CachedNetworkImage(
+                                                    imageUrl: imageUrl,
                                                     fit: BoxFit.cover,
+                                                    fadeInDuration: Duration.zero,
+                                                    fadeOutDuration: Duration.zero,
+                                                    placeholder: (c, u) =>
+                                                        const ColoredBox(
+                                                      color: Colors.black26,
+                                                    ),
+                                                    errorWidget:
+                                                        (c, u, e) =>
+                                                            const ColoredBox(
+                                                      color: Colors.black54,
+                                                    ),
                                                   ),
                                                 ),
                                               ),
@@ -1180,38 +1315,58 @@ class _ProfileContent extends StatelessWidget {
                                 ],
                               ),
                               const SizedBox(height: 16),
-                              Text(
-                                (user.username != null &&
-                                        user.username!.isNotEmpty)
-                                    ? '@${user.username}'
-                                    : user.email,
-                                textAlign: TextAlign.center,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleLarge
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: -0.3,
-                                      color: ThemedContentSurface
-                                          .profileTextPrimary,
+                              Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  onTap: () {
+                                    HapticFeedback.selectionClick();
+                                    onOpenAccountSwitcher();
+                                  },
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                      horizontal: 8,
                                     ),
-                              ),
-                              if (user.name != null &&
-                                  user.name!.isNotEmpty) ...[
-                                const SizedBox(height: 6),
-                                Text(
-                                  user.name!,
-                                  textAlign: TextAlign.center,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .bodyLarge
-                                      ?.copyWith(
-                                        color: ThemedContentSurface
-                                            .profileTextSecondary,
-                                        fontWeight: FontWeight.w500,
-                                      ),
+                                    child: Column(
+                                      children: [
+                                        Text(
+                                          (user.username != null &&
+                                                  user.username!.isNotEmpty)
+                                              ? '@${user.username}'
+                                              : user.email,
+                                          textAlign: TextAlign.center,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleLarge
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: -0.3,
+                                                color: ThemedContentSurface
+                                                    .profileTextPrimary,
+                                              ),
+                                        ),
+                                        if (user.name != null &&
+                                            user.name!.isNotEmpty) ...[
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            user.name!,
+                                            textAlign: TextAlign.center,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyLarge
+                                                ?.copyWith(
+                                                  color: ThemedContentSurface
+                                                      .profileTextSecondary,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              ],
+                              ),
                             ],
                           ),
                         ),
@@ -1300,9 +1455,10 @@ class _ProfileContent extends StatelessWidget {
                               : tabIndex == 1
                                   ? _PostsGrid(
                                       posts: newsPosts,
-                                      emptyTitle: 'Нет новостей',
-                                      emptyActionLabel: 'Опубликовать новость',
-                                          onEmptyAction: onCreateNews,
+                                      emptyTitle: 'Нет публикаций',
+                                      emptyActionLabel: 'Создать публикацию',
+                                      onEmptyAction: onCreateNews,
+                                      onHidePost: onHidePost,
                                     )
                                   : tabIndex == 2
                                       ? _PostsGrid(
@@ -1310,13 +1466,33 @@ class _ProfileContent extends StatelessWidget {
                                           emptyTitle: 'Нет публикаций',
                                           emptyActionLabel: 'Создать публикацию',
                                           onEmptyAction: onCreatePublication,
+                                          onHidePost: onHidePost,
                                         )
-                                      : _PostsGrid(
-                                          posts: videoPosts,
-                                          emptyTitle: 'Нет видео',
-                                          emptyActionLabel: 'Создать видео',
-                                          onEmptyAction: onCreateVideo,
-                                        ),
+                                      : tabIndex == 3
+                                          ? _PostsGrid(
+                                              posts: videoPosts,
+                                              emptyTitle: 'Нет видео',
+                                              emptyActionLabel: 'Создать видео',
+                                              onEmptyAction: onCreateVideo,
+                                              onHidePost: onHidePost,
+                                            )
+                                          : tabIndex == 4
+                                              ? _PostsGrid(
+                                                  posts: likedPosts,
+                                                  emptyTitle: 'Нет лайкнутых публикаций',
+                                                  emptyActionLabel:
+                                                      'Перейти к публикациям',
+                                                  onEmptyAction: onCreatePublication,
+                                                  onHidePost: onHidePost,
+                                                )
+                                          : _PostsGrid(
+                                              posts: privatePosts,
+                                              emptyTitle: 'Нет приватных публикаций',
+                                              emptyActionLabel: 'Создать публикацию',
+                                              onEmptyAction: onCreatePublication,
+                                              onHidePost: onUnhidePost,
+                                              hideActionLabel: 'Вернуть в профиль',
+                                            ),
                         ),
                       ),
                     ],
@@ -1400,6 +1576,26 @@ class _ProfileTabBar extends StatelessWidget {
               label: '',
               compact: true,
               onTap: () => onChanged(3),
+            ),
+          ),
+          const SizedBox(width: 3),
+          Expanded(
+            child: _ProfileTabChip(
+              selected: tabIndex == 4,
+              icon: Icons.favorite_border_rounded,
+              label: '',
+              compact: true,
+              onTap: () => onChanged(4),
+            ),
+          ),
+          const SizedBox(width: 3),
+          Expanded(
+            child: _ProfileTabChip(
+              selected: tabIndex == 5,
+              icon: Icons.lock_outline_rounded,
+              label: '',
+              compact: true,
+              onTap: () => onChanged(5),
             ),
           ),
         ],
@@ -1546,6 +1742,9 @@ class _ProductsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final gridThumbPx =
+        (MediaQuery.sizeOf(context).width / 3 * dpr).round().clamp(64, 2048);
     if (products.isEmpty) {
       return Center(
         child: Column(
@@ -1582,7 +1781,10 @@ class _ProductsGrid extends StatelessWidget {
         final p = products[index];
         return GestureDetector(
           onTap: () => context.push('/product/${p.id}', extra: p),
-          child: CachedProductImage(imageUrl: p.imageUrl),
+          child: CachedProductImage(
+            imageUrl: p.imageUrl,
+            memCacheWidth: gridThumbPx,
+          ),
         );
       },
     );
@@ -1595,15 +1797,22 @@ class _PostsGrid extends StatelessWidget {
     required this.emptyTitle,
     required this.emptyActionLabel,
     required this.onEmptyAction,
+    required this.onHidePost,
+    this.hideActionLabel = 'Скрыть',
   });
 
   final List<PostEntity> posts;
   final String emptyTitle;
   final String emptyActionLabel;
   final Future<void> Function() onEmptyAction;
+  final Future<void> Function(PostEntity post) onHidePost;
+  final String hideActionLabel;
 
   @override
   Widget build(BuildContext context) {
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final gridThumbPx =
+        (MediaQuery.sizeOf(context).width / 3 * dpr).round().clamp(64, 2048);
     if (posts.isEmpty) {
       return Center(
         child: Column(
@@ -1638,64 +1847,89 @@ class _PostsGrid extends StatelessWidget {
       itemCount: posts.length,
       itemBuilder: (context, index) {
         final p = posts[index];
-        final hasVideo = _isProbablyVideoPost(p);
+        final hasVideo = PostGridEngagementOverlay.isProbablyVideoPost(p);
+        late final Widget content;
         if (p.imageUrl.isEmpty && !hasVideo) {
-          return GestureDetector(
-            onTap: () => context.push('/post/${p.id}', extra: p),
-            child: Container(
-              color: Colors.grey.shade200,
-              child: const Center(
-                child: Icon(Icons.article_outlined, size: 32),
-              ),
+          content = ColoredBox(
+            color: Colors.grey.shade200,
+            child: const Center(
+              child: Icon(Icons.article_outlined, size: 32),
             ),
           );
-        }
-        if (hasVideo && p.imageUrl.isEmpty) {
-          return GestureDetector(
-            onTap: () => context.push('/post/${p.id}', extra: p),
-            child: Container(
-              color: Colors.grey.shade300,
-              child: const Center(
-                child: Icon(Icons.videocam, size: 40, color: Colors.white70),
-              ),
+        } else if (hasVideo && p.imageUrl.isEmpty) {
+          content = ColoredBox(
+            color: Colors.grey.shade300,
+            child: const Center(
+              child: Icon(Icons.videocam, size: 40, color: Colors.white70),
             ),
           );
-        }
-        return GestureDetector(
-          onTap: () => context.push('/post/${p.id}', extra: p),
-          child: Stack(
+        } else {
+          content = Stack(
             fit: StackFit.expand,
             children: [
-              Image.network(
-                p.imageUrl,
+              CachedNetworkImage(
+                imageUrl: p.imageUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) => Container(
+                memCacheWidth: gridThumbPx,
+                fadeInDuration: Duration.zero,
+                fadeOutDuration: Duration.zero,
+                placeholder: (c, u) =>
+                    ColoredBox(color: Colors.grey.shade200),
+                errorWidget: (c, u, e) => Container(
                   color: Colors.grey.shade200,
                   child: const Icon(Icons.broken_image_outlined),
                 ),
               ),
               if (hasVideo)
                 const Center(
-                  child: Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
+                  child: Icon(
+                    Icons.play_circle_fill,
+                    size: 36,
+                    color: Colors.white70,
+                  ),
                 ),
+            ],
+          );
+        }
+        return GestureDetector(
+          onTap: () => context.push('/post/${p.id}', extra: p),
+          onLongPress: () {
+            showModalBottomSheet<void>(
+              context: context,
+              builder: (sheetContext) => SafeArea(
+                child: ListTile(
+                  leading: Icon(
+                    hideActionLabel == 'Скрыть'
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                  ),
+                  title: Text(hideActionLabel),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    unawaited(onHidePost(p));
+                  },
+                ),
+              ),
+            );
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Positioned.fill(child: content),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: PostGridEngagementOverlay(
+                  post: p,
+                  showViewCount: hasVideo,
+                ),
+              ),
             ],
           ),
         );
       },
     );
-  }
-
-  bool _isProbablyVideoPost(PostEntity post) {
-    final videoUrl = (post.videoUrl ?? '').trim().toLowerCase();
-    if (videoUrl.isNotEmpty) return true;
-    final imageUrl = post.imageUrl.trim().toLowerCase();
-    if (imageUrl.isEmpty) return false;
-    return imageUrl.contains('/videos/') ||
-        imageUrl.endsWith('.mp4') ||
-        imageUrl.endsWith('.mov') ||
-        imageUrl.endsWith('.m4v') ||
-        imageUrl.endsWith('.webm') ||
-        imageUrl.endsWith('.m3u8');
   }
 }
 
@@ -1707,6 +1941,7 @@ class _MyProfileWarmCache {
     required this.newsPosts,
     required this.publicationPosts,
     required this.videoPosts,
+    required this.likedPosts,
     required this.storyGroups,
     required this.newStoriesByUserId,
     required this.myStoryNote,
@@ -1718,6 +1953,7 @@ class _MyProfileWarmCache {
   final List<PostEntity> newsPosts;
   final List<PostEntity> publicationPosts;
   final List<PostEntity> videoPosts;
+  final List<PostEntity> likedPosts;
   final List<StoryGroupEntity> storyGroups;
   final Map<String, bool> newStoriesByUserId;
   final String myStoryNote;

@@ -84,6 +84,7 @@ class PostRepositoryImpl implements PostRepository {
             likesCount: p.likesCount,
             dislikesCount: p.dislikesCount,
             commentsCount: p.commentsCount,
+            viewsCount: p.viewsCount,
             repostsCount: p.repostsCount,
             userName: p.userName,
             userAvatarUrl: p.userAvatarUrl,
@@ -499,6 +500,7 @@ class PostRepositoryImpl implements PostRepository {
           (p) => PostModel(
             id: p.id,
             userId: p.userId,
+            kind: p.kind,
             imageUrl: p.imageUrl,
             imageUrls: p.imageUrls,
             caption: p.caption,
@@ -508,6 +510,7 @@ class PostRepositoryImpl implements PostRepository {
             likesCount: p.likesCount,
             dislikesCount: p.dislikesCount,
             commentsCount: p.commentsCount,
+            viewsCount: p.viewsCount,
             repostsCount: p.repostsCount,
             userName: p.userName,
             userAvatarUrl: p.userAvatarUrl,
@@ -567,6 +570,7 @@ class PostRepositoryImpl implements PostRepository {
                 likesCount: p.likesCount,
                 dislikesCount: p.dislikesCount,
                 commentsCount: p.commentsCount,
+                viewsCount: p.viewsCount,
                 repostsCount: p.repostsCount,
                 userName: p.userName,
                 userAvatarUrl: p.userAvatarUrl,
@@ -786,6 +790,7 @@ class PostRepositoryImpl implements PostRepository {
             likesCount: p.likesCount,
             dislikesCount: p.dislikesCount,
             commentsCount: p.commentsCount,
+            viewsCount: p.viewsCount,
             repostsCount: p.repostsCount,
             userName: p.userName,
             userAvatarUrl: p.userAvatarUrl,
@@ -793,6 +798,63 @@ class PostRepositoryImpl implements PostRepository {
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: p.isRepostedByMe,
             isSavedByMe: true,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  @override
+  Future<List<PostEntity>> getLikedPublications(
+    String userId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final likes = await _client
+        .from(SupabaseConstants.postLikesTable)
+        .select('post_id, created_at')
+        .eq('user_id', userId)
+        .order('created_at', ascending: false)
+        .range(offset, offset + limit - 1);
+    final postIds = (likes as List)
+        .map((e) => (e as Map<String, dynamic>)['post_id'] as String?)
+        .whereType<String>()
+        .toList(growable: false);
+    if (postIds.isEmpty) return const [];
+
+    final res = await _client
+        .from(SupabaseConstants.postsTable)
+        .select('*, users!user_id(name, avatar)')
+        .eq('kind', 'publication')
+        .inFilter('id', postIds);
+    final list = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+    final order = {for (var i = 0; i < postIds.length; i++) postIds[i]: i};
+    list.sort((a, b) => (order[a.id] ?? 1 << 20).compareTo(order[b.id] ?? 1 << 20));
+
+    return list
+        .map(
+          (p) => PostModel(
+            id: p.id,
+            userId: p.userId,
+            kind: p.kind,
+            imageUrl: p.imageUrl,
+            imageUrls: p.imageUrls,
+            caption: p.caption,
+            videoUrl: p.videoUrl,
+            videoDurationSeconds: p.videoDurationSeconds,
+            createdAt: p.createdAt,
+            likesCount: p.likesCount,
+            dislikesCount: p.dislikesCount,
+            commentsCount: p.commentsCount,
+            viewsCount: p.viewsCount,
+            repostsCount: p.repostsCount,
+            userName: p.userName,
+            userAvatarUrl: p.userAvatarUrl,
+            isLikedByMe: true,
+            isDislikedByMe: p.isDislikedByMe,
+            isRepostedByMe: p.isRepostedByMe,
+            isSavedByMe: p.isSavedByMe,
           ),
         )
         .toList(growable: false);
@@ -947,6 +1009,7 @@ class PostRepositoryImpl implements PostRepository {
           (p) => PostModel(
             id: p.id,
             userId: p.userId,
+            kind: p.kind,
             imageUrl: p.imageUrl,
             imageUrls: p.imageUrls,
             caption: p.caption,
@@ -956,6 +1019,7 @@ class PostRepositoryImpl implements PostRepository {
             likesCount: p.likesCount,
             dislikesCount: p.dislikesCount,
             commentsCount: p.commentsCount,
+            viewsCount: p.viewsCount,
             repostsCount: p.repostsCount,
             userName: p.userName,
             userAvatarUrl: p.userAvatarUrl,
@@ -1052,6 +1116,7 @@ class PostRepositoryImpl implements PostRepository {
               likesCount: p.likesCount,
               dislikesCount: p.dislikesCount,
               commentsCount: p.commentsCount,
+              viewsCount: p.viewsCount,
               repostsCount: p.repostsCount,
               userName: p.userName,
               userAvatarUrl: p.userAvatarUrl,
@@ -1108,6 +1173,7 @@ class PostRepositoryImpl implements PostRepository {
         likesCount: post.likesCount,
         dislikesCount: post.dislikesCount,
         commentsCount: post.commentsCount,
+        viewsCount: post.viewsCount,
         repostsCount: post.repostsCount,
         userName: post.userName,
         userAvatarUrl: post.userAvatarUrl,

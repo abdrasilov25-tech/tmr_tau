@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tmr_tau/core/formatting/compact_count_format.dart';
 
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
@@ -219,7 +220,14 @@ class _VideoPage extends StatelessWidget {
           CachedNetworkImage(
             imageUrl: post.imageUrl,
             fit: BoxFit.cover,
-            errorWidget: (_, __, ___) =>
+            fadeInDuration: Duration.zero,
+            fadeOutDuration: Duration.zero,
+            memCacheWidth: (MediaQuery.sizeOf(context).shortestSide *
+                    MediaQuery.devicePixelRatioOf(context))
+                .round()
+                .clamp(256, 2048),
+            placeholder: (context, url) => const ColoredBox(color: Colors.black),
+            errorWidget: (context, url, error) =>
                 const ColoredBox(color: Colors.black),
           ),
 
@@ -306,6 +314,30 @@ class _BottomInfo extends StatelessWidget {
         if (post.caption.isNotEmpty) ...[
           const SizedBox(height: 8),
           _ExpandableCaption(caption: post.caption),
+        ],
+        if (post.videoUrl != null && post.videoUrl!.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(
+                Icons.play_arrow_rounded,
+                size: 19,
+                color: Colors.white.withValues(alpha: 0.9),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                formatCompactCount(post.viewsCount),
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  shadows: const [
+                    Shadow(color: Colors.black54, blurRadius: 4),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
       ],
     );

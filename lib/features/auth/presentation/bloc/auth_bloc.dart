@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../../core/storage/multi_account_storage.dart';
@@ -205,9 +207,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   Future<void> _onSwitchToAccountRequested(AuthSwitchToAccountRequested event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      await _authRepository.signOut();
-      await Future.delayed(const Duration(milliseconds: 300));
-      await _authRepository.signInWithEmail(event.email, event.password);
+      await _authRepository.signOut().timeout(const Duration(seconds: 8));
+      await Future.delayed(const Duration(milliseconds: 150));
+      await _authRepository
+          .signInWithEmail(event.email, event.password)
+          .timeout(const Duration(seconds: 12));
       final user = _authRepository.currentUser;
       if (user != null) {
         await _multiAccountStorage.setLastActiveAccountId(user.id);
@@ -221,6 +225,10 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         );
       }
       if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
+    } on TimeoutException {
+      if (!isClosed) {
+        emit(const AuthError('Переключение аккаунта заняло слишком много времени. Попробуйте снова.'));
+      }
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
     }

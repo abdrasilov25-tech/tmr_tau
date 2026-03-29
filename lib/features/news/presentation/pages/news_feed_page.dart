@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:video_player/video_player.dart';
+import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/double_tap_like_burst.dart';
@@ -442,26 +445,38 @@ class _PostVideoPlayer extends StatefulWidget {
 }
 
 class _PostVideoPlayerState extends State<_PostVideoPlayer> {
-  late VideoPlayerController _controller;
+  VideoPlayerController? _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (mounted) setState(() {});
-      });
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    try {
+      final c = await createCachedVideoController(widget.videoUrl);
+      await c.initialize();
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      setState(() => _controller = c);
+    } catch (_) {
+      if (mounted) setState(() {});
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    unawaited(_controller?.dispose());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_controller.value.isInitialized) {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) {
       return AspectRatio(
         aspectRatio: 16 / 9,
         child: Container(
@@ -473,19 +488,17 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
     return GestureDetector(
       onTap: () {
         setState(() {
-          _controller.value.isPlaying
-              ? _controller.pause()
-              : _controller.play();
+          c.value.isPlaying ? c.pause() : c.play();
         });
       },
       child: Stack(
         alignment: Alignment.center,
         children: [
           AspectRatio(
-            aspectRatio: _controller.value.aspectRatio,
-            child: VideoPlayer(_controller),
+            aspectRatio: c.value.aspectRatio,
+            child: VideoPlayer(c),
           ),
-          if (!_controller.value.isPlaying)
+          if (!c.value.isPlaying)
             Container(
               padding: const EdgeInsets.all(16),
               decoration: const BoxDecoration(

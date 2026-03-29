@@ -6,6 +6,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/media/cached_video_controller.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/story_entity.dart';
 import '../../domain/entities/story_group_entity.dart';
@@ -1232,51 +1233,74 @@ class _StoryVideoContent extends StatefulWidget {
 }
 
 class _StoryVideoContentState extends State<_StoryVideoContent> {
-  late VideoPlayerController _controller;
+  VideoPlayerController? _controller;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (mounted) {
-          setState(() {});
-          _controller.setLooping(true);
-          _controller.play();
-        }
-      });
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    await _loadVideo(widget.videoUrl);
+  }
+
+  Future<void> _loadVideo(String url) async {
+    try {
+      final c = await createCachedVideoController(url);
+      await c.initialize();
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      c.setLooping(true);
+      _controller = c;
+      setState(() {});
+      if (!widget.paused) c.play();
+    } catch (_) {
+      if (mounted) setState(() {});
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    unawaited(_controller?.dispose());
     super.dispose();
   }
 
   @override
   void didUpdateWidget(covariant _StoryVideoContent oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!_controller.value.isInitialized) return;
+    if (oldWidget.videoUrl != widget.videoUrl) {
+      unawaited(_controller?.dispose());
+      _controller = null;
+      setState(() {});
+      unawaited(_loadVideo(widget.videoUrl));
+      return;
+    }
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
     if (oldWidget.paused != widget.paused) {
       if (widget.paused) {
-        _controller.pause();
+        c.pause();
       } else {
-        _controller.play();
+        c.play();
       }
     }
     if (oldWidget.fastForward != widget.fastForward) {
-      _controller.setPlaybackSpeed(widget.fastForward ? 2.0 : 1.0);
+      c.setPlaybackSpeed(widget.fastForward ? 2.0 : 1.0);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_controller.value.isInitialized) {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) {
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),
       );
     }
-    final size = _controller.value.size;
+    final size = c.value.size;
     if (size.width <= 0 || size.height <= 0) {
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),
@@ -1292,7 +1316,7 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                VideoPlayer(_controller),
+                VideoPlayer(c),
                 if (widget.fastForward)
                   const Align(
                     alignment: Alignment.topRight,

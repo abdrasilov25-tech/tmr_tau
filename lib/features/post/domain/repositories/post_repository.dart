@@ -58,6 +58,11 @@ abstract class PostRepository {
     int limit = 50,
     int offset = 0,
   });
+  Future<List<PostEntity>> getLikedPublications(
+    String userId, {
+    int limit = 50,
+    int offset = 0,
+  });
   Future<List<PostCommentEntity>> getComments(String postId);
   Future<void> addComment({
     required String postId,

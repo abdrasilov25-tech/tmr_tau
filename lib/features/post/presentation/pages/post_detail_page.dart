@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/post_comment_entity.dart';
@@ -542,29 +545,41 @@ class _PostVideoPlayer extends StatefulWidget {
 }
 
 class _PostVideoPlayerState extends State<_PostVideoPlayer> {
-  late VideoPlayerController _controller;
+  VideoPlayerController? _controller;
   bool _ready = false;
 
   @override
   void initState() {
     super.initState();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..initialize().then((_) {
-        if (!mounted) return;
-        setState(() => _ready = true);
-        _controller.play();
-      });
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    try {
+      final c = await createCachedVideoController(widget.videoUrl);
+      await c.initialize();
+      if (!mounted) {
+        await c.dispose();
+        return;
+      }
+      _controller = c;
+      setState(() => _ready = true);
+      c.play();
+    } catch (_) {
+      if (mounted) setState(() => _ready = false);
+    }
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    unawaited(_controller?.dispose());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_ready || !_controller.value.isInitialized) {
+    final c = _controller;
+    if (!_ready || c == null || !c.value.isInitialized) {
       return AspectRatio(
         aspectRatio: 16 / 9,
         child: Container(color: Colors.grey.shade300, child: const Center(child: CircularProgressIndicator())),
@@ -574,10 +589,10 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
       behavior: HitTestBehavior.opaque,
       onTap: () {
         setState(() {
-          if (_controller.value.isPlaying) {
-            _controller.pause();
+          if (c.value.isPlaying) {
+            c.pause();
           } else {
-            _controller.play();
+            c.play();
           }
         });
       },
@@ -585,10 +600,10 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
         alignment: Alignment.center,
         children: [
           AspectRatio(
-            aspectRatio: _controller.value.aspectRatio,
-            child: VideoPlayer(_controller),
+            aspectRatio: c.value.aspectRatio,
+            child: VideoPlayer(c),
           ),
-          if (!_controller.value.isPlaying)
+          if (!c.value.isPlaying)
             Container(
               padding: const EdgeInsets.all(14),
               decoration: const BoxDecoration(
