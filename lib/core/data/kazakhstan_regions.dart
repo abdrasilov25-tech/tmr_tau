@@ -55,6 +55,42 @@ abstract final class KazakhstanRegions {
     if (c != null && c.isNotEmpty) return c;
     return 'Вся страна';
   }
+
+  static final List<String> _autocompleteNames =
+      List<String>.unmodifiable(_buildAutocompleteNames());
+
+  static List<String> _buildAutocompleteNames() {
+    final set = <String>{};
+    for (final r in _all) {
+      set.add(r.name);
+      set.addAll(r.settlements);
+    }
+    final list = set.toList();
+    list.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return list;
+  }
+
+  /// Подсказки городов при вводе (справочник РК).
+  static List<String> suggestCities(String query, {int limit = 10}) {
+    final q = query.trim().toLowerCase();
+    if (q.length < 2) return const [];
+    final lim = limit < 1 ? 10 : limit;
+    final starts = <String>[];
+    final contains = <String>[];
+    for (final n in _autocompleteNames) {
+      final ln = n.toLowerCase();
+      if (ln.startsWith(q)) {
+        starts.add(n);
+      } else if (ln.contains(q)) {
+        contains.add(n);
+      }
+    }
+    starts.sort((a, b) => a.length.compareTo(b.length));
+    contains.sort((a, b) => a.length.compareTo(b.length));
+    final out = <String>[...starts, ...contains];
+    if (out.length <= lim) return out;
+    return out.sublist(0, lim);
+  }
 }
 
 const List<KzRegionEntry> _all = [

@@ -131,6 +131,8 @@ alter table public.products add column if not exists is_top boolean default fals
 alter table public.products add column if not exists latitude double precision;
 alter table public.products add column if not exists longitude double precision;
 alter table public.products add column if not exists contact_phone text;
+alter table public.products add column if not exists is_negotiable boolean default false;
+alter table public.products add column if not exists is_giveaway boolean default false;
 -- Массив URL фото (обложка дублируется в image_url для совместимости).
 alter table public.products add column if not exists image_urls jsonb default '[]'::jsonb;
 

@@ -24,6 +24,8 @@ class ProductEntity extends Equatable {
     this.condition = 'any',
     this.isUrgent = false,
     this.isTop = false,
+    this.isNegotiable = false,
+    this.isGiveaway = false,
     this.latitude,
     this.longitude,
     this.contactPhone,
@@ -61,6 +63,10 @@ class ProductEntity extends Equatable {
   final String condition;
   final bool isUrgent;
   final bool isTop;
+  /// Торг возможен (как «есть торг» в объявлении).
+  final bool isNegotiable;
+  /// Отдам даром — цена в карточке не акцентируется, в БД может быть 0.
+  final bool isGiveaway;
   final double? latitude;
   final double? longitude;
   /// Телефон для звонка покупателю (как в OLX), опционально.
@@ -77,7 +83,12 @@ class ProductEntity extends Equatable {
   /// Обложка (совместимость со старым полем `image_url`).
   String get imageUrl => imageUrls.isNotEmpty ? imageUrls.first : '';
 
-  String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
+  String get priceFormatted {
+    if (isGiveaway) return 'Даром';
+    final base = '${price.toStringAsFixed(0)} ₸';
+    if (isNegotiable) return '$base · торг';
+    return base;
+  }
 
   // --- Визуальные флаги (лента / поиск): бесплатные переключатели + платные сроки ---
 
@@ -133,6 +144,8 @@ class ProductEntity extends Equatable {
     condition,
     isUrgent,
     isTop,
+    isNegotiable,
+    isGiveaway,
     latitude,
     longitude,
     contactPhone,

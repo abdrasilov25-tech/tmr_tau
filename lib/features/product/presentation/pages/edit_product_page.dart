@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/utils/kazakhstan_phone.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/category_entity.dart';
@@ -18,6 +19,11 @@ import '../../domain/repositories/categories_repository.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../constants/product_photos.dart';
 import '../widgets/draft_photos_viewer.dart';
+import '../widgets/product_form_city_autocomplete_field.dart';
+import '../widgets/product_form_kz_phone_field.dart';
+import '../widgets/product_form_price_field.dart';
+import '../widgets/product_form_promo_switches.dart';
+import '../widgets/product_listing_promo_flags_controller.dart';
 
 class EditProductPage extends StatefulWidget {
   const EditProductPage({
@@ -39,7 +45,8 @@ class _EditProductPageState extends State<EditProductPage> {
   late final TextEditingController _priceController;
   late final TextEditingController _descriptionController;
   late final TextEditingController _cityController;
-  late final TextEditingController _phoneController;
+  final _cityFocusNode = FocusNode();
+  late final TextEditingController _phoneNationalController;
   bool _loading = false;
   bool _gettingLocation = false;
   final List<String> _remoteImageUrls = [];
@@ -50,8 +57,7 @@ class _EditProductPageState extends State<EditProductPage> {
   CategoryEntity? _selectedSubcategory;
   bool _categoriesLoading = true;
   late String _condition;
-  late bool _isUrgent;
-  late bool _isTop;
+  late final ProductListingPromoFlagsController _promoFlags;
   double? _latitude;
   double? _longitude;
 
@@ -60,17 +66,28 @@ class _EditProductPageState extends State<EditProductPage> {
     super.initState();
     final p = widget.product;
     _titleController = TextEditingController(text: p.title);
-    _priceController = TextEditingController(text: p.price.toStringAsFixed(0));
+    _priceController = TextEditingController(
+      text: p.isGiveaway ? '0' : p.price.toStringAsFixed(0),
+    );
     _descriptionController = TextEditingController(text: p.description);
     _cityController = TextEditingController(text: p.city ?? '');
-    _phoneController = TextEditingController(text: p.contactPhone ?? '');
+    _phoneNationalController = TextEditingController(
+      text: KazakhstanPhone.stripToTenDigits(p.contactPhone ?? ''),
+    );
     _remoteImageUrls.addAll(p.imageUrls);
     if (_remoteImageUrls.isEmpty && p.imageUrl.isNotEmpty) {
       _remoteImageUrls.add(p.imageUrl);
     }
     _condition = p.condition == 'any' ? 'used' : p.condition;
-    _isUrgent = p.isUrgent;
-    _isTop = p.isTop;
+    _promoFlags = ProductListingPromoFlagsController(
+      onGiveawayEnabled: () {
+        _priceController.text = '0';
+      },
+      isUrgent: p.isUrgent,
+      isTop: p.isTop,
+      isNegotiable: p.isNegotiable,
+      isGiveaway: p.isGiveaway,
+    );
     _latitude = p.latitude;
     _longitude = p.longitude;
     WidgetsBinding.instance.addPostFrameCallback((_) => _loadCategories());
@@ -138,7 +155,9 @@ class _EditProductPageState extends State<EditProductPage> {
     _priceController.dispose();
     _descriptionController.dispose();
     _cityController.dispose();
-    _phoneController.dispose();
+    _cityFocusNode.dispose();
+    _phoneNationalController.dispose();
+    _promoFlags.dispose();
     super.dispose();
   }
 
@@ -181,8 +200,8 @@ class _EditProductPageState extends State<EditProductPage> {
       }
       final pos = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 12),
+          accuracy: LocationAccuracy.best,
+          timeLimit: Duration(seconds: 18),
         ),
       );
       if (!mounted) return;
@@ -190,11 +209,15 @@ class _EditProductPageState extends State<EditProductPage> {
         _latitude = pos.latitude;
         _longitude = pos.longitude;
       });
-      await _fillCityFromCoordinates(pos.latitude, pos.longitude);
+      await _fillCityFromCoordinates(pos.latitude, pos.longitude, overwrite: true);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Геолокация добавлена')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Геолокация: ${pos.latitude.toStringAsFixed(5)}, ${pos.longitude.toStringAsFixed(5)}',
+          ),
+        ),
+      );
     } on TimeoutException {
       final last = await Geolocator.getLastKnownPosition();
       if (!mounted) return;
@@ -203,11 +226,17 @@ class _EditProductPageState extends State<EditProductPage> {
           _latitude = last.latitude;
           _longitude = last.longitude;
         });
-        await _fillCityFromCoordinates(last.latitude, last.longitude);
+        await _fillCityFromCoordinates(
+          last.latitude,
+          last.longitude,
+          overwrite: true,
+        );
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Использованы последние известные координаты'),
+          SnackBar(
+            content: Text(
+              'Координаты (последние): ${last.latitude.toStringAsFixed(5)}, ${last.longitude.toStringAsFixed(5)}',
+            ),
           ),
         );
       } else {
@@ -227,7 +256,11 @@ class _EditProductPageState extends State<EditProductPage> {
     }
   }
 
-  Future<void> _fillCityFromCoordinates(double lat, double lng) async {
+  Future<void> _fillCityFromCoordinates(
+    double lat,
+    double lng, {
+    bool overwrite = false,
+  }) async {
     try {
       final places = await placemarkFromCoordinates(lat, lng);
       if (!mounted || places.isEmpty) return;
@@ -236,8 +269,8 @@ class _EditProductPageState extends State<EditProductPage> {
           (p.locality ?? p.subAdministrativeArea ?? p.administrativeArea ?? '')
               .trim();
       if (city.isEmpty) return;
-      if (_cityController.text.trim().isEmpty) {
-        _cityController.text = city;
+      if (overwrite || _cityController.text.trim().isEmpty) {
+        setState(() => _cityController.text = city);
       }
     } catch (_) {
       // Ignore reverse geocoding errors, coordinates are still saved.
@@ -314,13 +347,19 @@ class _EditProductPageState extends State<EditProductPage> {
           ? null
           : _cityController.text.trim(),
       condition: _condition,
-      isUrgent: _isUrgent,
-      isTop: _isTop,
+      isUrgent: _promoFlags.isUrgent,
+      isTop: _promoFlags.isTop,
+      isNegotiable: _promoFlags.isNegotiable,
+      isGiveaway: _promoFlags.isGiveaway,
       latitude: _latitude,
       longitude: _longitude,
-      contactPhone: _phoneController.text.trim().isEmpty
-          ? null
-          : _phoneController.text.trim(),
+      contactPhone: KazakhstanPhone.isValidNationalTen(
+            KazakhstanPhone.stripToTenDigits(_phoneNationalController.text),
+          )
+          ? KazakhstanPhone.fullInternational(
+              KazakhstanPhone.stripToTenDigits(_phoneNationalController.text),
+            )
+          : null,
     );
   }
 
@@ -345,14 +384,31 @@ class _EditProductPageState extends State<EditProductPage> {
       return;
     }
 
-    final price = double.tryParse(
-      _priceController.text.replaceAll(' ', '').replaceAll(',', '.'),
-    );
-    if (price == null || price <= 0) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Укажите цену больше нуля')));
+    final national = KazakhstanPhone.stripToTenDigits(_phoneNationalController.text);
+    if (!KazakhstanPhone.isValidNationalTen(national)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Введите 10 цифр казахстанского номера после +7'),
+        ),
+      );
       return;
+    }
+    final phoneFull = KazakhstanPhone.fullInternational(national);
+
+    late final double resolvedPrice;
+    if (_promoFlags.isGiveaway) {
+      resolvedPrice = 0;
+    } else {
+      final parsed = double.tryParse(
+        _priceController.text.replaceAll(' ', '').replaceAll(',', '.'),
+      );
+      if (parsed == null || parsed <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Укажите цену больше нуля')),
+        );
+        return;
+      }
+      resolvedPrice = parsed;
     }
 
     if (_totalPhotoCount == 0) {
@@ -378,12 +434,11 @@ class _EditProductPageState extends State<EditProductPage> {
           ? widget.product.categoryId
           : _selectedSubcategory?.id;
 
-      final phoneTrim = _phoneController.text.trim();
       await productRepository.updateProduct(
         productId: widget.productId,
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
-        price: price,
+        price: resolvedPrice,
         imageUrls: imageUrls,
         category: categoryLabel,
         categoryId: categoryIdForDb,
@@ -391,11 +446,13 @@ class _EditProductPageState extends State<EditProductPage> {
             ? null
             : _cityController.text.trim(),
         condition: _condition,
-        isUrgent: _isUrgent,
-        isTop: _isTop,
+        isUrgent: _promoFlags.isUrgent,
+        isTop: _promoFlags.isTop,
+        isNegotiable: _promoFlags.isNegotiable,
+        isGiveaway: _promoFlags.isGiveaway,
         latitude: _latitude,
         longitude: _longitude,
-        contactPhone: phoneTrim.isEmpty ? null : phoneTrim,
+        contactPhone: phoneFull,
       );
       if (!mounted) return;
       final authState = context.read<AuthBloc>().state;
@@ -408,7 +465,8 @@ class _EditProductPageState extends State<EditProductPage> {
       );
       if (!mounted) return;
       // Если повторный SELECT недоступен (RLS/сеть), всё равно отдаём экрану актуальные поля.
-      final out = updated ?? _buildLocalProductFromForm(price, imageUrls);
+      final out =
+          updated ?? _buildLocalProductFromForm(resolvedPrice, imageUrls);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Товар обновлён')));
@@ -671,53 +729,18 @@ class _EditProductPageState extends State<EditProductPage> {
                   (v == null || v.trim().isEmpty) ? 'Введите название' : null,
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _priceController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Цена (₸) *',
-                hintText: '0',
-              ),
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'Введите цену';
-                final p = double.tryParse(
-                  v.replaceAll(' ', '').replaceAll(',', '.'),
-                );
-                if (p == null) return 'Некорректная цена';
-                if (p <= 0) return 'Цена должна быть больше нуля';
-                return null;
-              },
+            ProductFormPriceField(
+              flags: _promoFlags,
+              priceController: _priceController,
             ),
             const SizedBox(height: 16),
-            TextFormField(
+            ProductFormCityAutocompleteField(
               controller: _cityController,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Город *',
-                hintText: 'Например, Алматы',
-              ),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Укажите город' : null,
+              focusNode: _cityFocusNode,
             ),
             const SizedBox(height: 16),
-            TextFormField(
-              controller: _phoneController,
-              keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: 'Телефон для звонков *',
-                hintText: '+7 707 123 45 67',
-                helperText:
-                    'Покупатели увидят номер после «Позвонить»',
-              ),
-              validator: (v) {
-                final t = v?.trim() ?? '';
-                if (t.isEmpty) return 'Укажите номер телефона';
-                final digits = t.replaceAll(RegExp(r'\D'), '');
-                if (digits.length < 9) {
-                  return 'Введите номер полностью';
-                }
-                return null;
-              },
+            ProductFormKzPhoneField(
+              controller: _phoneNationalController,
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
@@ -734,18 +757,8 @@ class _EditProductPageState extends State<EditProductPage> {
               },
             ),
             const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Срочное объявление'),
-              value: _isUrgent,
-              onChanged: (v) => setState(() => _isUrgent = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('Поднять в ТОП'),
-              value: _isTop,
-              onChanged: (v) => setState(() => _isTop = v),
-            ),
+            ProductFormPromoSwitches(flags: _promoFlags),
+            const SizedBox(height: 8),
             Text(
               'Платное продвижение на 24 ч и статистика — кнопка «Продвижение» в объявлении.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -768,6 +781,16 @@ class _EditProductPageState extends State<EditProductPage> {
                     : 'Геолокация добавлена',
               ),
             ),
+            if (_latitude != null && _longitude != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Широта ${_latitude!.toStringAsFixed(5)}, долгота ${_longitude!.toStringAsFixed(5)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.outline,
+                      ),
+                ),
+              ),
             const SizedBox(height: 16),
             TextFormField(
               controller: _descriptionController,

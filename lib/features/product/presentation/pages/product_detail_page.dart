@@ -335,6 +335,31 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                           color: Theme.of(context).colorScheme.primary,
                         ),
                   ),
+                  if (_product.isGiveaway || _product.isNegotiable) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        if (_product.isGiveaway)
+                          Chip(
+                            label: const Text('Отдам даром'),
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            labelStyle:
+                                Theme.of(context).textTheme.labelMedium,
+                          ),
+                        if (_product.isNegotiable)
+                          Chip(
+                            label: const Text('Есть торг'),
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            labelStyle:
+                                Theme.of(context).textTheme.labelMedium,
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Align(
                     alignment: Alignment.centerLeft,

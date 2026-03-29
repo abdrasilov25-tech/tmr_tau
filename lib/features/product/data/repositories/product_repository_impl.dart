@@ -13,7 +13,7 @@ class ProductRepositoryImpl implements ProductRepository {
   final SupabaseClient _client;
 
   static const String _productSelect =
-      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, latitude, longitude, contact_phone, promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count, users!seller_id(name, avatar), categories!category_id(name)';
+      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, is_negotiable, is_giveaway, latitude, longitude, contact_phone, promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count, users!seller_id(name, avatar), categories!category_id(name)';
 
   dynamic _excludeSellerIds(dynamic queryBuilder, Set<String> excludeSellerIds) {
     if (excludeSellerIds.isEmpty) return queryBuilder;
@@ -249,6 +249,8 @@ class ProductRepositoryImpl implements ProductRepository {
     String condition = 'any',
     bool isUrgent = false,
     bool isTop = false,
+    bool isNegotiable = false,
+    bool isGiveaway = false,
     double? latitude,
     double? longitude,
     String? contactPhone,
@@ -268,6 +270,8 @@ class ProductRepositoryImpl implements ProductRepository {
       'condition': condition,
       'is_urgent': isUrgent,
       'is_top': isTop,
+      'is_negotiable': isNegotiable,
+      'is_giveaway': isGiveaway,
       'latitude': latitude,
       'longitude': longitude,
       'contact_phone': (phoneDb == null || phoneDb.isEmpty) ? null : phoneDb,
@@ -289,6 +293,8 @@ class ProductRepositoryImpl implements ProductRepository {
     String condition = 'any',
     bool isUrgent = false,
     bool isTop = false,
+    bool isNegotiable = false,
+    bool isGiveaway = false,
     double? latitude,
     double? longitude,
     String? contactPhone,
@@ -308,6 +314,8 @@ class ProductRepositoryImpl implements ProductRepository {
       'condition': condition,
       'is_urgent': isUrgent,
       'is_top': isTop,
+      'is_negotiable': isNegotiable,
+      'is_giveaway': isGiveaway,
       'latitude': latitude,
       'longitude': longitude,
       'contact_phone': (phoneDb == null || phoneDb.isEmpty) ? null : phoneDb,
