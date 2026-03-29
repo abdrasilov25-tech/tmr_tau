@@ -8,6 +8,7 @@ import 'core/storage/chat_list_storage.dart';
 import 'core/storage/chat_story_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
+import 'core/config/oauth_env_config.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 Future<bool> _initializeSupabase(String url, String anonKey) async {
@@ -40,6 +41,9 @@ Future<void> main() async {
   // Не логируем URL и ключи даже в debug — не попадут в логи/краши
   assert(() {
     debugPrint('Supabase config loaded (URL/keys not logged)');
+    debugPrint(
+      'OAuth env loaded (google keys present: ${OAuthEnvConfig.hasGoogleOAuthEnv})',
+    );
     return true;
   }());
 

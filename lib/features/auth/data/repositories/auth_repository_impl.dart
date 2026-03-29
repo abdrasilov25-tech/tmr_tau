@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_remote_datasource.dart';
+import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/constants/supabase_constants.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
@@ -105,11 +108,19 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<void> signInWithGoogle() async {
+    final queryParams = <String, String>{
+      'prompt': 'select_account',
+    };
+    final webClientId = OAuthEnvConfig.googleWebClientId;
+    if (webClientId.isNotEmpty) {
+      queryParams['client_id'] = webClientId;
+    }
     await _client.auth.signInWithOAuth(
       OAuthProvider.google,
-      redirectTo: 'tmrtau://auth/callback', // Замените на ваш app scheme
+      redirectTo: OAuthEnvConfig.redirectTo,
+      queryParams: queryParams,
     );
-    final authUser = _client.auth.currentUser;
+    final authUser = await _waitForOAuthUser();
     final uid = authUser?.id;
     if (uid == null) return;
     _cachedUser = await _dataSource.fetchUserProfile(uid);
@@ -133,9 +144,9 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> signInWithApple() async {
     await _client.auth.signInWithOAuth(
       OAuthProvider.apple,
-      redirectTo: 'tmrtau://auth/callback',
+      redirectTo: OAuthEnvConfig.redirectTo,
     );
-    final authUser = _client.auth.currentUser;
+    final authUser = await _waitForOAuthUser();
     final uid = authUser?.id;
     if (uid == null) return;
     _cachedUser = await _dataSource.fetchUserProfile(uid);
@@ -197,7 +208,7 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> resetPasswordForEmail(String email) async {
     await _client.auth.resetPasswordForEmail(
       email,
-      redirectTo: 'tmrtau://auth/callback',
+      redirectTo: OAuthEnvConfig.redirectTo,
     );
   }
 
@@ -221,5 +232,24 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> signOut() async {
     _cachedUser = null;
     await _dataSource.signOut();
+  }
+
+  Future<User?> _waitForOAuthUser({Duration timeout = const Duration(seconds: 90)}) async {
+    final existing = _client.auth.currentUser;
+    if (existing != null) return existing;
+
+    final completer = Completer<User?>();
+    late final StreamSubscription<AuthState> sub;
+    sub = _client.auth.onAuthStateChange.listen((event) {
+      final user = event.session?.user ?? _client.auth.currentUser;
+      if (user != null && !completer.isCompleted) {
+        completer.complete(user);
+      }
+    });
+    try {
+      return await completer.future.timeout(timeout, onTimeout: () => _client.auth.currentUser);
+    } finally {
+      await sub.cancel();
+    }
   }
 }

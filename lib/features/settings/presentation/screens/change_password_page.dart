@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 
@@ -38,7 +39,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     try {
       await Supabase.instance.client.auth.resetPasswordForEmail(
         email,
-        redirectTo: 'tmrtau://auth/callback',
+        redirectTo: OAuthEnvConfig.redirectTo,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

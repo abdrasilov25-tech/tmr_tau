@@ -618,13 +618,27 @@ create trigger on_post_comment after insert or delete on public.post_comments fo
 
 -- ============== Create profile on signup ==============
 create or replace function public.handle_new_user()
-returns trigger as $$
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_name text;
 begin
+  v_name := coalesce(
+    nullif(trim(new.raw_user_meta_data->>'full_name'), ''),
+    nullif(trim(new.raw_user_meta_data->>'name'), ''),
+    nullif(trim(new.raw_user_meta_data->>'given_name'), ''),
+    nullif(trim(new.email), ''),
+    'Пользователь'
+  );
   insert into public.users (id, name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'name', new.email));
+  values (new.id, v_name)
+  on conflict (id) do nothing;
   return new;
 end;
-$$ language plpgsql security definer;
+$$;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created

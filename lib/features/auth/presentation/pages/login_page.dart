@@ -22,7 +22,6 @@ import 'login_result.dart';
 class _NeonColors {
   static const pink = Color(0xFFE91E8C);
   static const orange = Color(0xFFFF6B35);
-  static const teal = Color(0xFF00D9D9);
   static const cyan = Color(0xFF00E5FF);
   static const white = Color(0xFFFFFFFF);
   static const white60 = Color(0x99FFFFFF);
@@ -49,6 +48,7 @@ class _LoginPageState extends State<LoginPage>
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
+  bool _lampOn = false;
   bool _authHandled = false;
   List<AccountModel> _quickAccounts = const [];
   late AnimationController _scaleController;
@@ -130,7 +130,7 @@ class _LoginPageState extends State<LoginPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _NeonColors.teal,
+      backgroundColor: const Color(0xFF0D0F14),
       body: Stack(
         fit: StackFit.expand,
         children: [
@@ -144,6 +144,12 @@ class _LoginPageState extends State<LoginPage>
                 ),
               );
             },
+          ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 260),
+            color: _lampOn
+                ? Colors.transparent
+                : Colors.black.withValues(alpha: 0.40),
           ),
           // Глубина: размытые светящиеся пятна
           _buildGlowSpots(),
@@ -222,6 +228,14 @@ class _LoginPageState extends State<LoginPage>
             ),
           );
         }
+        if (state is AuthPasswordResetSent) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Ссылка для сброса отправлена на почту'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       },
       builder: (context, state) {
         final loading = state is AuthLoading;
@@ -238,13 +252,17 @@ class _LoginPageState extends State<LoginPage>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 44),
+                _buildLampShowcase(),
+                const SizedBox(height: 12),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: ThemedContentSurface.loginPanel,
+                        color: _lampOn
+                            ? Colors.white.withValues(alpha: 0.22)
+                            : ThemedContentSurface.loginPanel,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: Colors.black.withValues(alpha: 0.06),
@@ -258,31 +276,33 @@ class _LoginPageState extends State<LoginPage>
                         ],
                       ),
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+                        padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                 Text(
-                  'tmr_tau',
+                  'Вход',
                   style: GoogleFonts.poppins(
-                    fontSize: 36,
+                    fontSize: 30,
                     fontWeight: FontWeight.bold,
-                    color: titleColor,
+                    color: _lampOn ? Colors.white : titleColor,
                     letterSpacing: 1.2,
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Войдите в аккаунт',
+                  'Войдите для продолжение',
                   style: GoogleFonts.poppins(
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.w400,
-                    color: subtitleColor,
+                    color: _lampOn
+                        ? Colors.white.withValues(alpha: 0.85)
+                        : subtitleColor,
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 36),
+                const SizedBox(height: 22),
                 _NeonTextField(
                   controller: _emailController,
                   focusNode: _emailFocus,
@@ -297,7 +317,7 @@ class _LoginPageState extends State<LoginPage>
                     return null;
                   },
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 12),
                 _NeonTextField(
                   controller: _passwordController,
                   focusNode: _passwordFocus,
@@ -311,7 +331,36 @@ class _LoginPageState extends State<LoginPage>
                   validator: (v) =>
                       (v == null || v.isEmpty) ? 'Введите пароль' : null,
                 ),
-                const SizedBox(height: 40),
+                const SizedBox(height: 14),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: loading
+                        ? null
+                        : () {
+                            final email = _emailController.text.trim();
+                            if (email.isEmpty || !email.contains('@')) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Введите корректный email для сброса пароля'),
+                                ),
+                              );
+                              return;
+                            }
+                            context.read<AuthBloc>().add(
+                                  AuthResetPasswordRequested(email: email),
+                                );
+                          },
+                    child: Text(
+                      'Забыли пароль?',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 _NeonLoginButton(
                   scaleAnimation: _scaleAnimation,
                   onTapDown: () => _scaleController.forward(),
@@ -333,23 +382,34 @@ class _LoginPageState extends State<LoginPage>
                     child: const Text('Продолжить с Apple'),
                   ),
                 ],
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
+                FilledButton.tonal(
+                  onPressed: loading
+                      ? null
+                      : () {
+                          context
+                              .read<AuthBloc>()
+                              .add(const AuthSignInWithGoogleRequested());
+                        },
+                  child: const Text('Продолжить с Google'),
+                ),
+                const SizedBox(height: 12),
                 TextButton(
                   onPressed: () => context.push('/register'),
                   style: TextButton.styleFrom(
                     foregroundColor: Colors.green,
                   ),
                   child: Text(
-                    'Нет аккаунта? Зарегистрироваться',
+                    'Регистрация',
                     style: GoogleFonts.poppins(
-                      fontSize: 14,
+                      fontSize: 13,
                       color: Colors.green,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 8),
                 if (_quickAccounts.isNotEmpty) ...[
-                  const SizedBox(height: 8),
                   Text(
                     'Быстрый вход',
                     style: GoogleFonts.poppins(
@@ -359,9 +419,9 @@ class _LoginPageState extends State<LoginPage>
                     ),
                     textAlign: TextAlign.left,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   SizedBox(
-                    height: 76,
+                    height: 66,
                     child: Builder(
                       builder: (context) {
                         final saved =
@@ -399,19 +459,19 @@ class _LoginPageState extends State<LoginPage>
                                 children: [
                                   CachedAvatar(
                                     imageUrl: uniqueUrl,
-                                    radius: 18,
+                                    radius: 16,
                                     fallbackText: savedMatch.displayName,
                                   ),
-                                  const SizedBox(height: 4),
+                                  const SizedBox(height: 3),
                                   SizedBox(
-                                    width: 80,
+                                    width: 74,
                                     child: Text(
                                       savedMatch.displayName,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       textAlign: TextAlign.center,
                                       style: GoogleFonts.poppins(
-                                        fontSize: 11,
+                                        fontSize: 10,
                                         color: subtitleColor,
                                       ),
                                     ),
@@ -424,7 +484,7 @@ class _LoginPageState extends State<LoginPage>
                       },
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 8),
                 ],
                           ],
                         ),
@@ -432,7 +492,7 @@ class _LoginPageState extends State<LoginPage>
                     ),
                   ),
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 12),
               ],
             ),
           ),
@@ -460,6 +520,104 @@ class _LoginPageState extends State<LoginPage>
       );
       _emailController.text = account.email;
     }
+  }
+
+  Widget _buildLampShowcase() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 260),
+          height: 148,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () => setState(() => _lampOn = !_lampOn),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 260),
+                      width: 88,
+                      height: 106,
+                      decoration: BoxDecoration(
+                        boxShadow: _lampOn
+                            ? [
+                                BoxShadow(
+                                  color: const Color(0xFFFFF4BE).withValues(alpha: 0.65),
+                                  blurRadius: 36,
+                                  spreadRadius: 10,
+                                ),
+                              ]
+                            : const [],
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 78,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(48),
+                                bottom: Radius.circular(18),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            width: 10,
+                            height: 42,
+                            color: Colors.white,
+                          ),
+                          Container(
+                            width: 44,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: _lampOn
+                        ? const Color(0x30FFF2BF)
+                        : Colors.white.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.18),
+                    ),
+                  ),
+                  child: Text(
+                    'Welcome',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildThemeButton() {
