@@ -21,6 +21,7 @@ import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../notifications/domain/repositories/notifications_repository.dart';
 import '../../../notifications/presentation/notification_activity_peek_bus.dart';
+import '../../../notifications/presentation/notification_tab_badge_controller.dart';
 import '../../../notifications/presentation/widgets/notification_activity_peek_bar.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
@@ -1315,6 +1316,7 @@ class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
 
   void _onUnreadInvalidateTick() {
     _loadUnread();
+    unawaited(context.read<NotificationTabBadgeController>().refresh());
   }
 
   Future<void> _loadUnread() async {

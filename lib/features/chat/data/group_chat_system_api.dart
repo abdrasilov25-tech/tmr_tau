@@ -21,12 +21,12 @@ abstract final class GroupChatSystemApi {
   static Future<void> notifyMemberJoined(
     SupabaseClient client, {
     required String groupId,
-    required String ownerId,
+    required String actorId,
     required String memberName,
   }) async {
     await client.from(SupabaseConstants.chatGroupMessagesTable).insert({
       'group_id': groupId,
-      'sender_id': ownerId,
+      'sender_id': actorId,
       'text': '$memberName присоединился(ась) к группе',
       'kind': 'system_join',
     });

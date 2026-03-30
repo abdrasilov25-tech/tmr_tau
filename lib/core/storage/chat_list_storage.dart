@@ -27,10 +27,11 @@ class ChatListStorage {
   String _dialogKey(String peerId) => '${_base}dialog_$peerId';
   String _acceptedKey(String peerId) => '${_base}accepted_$peerId';
   String _declinedKey(String peerId) => '${_base}declined_$peerId';
-  String _declinedMsgEpochKey(String peerId) =>
-      '${_base}declined_msg_$peerId';
-  String _hiddenMessagesKey(String peerId) =>
-      '${_base}hidden_messages_$peerId';
+  String _declinedMsgEpochKey(String peerId) => '${_base}declined_msg_$peerId';
+  String _hiddenMessagesKey(String peerId) => '${_base}hidden_messages_$peerId';
+
+  String _cityChatRulesKey(String groupId) =>
+      '${_base}city_rules_seen_${groupId.trim()}';
 
   /// Id для префиксов read/accepted/…: у тредов `direct:uuid` это часть после `:`.
   String _prefsPeerIdFromThreadKey(String storageKeyOrPeerId) {
@@ -85,6 +86,16 @@ class ChatListStorage {
     await _prefs.setBool(_acceptedKey(peerId), value);
   }
 
+  /// Отметка «правила городского чата показаны» (локально на устройстве, по группе).
+  bool hasSeenCityChatRules(String groupId) {
+    return _prefs.getBool(_cityChatRulesKey(groupId)) ?? false;
+  }
+
+  Future<void> setSeenCityChatRules(String groupId) async {
+    if (_activeAccountId.isEmpty) return;
+    await _prefs.setBool(_cityChatRulesKey(groupId), true);
+  }
+
   bool isDeclined(String peerId) {
     return _prefs.getBool(_declinedKey(peerId)) ?? false;
   }
@@ -98,10 +109,7 @@ class ChatListStorage {
     if (value) {
       await _prefs.setBool(_declinedKey(peerId), true);
       if (lastMessageEpochMs != null) {
-        await _prefs.setInt(
-          _declinedMsgEpochKey(peerId),
-          lastMessageEpochMs,
-        );
+        await _prefs.setInt(_declinedMsgEpochKey(peerId), lastMessageEpochMs);
       }
     } else {
       await _prefs.remove(_declinedKey(peerId));

@@ -19,6 +19,8 @@ import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_grid_engagement_overlay.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../product/domain/entities/product_entity.dart';
+import '../../../product/data/services/payment_service.dart';
+import '../../../product/presentation/bloc/payment_cubit.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
 import '../bloc/profile_bloc.dart';
@@ -76,10 +78,7 @@ class SellerProfilePage extends StatelessWidget {
     if (hide) {
       await Supabase.instance.client
           .from(SupabaseConstants.hiddenStoriesTable)
-          .upsert({
-            'owner_id': current,
-            'hidden_user_id': sellerId,
-          });
+          .upsert({'owner_id': current, 'hidden_user_id': sellerId});
     } else {
       await Supabase.instance.client
           .from(SupabaseConstants.hiddenStoriesTable)
@@ -89,7 +88,10 @@ class SellerProfilePage extends StatelessWidget {
     }
   }
 
-  Future<void> _toggleBlockUser(String currentUserId, bool currentlyBlocked) async {
+  Future<void> _toggleBlockUser(
+    String currentUserId,
+    bool currentlyBlocked,
+  ) async {
     final repo = SettingsRepositoryImpl(Supabase.instance.client);
     if (currentlyBlocked) {
       await repo.unblockUser(blockerId: currentUserId, blockedUserId: sellerId);
@@ -185,7 +187,9 @@ class SellerProfilePage extends StatelessWidget {
           messenger.showSnackBar(
             SnackBar(
               content: Text(
-                blocked ? 'Пользователь разблокирован' : 'Пользователь заблокирован',
+                blocked
+                    ? 'Пользователь разблокирован'
+                    : 'Пользователь заблокирован',
               ),
             ),
           );
@@ -217,9 +221,7 @@ class SellerProfilePage extends StatelessWidget {
           break;
         case 'share':
           final url = _profileUrl(sellerId);
-          await SharePlus.instance.share(
-            ShareParams(text: url),
-          );
+          await SharePlus.instance.share(ShareParams(text: url));
           break;
       }
     } catch (e) {
@@ -236,8 +238,9 @@ class SellerProfilePage extends StatelessWidget {
         ? (context.read<AuthBloc>().state as AuthAuthenticated).user.id
         : null;
     return BlocProvider(
-      create: (c) => ProfileBloc(c.read<ProfileRepository>())
-        ..add(ProfileLoadRequested(sellerId, currentUserId: currentUserId)),
+      create: (c) =>
+          ProfileBloc(c.read<ProfileRepository>())
+            ..add(ProfileLoadRequested(sellerId, currentUserId: currentUserId)),
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Профиль'),
@@ -258,9 +261,9 @@ class SellerProfilePage extends StatelessWidget {
             if (state is ProfileFailure) {
               return AppErrorView(
                 message: state.message,
-                onRetry: () => context
-                    .read<ProfileBloc>()
-                    .add(ProfileLoadRequested(sellerId)),
+                onRetry: () => context.read<ProfileBloc>().add(
+                  ProfileLoadRequested(sellerId),
+                ),
               );
             }
             if (state is ProfileSuccess) {
@@ -289,6 +292,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   bool _loadingPublications = true;
   String? _currentUserId;
   bool _isMutualFollow = false;
+
   /// Подписчик подписан на вас, а вы на него ещё нет (как подпись в Instagram).
   bool _peerFollowsMe = false;
   List<SellerProfileEntity> _commonFollowers = const [];
@@ -320,9 +324,9 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   Future<void> _loadPublications() async {
     try {
       final posts = await context.read<PostRepository>().getPostsByUser(
-            widget.profile.id,
-            currentUserId: _currentUserId,
-          );
+        widget.profile.id,
+        currentUserId: _currentUserId,
+      );
       if (!mounted) return;
       setState(() {
         _publicationPosts = posts
@@ -521,209 +525,223 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                GestureDetector(
-                  onTap: () {
-                    final imageUrl = profile.avatarUrl;
-                    if (imageUrl == null || imageUrl.isEmpty) return;
-                    showDialog<void>(
-                      context: context,
-                      builder: (ctx) => Dialog(
-                        backgroundColor: Colors.black,
-                        insetPadding: const EdgeInsets.all(24),
-                        child: AspectRatio(
-                          aspectRatio: 1,
-                          child: InteractiveViewer(
-                            child: CachedNetworkImage(
-                              imageUrl: imageUrl,
-                              fit: BoxFit.cover,
-                              fadeInDuration: Duration.zero,
-                              fadeOutDuration: Duration.zero,
-                              placeholder: (_, __) =>
-                                  const ColoredBox(color: Colors.black26),
-                              errorWidget: (_, __, ___) =>
-                                  const ColoredBox(color: Colors.black54),
+                    GestureDetector(
+                      onTap: () {
+                        final imageUrl = profile.avatarUrl;
+                        if (imageUrl == null || imageUrl.isEmpty) return;
+                        showDialog<void>(
+                          context: context,
+                          builder: (ctx) => Dialog(
+                            backgroundColor: Colors.black,
+                            insetPadding: const EdgeInsets.all(24),
+                            child: AspectRatio(
+                              aspectRatio: 1,
+                              child: InteractiveViewer(
+                                child: CachedNetworkImage(
+                                  imageUrl: imageUrl,
+                                  fit: BoxFit.cover,
+                                  fadeInDuration: Duration.zero,
+                                  fadeOutDuration: Duration.zero,
+                                  placeholder: (context, url) =>
+                                      const ColoredBox(color: Colors.black26),
+                                  errorWidget: (context, url, error) =>
+                                      const ColoredBox(color: Colors.black54),
+                                ),
+                              ),
                             ),
                           ),
+                        );
+                      },
+                      child: CachedAvatar(
+                        imageUrl:
+                            profile.avatarUrl != null &&
+                                profile.avatarUrl!.isNotEmpty
+                            ? '${profile.avatarUrl}?uid=${profile.id}'
+                            : null,
+                        radius: 48,
+                        fallbackText: profile.name,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          profile.name,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(
+                                color: ThemedContentSurface.profileTextPrimary,
+                              ),
+                        ),
+                        if (profile.isVerified) ...[
+                          const SizedBox(width: 6),
+                          const VerifiedBadge(size: 22),
+                        ],
+                      ],
+                    ),
+                    if (profile.bio != null && profile.bio!.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        width: double.infinity,
+                        margin: const EdgeInsets.only(top: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.grey.shade300),
+                        ),
+                        child: Text(
+                          profile.bio!,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color:
+                                    ThemedContentSurface.profileTextSecondary,
+                                height: 1.35,
+                              ),
+                          textAlign: TextAlign.center,
                         ),
                       ),
-                    );
-                  },
-                  child: CachedAvatar(
-                    imageUrl: profile.avatarUrl != null &&
-                            profile.avatarUrl!.isNotEmpty
-                        ? '${profile.avatarUrl}?uid=${profile.id}'
-                        : null,
-                    radius: 48,
-                    fallbackText: profile.name,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      profile.name,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                            color: ThemedContentSurface.profileTextPrimary,
-                          ),
-                    ),
-                    if (profile.isVerified) ...[
-                      const SizedBox(width: 6),
-                      const VerifiedBadge(size: 22),
                     ],
-                  ],
-                ),
-                if (profile.bio != null && profile.bio!.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(top: 4),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: Text(
-                      profile.bio!,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: ThemedContentSurface.profileTextSecondary,
-                            height: 1.35,
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _SellerTikTokStat(
+                            value: '${profile.followersCount}',
+                            label: 'подписчиков',
                           ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SellerTikTokStat(
-                        value: '${profile.followersCount}',
-                        label: 'подписчиков',
-                      ),
-                    ),
-                    Expanded(
-                      child: _SellerTikTokStat(
-                        value: '${profile.followingCount}',
-                        label: 'подписок',
-                      ),
-                    ),
-                    Expanded(
-                      child: _SellerTikTokStat(
-                        value: formatCompactCount(
-                          profile.totalReceivedPostLikes,
                         ),
-                        label: 'лайки',
-                      ),
+                        Expanded(
+                          child: _SellerTikTokStat(
+                            value: '${profile.followingCount}',
+                            label: 'подписок',
+                          ),
+                        ),
+                        Expanded(
+                          child: _SellerTikTokStat(
+                            value: formatCompactCount(
+                              profile.totalReceivedPostLikes,
+                            ),
+                            label: 'лайки',
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                if (profile.products.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    '${profile.products.length} товаров',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    if (profile.products.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        '${profile.products.length} товаров',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: ThemedContentSurface.profileTextSecondary,
                         ),
-                  ),
-                ],
-                if (_commonFollowers.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: _showCommonFollowersSheet,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 6,
                       ),
-                      child: Row(
-                        children: [
-                          SizedBox(
-                            width: 74,
-                            height: 28,
-                            child: Stack(
-                              clipBehavior: Clip.none,
-                              children: [
-                                for (var i = 0;
-                                    i < (_commonFollowers.length < 3
-                                        ? _commonFollowers.length
-                                        : 3);
-                                    i++)
-                                  Positioned(
-                                    left: i * 18,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: Colors.white,
-                                          width: 2,
+                    ],
+                    if (_commonFollowers.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _showCommonFollowersSheet,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 6,
+                          ),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 74,
+                                height: 28,
+                                child: Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    for (
+                                      var i = 0;
+                                      i <
+                                          (_commonFollowers.length < 3
+                                              ? _commonFollowers.length
+                                              : 3);
+                                      i++
+                                    )
+                                      Positioned(
+                                        left: i * 18,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: Colors.white,
+                                              width: 2,
+                                            ),
+                                          ),
+                                          child: CachedAvatar(
+                                            imageUrl:
+                                                _commonFollowers[i].avatarUrl,
+                                            radius: 13,
+                                            fallbackText:
+                                                _commonFollowers[i].name,
+                                          ),
                                         ),
                                       ),
-                                      child: CachedAvatar(
-                                        imageUrl: _commonFollowers[i].avatarUrl,
-                                        radius: 13,
-                                        fallbackText: _commonFollowers[i].name,
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Text(
+                                  _commonFollowers.length == 1
+                                      ? 'Подписаны: ${_commonFollowers.first.name}'
+                                      : 'Подписаны: ${_commonFollowers.take(2).map((u) => u.name).join(', ')}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.bodyMedium
+                                      ?.copyWith(
+                                        color: ThemedContentSurface
+                                            .profileTextSecondary,
+                                        fontWeight: FontWeight.w500,
                                       ),
-                                    ),
-                                  ),
-                              ],
-                            ),
+                                ),
+                              ),
+                              const Icon(Icons.chevron_right_rounded, size: 20),
+                            ],
                           ),
-                          Expanded(
-                            child: Text(
-                              _commonFollowers.length == 1
-                                  ? 'Подписаны: ${_commonFollowers.first.name}'
-                                  : 'Подписаны: ${_commonFollowers.take(2).map((u) => u.name).join(', ')}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                    color:
-                                        ThemedContentSurface.profileTextSecondary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                            ),
-                          ),
-                          const Icon(Icons.chevron_right_rounded, size: 20),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                ],
-                if (_currentUserId != null && _currentUserId != profile.id) ...[
-                  if (!profile.isFollowingByMe && _peerFollowsMe) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Подписан на вас',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: ThemedContentSurface.profileTextSecondary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: (profile.isFollowingByMe
+                    ],
+                    if (_currentUserId != null &&
+                        _currentUserId != profile.id) ...[
+                      if (!profile.isFollowingByMe && _peerFollowsMe) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          'Подписан на вас',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color:
+                                    ThemedContentSurface.profileTextSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: (profile.isFollowingByMe
                                 ? OutlinedButton(
                                     onPressed: () async {
-                                      final uid = (context.read<AuthBloc>().state
-                                              as AuthAuthenticated)
-                                          .user
-                                          .id;
+                                      final uid =
+                                          (context.read<AuthBloc>().state
+                                                  as AuthAuthenticated)
+                                              .user
+                                              .id;
                                       context.read<ProfileBloc>().add(
-                                            ProfileToggleFollow(
-                                              followerId: uid,
-                                              followingId: profile.id,
-                                            ),
-                                          );
+                                        ProfileToggleFollow(
+                                          followerId: uid,
+                                          followingId: profile.id,
+                                        ),
+                                      );
                                       await Future<void>.delayed(
                                         const Duration(milliseconds: 220),
                                       );
@@ -739,16 +757,17 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                   )
                                 : FilledButton(
                                     onPressed: () async {
-                                      final uid = (context.read<AuthBloc>().state
-                                              as AuthAuthenticated)
-                                          .user
-                                          .id;
+                                      final uid =
+                                          (context.read<AuthBloc>().state
+                                                  as AuthAuthenticated)
+                                              .user
+                                              .id;
                                       context.read<ProfileBloc>().add(
-                                            ProfileToggleFollow(
-                                              followerId: uid,
-                                              followingId: profile.id,
-                                            ),
-                                          );
+                                        ProfileToggleFollow(
+                                          followerId: uid,
+                                          followingId: profile.id,
+                                        ),
+                                      );
                                       await Future<void>.delayed(
                                         const Duration(milliseconds: 220),
                                       );
@@ -762,17 +781,22 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                           : 'Подписаться',
                                     ),
                                   )),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: StartChatButton(
-                          peerId: profile.id,
-                          peerName: profile.name,
-                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: StartChatButton(
+                              peerId: profile.id,
+                              peerName: profile.name,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                ],
+                    if (_currentUserId != null &&
+                        _currentUserId == profile.id) ...[
+                      const SizedBox(height: 16),
+                      const _OwnQarmetProfilePanel(),
+                    ],
                   ],
                 ),
               ),
@@ -783,7 +807,9 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: DecoratedBox(
-              decoration: ThemedContentSurface.profileCardDecoration(radius: 16),
+              decoration: ThemedContentSurface.profileCardDecoration(
+                radius: 16,
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(8),
                 child: Row(
@@ -819,17 +845,14 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
               crossAxisSpacing: 8,
               mainAxisSpacing: 8,
             ),
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                final product = profile.products[index];
-                return _ProductGridTile(
-                  product: product,
-                  onTap: () =>
-                      context.push('/product/${product.id}', extra: product),
-                );
-              },
-              childCount: profile.products.length,
-            ),
+            delegate: SliverChildBuilderDelegate((context, index) {
+              final product = profile.products[index];
+              return _ProductGridTile(
+                product: product,
+                onTap: () =>
+                    context.push('/product/${product.id}', extra: product),
+              );
+            }, childCount: profile.products.length),
           )
         else
           SliverToBoxAdapter(
@@ -844,10 +867,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
 }
 
 class _ProductGridTile extends StatelessWidget {
-  const _ProductGridTile({
-    required this.product,
-    required this.onTap,
-  });
+  const _ProductGridTile({required this.product, required this.onTap});
 
   final ProductEntity product;
   final VoidCallback onTap;
@@ -882,8 +902,8 @@ class _ProductGridTile extends StatelessWidget {
               child: Text(
                 product.priceFormatted,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
+                  color: Theme.of(context).colorScheme.primary,
+                ),
               ),
             ),
           ],
@@ -923,7 +943,11 @@ class _ProfileTabChip extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 18, color: selected ? Colors.black87 : Colors.grey),
+              Icon(
+                icon,
+                size: 18,
+                color: selected ? Colors.black87 : Colors.grey,
+              ),
               const SizedBox(width: 6),
               Text(
                 label,
@@ -941,10 +965,7 @@ class _ProfileTabChip extends StatelessWidget {
 }
 
 class _ProfilePublicationsGrid extends StatelessWidget {
-  const _ProfilePublicationsGrid({
-    required this.posts,
-    required this.loading,
-  });
+  const _ProfilePublicationsGrid({required this.posts, required this.loading});
 
   final List<PostEntity> posts;
   final bool loading;
@@ -969,8 +990,9 @@ class _ProfilePublicationsGrid extends StatelessWidget {
       );
     }
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final gridThumbPx =
-        (MediaQuery.sizeOf(context).width / 3 * dpr).round().clamp(64, 2048);
+    final gridThumbPx = (MediaQuery.sizeOf(context).width / 3 * dpr)
+        .round()
+        .clamp(64, 2048);
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -995,8 +1017,11 @@ class _ProfilePublicationsGrid extends StatelessWidget {
           content = ColoredBox(
             color: Colors.grey.shade300,
             child: const Center(
-              child:
-                  Icon(Icons.play_circle_fill, size: 36, color: Colors.white70),
+              child: Icon(
+                Icons.play_circle_fill,
+                size: 36,
+                color: Colors.white70,
+              ),
             ),
           );
         } else {
@@ -1009,17 +1034,20 @@ class _ProfilePublicationsGrid extends StatelessWidget {
                 memCacheWidth: gridThumbPx,
                 fadeInDuration: Duration.zero,
                 fadeOutDuration: Duration.zero,
-                placeholder: (_, __) =>
+                placeholder: (context, url) =>
                     ColoredBox(color: Colors.grey.shade200),
-                errorWidget: (_, __, ___) => Container(
+                errorWidget: (context, url, error) => Container(
                   color: Colors.grey.shade200,
                   child: const Icon(Icons.broken_image_outlined),
                 ),
               ),
               if (hasVideo)
                 const Center(
-                  child:
-                      Icon(Icons.play_circle_fill, size: 34, color: Colors.white70),
+                  child: Icon(
+                    Icons.play_circle_fill,
+                    size: 34,
+                    color: Colors.white70,
+                  ),
                 ),
             ],
           );
@@ -1048,10 +1076,7 @@ class _ProfilePublicationsGrid extends StatelessWidget {
 }
 
 class _SellerTikTokStat extends StatelessWidget {
-  const _SellerTikTokStat({
-    required this.value,
-    required this.label,
-  });
+  const _SellerTikTokStat({required this.value, required this.label});
 
   final String value;
   final String label;
@@ -1064,20 +1089,95 @@ class _SellerTikTokStat extends StatelessWidget {
           value,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: ThemedContentSurface.profileTextPrimary,
-              ),
+            fontWeight: FontWeight.w800,
+            color: ThemedContentSurface.profileTextPrimary,
+          ),
         ),
         const SizedBox(height: 2),
         Text(
           label,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: ThemedContentSurface.profileTextSecondary,
-                fontWeight: FontWeight.w500,
-              ),
+            color: ThemedContentSurface.profileTextSecondary,
+            fontWeight: FontWeight.w500,
+          ),
         ),
       ],
+    );
+  }
+}
+
+class _OwnQarmetProfilePanel extends StatelessWidget {
+  const _OwnQarmetProfilePanel();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => PaymentCubit(context.read<PaymentService>())..initStore(),
+      child: BlocBuilder<PaymentCubit, PaymentUiState>(
+        builder: (context, state) {
+          final loading = state.status == PaymentUiStatus.loading;
+          return DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Qarmet в профиле: ${state.balance}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.tonal(
+                        onPressed: loading
+                            ? null
+                            : () => context
+                                  .read<PaymentCubit>()
+                                  .spendPremiumBadge(cost: 5),
+                        child: const Text('Галочка (5)'),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: loading
+                            ? null
+                            : () => context.read<PaymentCubit>().spendFrame(
+                                level: 2,
+                                cost: 2,
+                              ),
+                        child: const Text('Рамка (2)'),
+                      ),
+                      FilledButton.tonal(
+                        onPressed: loading
+                            ? null
+                            : () => context.read<PaymentCubit>().spendBadge(
+                                level: 3,
+                                cost: 3,
+                              ),
+                        child: const Text('Значок (3)'),
+                      ),
+                      OutlinedButton(
+                        onPressed: loading
+                            ? null
+                            : () =>
+                                  context.read<PaymentCubit>().refreshWallet(),
+                        child: const Text('Обновить'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

@@ -10,14 +10,19 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../data/group_chat_system_api.dart';
 import '../../data/invite_candidates.dart';
+import '../../domain/temirtau_city_group_config.dart';
 
 class GroupChatInfoPage extends StatefulWidget {
   const GroupChatInfoPage({
     super.key,
     required this.groupId,
+    this.officialCityChatHint = false,
   });
 
   final String groupId;
+
+  /// Передаётся из списка чатов (экран знает, что это Temirtau city до загрузки).
+  final bool officialCityChatHint;
 
   @override
   State<GroupChatInfoPage> createState() => _GroupChatInfoPageState();
@@ -31,8 +36,18 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
   Map<String, dynamic>? _group;
   List<_GroupMemberItem> _members = const [];
 
-  bool get _isOwner =>
-      _group != null && _group!['owner_id'] == _currentUserId;
+  bool get _isOwner => _group != null && _group!['owner_id'] == _currentUserId;
+
+  bool get _isOfficialCity {
+    final g = _group;
+    if (g == null) return widget.officialCityChatHint;
+    if (g['is_official_city_chat'] == true) return true;
+    return TemirtauCityGroupConfig.isOfficialCityChatTitle(
+      g['title'] as String?,
+    );
+  }
+
+  bool get _canInviteMembers => _isOwner || _isOfficialCity;
 
   @override
   void initState() {
@@ -50,7 +65,9 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
     try {
       final groupRes = await _client
           .from(SupabaseConstants.chatGroupsTable)
-          .select('id,owner_id,title,description,avatar_url,created_at')
+          .select(
+            'id,owner_id,title,description,avatar_url,created_at,is_official_city_chat',
+          )
           .eq('id', widget.groupId)
           .maybeSingle();
       if (groupRes == null) {
@@ -76,14 +93,16 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
         final userMap = <String, Map<String, dynamic>>{
           for (final u in users) u['id'] as String: u,
         };
-        items = memberIds.map((id) {
-          final u = userMap[id];
-          return _GroupMemberItem(
-            id: id,
-            name: (u?['name'] as String?) ?? 'Пользователь',
-            avatarUrl: u?['avatar'] as String?,
-          );
-        }).toList(growable: false);
+        items = memberIds
+            .map((id) {
+              final u = userMap[id];
+              return _GroupMemberItem(
+                id: id,
+                name: (u?['name'] as String?) ?? 'Пользователь',
+                avatarUrl: u?['avatar'] as String?,
+              );
+            })
+            .toList(growable: false);
       }
       if (!mounted) return;
       setState(() {
@@ -102,7 +121,7 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
 
   Future<void> _editTitleAndDescription() async {
     final group = _group;
-    if (!_isOwner || group == null) return;
+    if (_isOfficialCity || !_isOwner || group == null) return;
     final titleController = TextEditingController(
       text: (group['title'] as String?) ?? '',
     );
@@ -124,7 +143,9 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
               children: [
                 TextField(
                   controller: titleController,
-                  decoration: const InputDecoration(labelText: 'Название группы'),
+                  decoration: const InputDecoration(
+                    labelText: 'Название группы',
+                  ),
                 ),
                 const SizedBox(height: 10),
                 TextField(
@@ -150,24 +171,27 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
     if (ok != true || title.isEmpty) return;
     setState(() => _saving = true);
     try {
-      await _client.from(SupabaseConstants.chatGroupsTable).update({
-        'title': title,
-        'description': description,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.groupId);
+      await _client
+          .from(SupabaseConstants.chatGroupsTable)
+          .update({
+            'title': title,
+            'description': description,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', widget.groupId);
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось обновить группу: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Не удалось обновить группу: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _changeAvatar() async {
-    if (!_isOwner) return;
+    if (!_isOwner || _isOfficialCity) return;
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
@@ -184,23 +208,26 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
         fileOptions: const FileOptions(upsert: true),
       );
       final publicUrl = storage.getPublicUrl(fileName);
-      await _client.from(SupabaseConstants.chatGroupsTable).update({
-        'avatar_url': publicUrl,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', widget.groupId);
+      await _client
+          .from(SupabaseConstants.chatGroupsTable)
+          .update({
+            'avatar_url': publicUrl,
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', widget.groupId);
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось обновить аватар: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Не удалось обновить аватар: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   Future<void> _addMember() async {
-    if (!_isOwner) return;
+    if (!_canInviteMembers) return;
     final memberIds = _members.map((e) => e.id).toSet();
     final current = _currentUserId;
     if (current == null) return;
@@ -296,7 +323,7 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
         await GroupChatSystemApi.notifyMemberJoined(
           _client,
           groupId: widget.groupId,
-          ownerId: current,
+          actorId: current,
           memberName: u.name,
         );
       }
@@ -362,9 +389,7 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     final group = _group;
     if (group == null) {
@@ -374,24 +399,41 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
     final desc = (group['description'] as String?) ?? '';
     final avatar = (group['avatar_url'] as String?) ?? '';
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Информация о группе'),
-      ),
+      appBar: AppBar(title: const Text('Информация о группе')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Center(
             child: GestureDetector(
-              onTap: _isOwner ? _changeAvatar : null,
+              onTap: (_isOwner && !_isOfficialCity) ? _changeAvatar : null,
               child: Stack(
                 alignment: Alignment.bottomRight,
                 children: [
-                  CachedAvatar(
-                    imageUrl: avatar.isEmpty ? null : avatar,
-                    radius: 42,
-                    fallbackText: title,
-                  ),
-                  if (_isOwner)
+                  _isOfficialCity
+                      ? Container(
+                          width: 84,
+                          height: 84,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: <Color>[
+                                Color(0xFF0284C7),
+                                Color(0xFF38BDF8),
+                              ],
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.location_city_rounded,
+                            color: Colors.white,
+                            size: 40,
+                          ),
+                        )
+                      : CachedAvatar(
+                          imageUrl: avatar.isEmpty ? null : avatar,
+                          radius: 42,
+                          fallbackText: title,
+                        ),
+                  if (_isOwner && !_isOfficialCity)
                     const CircleAvatar(
                       radius: 14,
                       child: Icon(Icons.edit, size: 16),
@@ -401,10 +443,41 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
             ),
           ),
           const SizedBox(height: 12),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleLarge,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              if (_isOfficialCity) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: <Color>[Color(0xFF0284C7), Color(0xFF0EA5E9)],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Text(
+                    'CITY',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           if (desc.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -415,19 +488,53 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
             ),
           ],
           const SizedBox(height: 14),
-          if (_isOwner) ...[
+          if (_isOfficialCity) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF0F9FF),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFBAE6FD)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.lock_outline, color: Color(0xFF0369A1)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Название и описание официального городского чата '
+                      'закреплены и не могут быть изменены. Вы можете '
+                      'пригласить участников.',
+                      style: TextStyle(
+                        color: Colors.grey.shade800,
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
+          if (_isOwner && !_isOfficialCity) ...[
             FilledButton.icon(
               onPressed: _saving ? null : _editTitleAndDescription,
               icon: const Icon(Icons.edit_outlined),
               label: const Text('Изменить название и описание'),
             ),
             const SizedBox(height: 8),
+          ],
+          if (_canInviteMembers) ...[
             OutlinedButton.icon(
               onPressed: _saving ? null : _addMember,
               icon: const Icon(Icons.person_add_alt_1_outlined),
               label: const Text('Добавить участника'),
             ),
-          ] else
+            const SizedBox(height: 8),
+          ],
+          if (!_isOwner)
             OutlinedButton.icon(
               onPressed: _leaveGroup,
               icon: const Icon(Icons.logout),

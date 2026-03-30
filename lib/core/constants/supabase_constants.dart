@@ -33,6 +33,8 @@ class SupabaseConstants {
   static const String chatGroupsTable = 'chat_groups';
   static const String chatGroupMembersTable = 'chat_group_members';
   static const String chatGroupMessagesTable = 'chat_group_messages';
+  /// Автомодерация городского чата (RLS: только своя строка).
+  static const String cityChatUserModerationTable = 'city_chat_user_moderation';
   static const String userChannelsTable = 'user_channels';
   static const String channelMessagesTable = 'channel_messages';
   static const String channelSubscribersTable = 'channel_subscribers';

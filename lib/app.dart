@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
@@ -31,6 +33,7 @@ import 'features/news/presentation/bloc/news_bloc.dart';
 import 'features/notifications/data/repositories/notifications_repository_impl.dart';
 import 'features/notifications/domain/repositories/notifications_repository.dart';
 import 'features/notifications/presentation/notification_activity_peek_bus.dart';
+import 'features/notifications/presentation/notification_tab_badge_controller.dart';
 import 'features/post/data/repositories/post_repository_impl.dart';
 import 'features/post/domain/repositories/post_repository.dart';
 import 'features/product/data/repositories/categories_repository_impl.dart';
@@ -97,6 +100,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final ThemeRepository _themeRepository;
   late final ThemeIndexNotifier _themeIndexNotifier;
   ChatUnreadBadgeController? _chatUnreadBadgeController;
+  NotificationTabBadgeController? _notificationTabBadgeController;
   NotificationActivityPeekBus? _notificationActivityPeekBus;
 
   @override
@@ -127,6 +131,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _commentsRepository = CommentsRepositoryImpl(_client);
     _storiesRepository = StoriesRepositoryImpl(_client);
     _notificationsRepository = NotificationsRepositoryImpl(_client);
+    _notificationTabBadgeController = NotificationTabBadgeController(
+      notificationsRepository: _notificationsRepository,
+    );
     _postRepository = PostRepositoryImpl(_client);
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
     _searchTabActivation = SearchTabActivationController();
@@ -150,6 +157,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   @override
   void dispose() {
     _chatUnreadBadgeController?.dispose();
+    _notificationTabBadgeController?.dispose();
     _notificationActivityPeekBus?.dispose();
     super.dispose();
   }
@@ -190,6 +198,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
         RepositoryProvider<ChatListStorage>.value(value: widget.chatListStorage),
         ChangeNotifierProvider<ChatUnreadBadgeController>.value(
           value: _chatUnreadBadgeController!,
+        ),
+        ChangeNotifierProvider<NotificationTabBadgeController>.value(
+          value: _notificationTabBadgeController!,
         ),
         RepositoryProvider<ChatStoryListStorage>.value(
           value: widget.chatStoryListStorage,
@@ -261,6 +272,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
               await context.read<AccountManager>().addOrUpdateAccount(account);
               if (context.mounted) {
                 await context.read<ChatUnreadBadgeController>().refresh();
+                await context.read<NotificationTabBadgeController>().refresh();
               }
             }
           },
@@ -286,6 +298,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
                           NewsLoaded(currentUserId: state.user.id),
                         );
                     context.read<ChatUnreadBadgeController>().refresh();
+                    unawaited(
+                      context.read<NotificationTabBadgeController>().refresh(),
+                    );
                   }
                 },
                 child: BlocListener<AuthBloc, AuthState>(
@@ -295,6 +310,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
                     widget.chatListStorage.setActiveAccountId(null);
                     widget.chatStoryListStorage.setActiveAccountId(null);
                     context.read<ChatUnreadBadgeController>().clear();
+                    context.read<NotificationTabBadgeController>().clear();
                     context.read<NewsBloc>().add(const NewsCleared());
                     context.read<FeedRepository>().invalidateFeedCache();
                     context.read<SearchTabActivationController>().reset();

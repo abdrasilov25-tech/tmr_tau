@@ -26,6 +26,14 @@ alter table public.users add column if not exists instagram_url text default '';
 alter table public.users add column if not exists telegram_username text default '';
 alter table public.users add column if not exists website_url text default '';
 alter table public.users add column if not exists total_received_post_likes int not null default 0;
+alter table public.users add column if not exists qarmet_balance int not null default 0;
+alter table public.users add column if not exists official_page_active boolean not null default false;
+alter table public.users add column if not exists official_page_last_credit_at timestamptz;
+alter table public.users add column if not exists official_page_profile_perks boolean not null default false;
+alter table public.users add column if not exists official_page_promo_perks boolean not null default false;
+alter table public.users add column if not exists profile_premium_badge boolean not null default false;
+alter table public.users add column if not exists profile_frame_level int not null default 0;
+alter table public.users add column if not exists profile_badge_level int not null default 0;
 -- Backfill missing rows in public.users from auth.users (safe on repeated runs).
 insert into public.users (id, name)
 select au.id, coalesce(nullif(au.email, ''), 'Пользователь')
@@ -538,6 +546,42 @@ drop policy if exists "Notifications insert as actor" on public.notifications;
 create policy "Notifications insert as actor" on public.notifications
   for insert with check (auth.uid() = actor_id);
 
+-- Счётчики для нижней панели: публикации/товары vs новости (см. миграцию).
+create or replace function public.notification_feed_unread_counts(p_user_id uuid)
+returns table (publications_count bigint, news_count bigint)
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select
+    (
+      select count(*)::bigint
+      from public.notifications n
+      left join public.posts p on p.id = n.post_id
+      where n.user_id = p_user_id
+        and n.read_at is null
+        and (
+          n.product_id is not null
+          or (
+            n.post_id is not null
+            and coalesce(p.kind, 'publication') = 'publication'
+          )
+        )
+    ) as publications_count,
+    (
+      select count(*)::bigint
+      from public.notifications n
+      inner join public.posts p on p.id = n.post_id
+      where n.user_id = p_user_id
+        and n.read_at is null
+        and p.kind = 'news'
+    ) as news_count;
+$$;
+
+revoke all on function public.notification_feed_unread_counts(uuid) from public;
+grant execute on function public.notification_feed_unread_counts(uuid) to authenticated;
+
 drop policy if exists "Favorites all" on public.favorites;
 drop policy if exists "Orders all" on public.orders;
 create policy "Favorites all" on public.favorites for all using (auth.uid() = user_id);
@@ -815,10 +859,14 @@ create table if not exists public.chat_groups (
   owner_id uuid not null references public.users(id) on delete cascade,
   title text not null,
   description text default '',
+  is_official_city_chat boolean not null default false,
+  is_discoverable boolean not null default true,
   avatar_url text default '',
   updated_at timestamptz default now(),
   created_at timestamptz default now()
 );
+
+alter table public.chat_groups add column if not exists is_discoverable boolean not null default true;
 
 create table if not exists public.chat_group_members (
   group_id uuid not null references public.chat_groups(id) on delete cascade,
@@ -873,6 +921,23 @@ create policy "Chat groups select members"
     or public.is_group_member(id, auth.uid())
   );
 
+-- Официальный городской чат: виден всем авторизованным (иначе новые пользователи не находят группу по названию).
+create policy "Chat groups select official city all authed"
+  on public.chat_groups
+  for select
+  to authenticated
+  using (
+    coalesce(is_official_city_chat, false) = true
+    or trim(title) = 'Temirtau city'
+  );
+
+drop policy if exists "Chat groups select discoverable" on public.chat_groups;
+create policy "Chat groups select discoverable"
+  on public.chat_groups
+  for select
+  to authenticated
+  using (coalesce(is_discoverable, false) = true);
+
 create policy "Chat groups insert own"
   on public.chat_groups for insert
   with check (auth.uid() = owner_id);
@@ -885,6 +950,25 @@ create policy "Chat groups update owner"
 create policy "Chat groups delete owner"
   on public.chat_groups for delete
   using (auth.uid() = owner_id);
+
+create or replace function public.lock_official_city_group_metadata()
+returns trigger
+language plpgsql
+as $$
+begin
+  if coalesce(old.is_official_city_chat, false) then
+    new.title := old.title;
+    new.description := old.description;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_lock_official_city_group_metadata on public.chat_groups;
+create trigger trg_lock_official_city_group_metadata
+  before update on public.chat_groups
+  for each row
+  execute procedure public.lock_official_city_group_metadata();
 
 create policy "Chat group members select own groups"
   on public.chat_group_members for select
@@ -904,6 +988,33 @@ create policy "Chat group members insert by owner"
       select 1 from public.chat_groups g
       where g.id = chat_group_members.group_id
         and g.owner_id = auth.uid()
+    )
+  );
+
+create policy "Chat group members insert city_member_invite"
+  on public.chat_group_members for insert
+  with check (
+    exists (
+      select 1 from public.chat_groups g
+      where g.id = chat_group_members.group_id
+        and coalesce(g.is_official_city_chat, false) = true
+        and public.is_group_member(g.id, auth.uid())
+    )
+  );
+
+create policy "Chat group members insert self official city"
+  on public.chat_group_members
+  for insert
+  to authenticated
+  with check (
+    auth.uid() = user_id
+    and exists (
+      select 1 from public.chat_groups g
+      where g.id = chat_group_members.group_id
+        and (
+          coalesce(g.is_official_city_chat, false) = true
+          or trim(g.title) = 'Temirtau city'
+        )
     )
   );
 
@@ -928,6 +1039,21 @@ create policy "Chat group messages insert by member"
     auth.uid() = sender_id
     and public.is_group_member(group_id, auth.uid())
   );
+
+-- Автомодерация официального городского чата (функции и триггер — см. migrations/20260330220000_city_chat_auto_moderation.sql).
+create table if not exists public.city_chat_user_moderation (
+  user_id uuid primary key references public.users(id) on delete cascade,
+  violation_count int not null default 0,
+  banned_until timestamptz,
+  permanent_ban boolean not null default false,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.city_chat_user_moderation enable row level security;
+
+create policy "City chat moderation select own"
+  on public.city_chat_user_moderation for select
+  using (auth.uid() = user_id);
 
 -- Personal channels
 create table if not exists public.user_channels (

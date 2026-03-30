@@ -35,7 +35,8 @@ class ProductPromotionSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthBloc>().state;
-    final isOwner = auth is AuthAuthenticated && auth.user.id == product.sellerId;
+    final isOwner =
+        auth is AuthAuthenticated && auth.user.id == product.sellerId;
 
     return BlocProvider(
       create: (_) => PaymentCubit(context.read<PaymentService>())..initStore(),
@@ -43,7 +44,7 @@ class ProductPromotionSheet extends StatelessWidget {
         listener: (context, state) {
           if (state.status == PaymentUiStatus.success) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Покупка успешно завершена')),
+              const SnackBar(content: Text('Операция с Qarmet выполнена')),
             );
             onPromotionActivated?.call();
           } else if (state.status == PaymentUiStatus.error ||
@@ -62,7 +63,9 @@ class ProductPromotionSheet extends StatelessWidget {
             expand: false,
             builder: (context, scrollController) {
               return Material(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(20),
+                ),
                 color: Theme.of(context).colorScheme.surface,
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
@@ -81,7 +84,7 @@ class ProductPromotionSheet extends StatelessWidget {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'Продвижение и Premium',
+                        'Qarmet: продвижение и профиль',
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 8),
@@ -90,29 +93,102 @@ class ProductPromotionSheet extends StatelessWidget {
                       else ...[
                         Card(
                           child: ListTile(
-                            leading: const Icon(Icons.bolt),
-                            title: const Text('Boost товара'),
-                            subtitle: const Text('Разовая покупка: boost_post'),
+                            leading: const Icon(
+                              Icons.account_balance_wallet_outlined,
+                            ),
+                            title: Text('Баланс Qarmet: ${state.balance}'),
+                            subtitle: Text(
+                              state.isOfficialPageActive
+                                  ? 'official_page активна: ежемесячные начисления включены'
+                                  : 'Подписка official_page не активна',
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.refresh),
+                              onPressed: loading
+                                  ? null
+                                  : () => context
+                                        .read<PaymentCubit>()
+                                        .refreshWallet(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Пакеты в магазине',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        ...state.catalog.map(
+                          (pack) => Card(
+                            child: ListTile(
+                              leading: Icon(
+                                pack.isSubscription
+                                    ? Icons.autorenew
+                                    : Icons.shopping_cart_checkout,
+                              ),
+                              title: Text(
+                                '${pack.productId}: ${pack.baseQarmet}+${pack.bonusQarmet} Qarmet',
+                              ),
+                              subtitle: Text(
+                                '${pack.priceKzt} KZT, ~${pack.pricePerQarmet.toStringAsFixed(2)} KZT/Qarmet',
+                              ),
+                              onTap: loading
+                                  ? null
+                                  : () => context
+                                        .read<PaymentCubit>()
+                                        .buyQarmetPackage(pack.productId),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Продвижение товара (каждое = 1 Qarmet)',
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 8),
+                        Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.north_rounded),
+                            title: const Text('В топ на +24 часа'),
+                            subtitle: const Text('Стоимость: 1 Qarmet'),
                             onTap: loading
                                 ? null
-                                : () => context.read<PaymentCubit>().buyBoost(product.id),
+                                : () => context
+                                      .read<PaymentCubit>()
+                                      .spendTopPromotion(product.id),
                           ),
                         ),
                         Card(
                           child: ListTile(
-                            leading: const Icon(Icons.workspace_premium_outlined),
-                            title: const Text('Premium подписка'),
-                            subtitle: const Text('Подписка: premium_subscription'),
+                            leading: const Icon(Icons.priority_high),
+                            title: const Text('Срочно на +24 часа'),
+                            subtitle: const Text('Стоимость: 1 Qarmet'),
                             onTap: loading
                                 ? null
-                                : () => context.read<PaymentCubit>().buyPremium(),
+                                : () => context
+                                      .read<PaymentCubit>()
+                                      .spendUrgentPromotion(product.id),
+                          ),
+                        ),
+                        Card(
+                          child: ListTile(
+                            leading: const Icon(Icons.auto_awesome),
+                            title: const Text('Выделение на +24 часа'),
+                            subtitle: const Text('Стоимость: 1 Qarmet'),
+                            onTap: loading
+                                ? null
+                                : () => context
+                                      .read<PaymentCubit>()
+                                      .spendHighlightPromotion(product.id),
                           ),
                         ),
                         const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: loading
                               ? null
-                              : () => context.read<PaymentCubit>().restorePurchases(),
+                              : () => context
+                                    .read<PaymentCubit>()
+                                    .restorePurchases(),
                           icon: const Icon(Icons.restore),
                           label: const Text('Восстановить покупки'),
                         ),

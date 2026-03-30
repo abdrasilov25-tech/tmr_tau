@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -28,6 +30,7 @@ import '../../features/post_reports/presentation/screens/report_post_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/edit_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
+import '../../features/product/presentation/pages/qarmet_wallet_page.dart';
 import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
 import '../../features/profile/presentation/pages/following_page.dart';
@@ -37,6 +40,7 @@ import '../../features/cart/presentation/pages/cart_page.dart';
 import '../../features/chat/presentation/pages/chat_page.dart';
 import '../../features/chat/presentation/pages/chats_page.dart';
 import '../../features/chat/presentation/chat_unread_badge_controller.dart';
+import '../../features/notifications/presentation/notification_tab_badge_controller.dart';
 import '../../features/chat/presentation/pages/group_chat_page.dart';
 import '../../features/chat/presentation/pages/channel_page.dart';
 import '../../features/chat/presentation/pages/group_chat_info_page.dart';
@@ -68,6 +72,24 @@ import '../../features/map/domain/usecases/get_nearby_products.dart';
 import '../../features/map/presentation/bloc/map_bloc.dart';
 import '../../features/map/presentation/pages/map_page.dart';
 import '../navigation/search_tab_activation_controller.dart';
+
+Widget _shellNavCountBadge({required String label, required Widget icon}) {
+  final show = label.isNotEmpty;
+  return Badge(
+    isLabelVisible: show,
+    backgroundColor: const Color(0xFF2563EB),
+    textColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 6),
+    label: Text(
+      label,
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w700,
+      ),
+    ),
+    child: icon,
+  );
+}
 
 class AppRouter {
   AppRouter({
@@ -169,6 +191,10 @@ class AppRouter {
       GoRoute(
         path: '/add-product',
         builder: (context, state) => const AddProductPage(),
+      ),
+      GoRoute(
+        path: '/qarmet-wallet',
+        builder: (context, state) => const QarmetWalletPage(),
       ),
       GoRoute(
         path: '/add-story',
@@ -347,14 +373,25 @@ class AppRouter {
           final groupId = state.pathParameters['groupId']!;
           final groupName =
               state.uri.queryParameters['name'] ?? 'Групповой чат';
-          return GroupChatPage(groupId: groupId, groupName: groupName);
+          final officialCityChat =
+              state.uri.queryParameters['city'] == '1';
+          return GroupChatPage(
+            groupId: groupId,
+            groupName: groupName,
+            officialCityChat: officialCityChat,
+          );
         },
       ),
       GoRoute(
         path: '/chat-group/:groupId/info',
         builder: (context, state) {
           final groupId = state.pathParameters['groupId']!;
-          return GroupChatInfoPage(groupId: groupId);
+          final officialCityChat =
+              state.uri.queryParameters['city'] == '1';
+          return GroupChatInfoPage(
+            groupId: groupId,
+            officialCityChatHint: officialCityChat,
+          );
         },
       ),
       GoRoute(
@@ -412,11 +449,10 @@ class AppRouter {
                 routes: [
                   GoRoute(
                     path: 'search',
-                    builder: (context, state) =>
-                        SearchPage(
-                          productRepository: productRepository,
-                          settingsRepository: settingsRepository,
-                        ),
+                    builder: (context, state) => SearchPage(
+                      productRepository: productRepository,
+                      settingsRepository: settingsRepository,
+                    ),
                   ),
                 ],
               ),
@@ -424,9 +460,8 @@ class AppRouter {
                 routes: [
                   GoRoute(
                     path: 'map',
-                    builder: (context, state) => _MapBranchHost(
-                      mapRepository: mapRepository,
-                    ),
+                    builder: (context, state) =>
+                        _MapBranchHost(mapRepository: mapRepository),
                   ),
                 ],
               ),
@@ -545,10 +580,7 @@ class _MapBranchHostState extends State<_MapBranchHost>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    return BlocProvider.value(
-      value: _bloc!,
-      child: const MapPage(),
-    );
+    return BlocProvider.value(value: _bloc!, child: const MapPage());
   }
 }
 
@@ -564,13 +596,22 @@ class _MainShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeNotifier = context.read<ThemeIndexNotifier>();
+    final chatUnread = context.read<ChatUnreadBadgeController>();
+    final notificationTabs = context.read<NotificationTabBadgeController>();
     return ListenableBuilder(
-      listenable: themeNotifier.listenable,
+      listenable: Listenable.merge([
+        themeNotifier.listenable,
+        chatUnread,
+        notificationTabs,
+      ]),
       builder: (context, _) {
         final decoration = themeDecoration(
           themeNotifier.value,
           themeNotifier.customImagePath,
         );
+        final chatsBadge = chatUnread.badgeShortLabel;
+        final publicationsBadge = notificationTabs.publicationsBadgeLabel;
+        final newsBadge = notificationTabs.newsBadgeLabel;
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: Stack(
@@ -602,37 +643,80 @@ class _MainShell extends StatelessWidget {
                 if (index == 3) {
                   context.read<ChatUnreadBadgeController>().refresh();
                 }
+                if (index == 0 || index == 4) {
+                  unawaited(
+                    context.read<NotificationTabBadgeController>().refresh(),
+                  );
+                }
               },
               backgroundColor: Colors.transparent,
               elevation: 0,
               indicatorColor: Colors.transparent,
-              destinations: const [
+              destinations: [
                 NavigationDestination(
-                  icon: Icon(Icons.home_outlined, size: 26),
-                  selectedIcon: Icon(Icons.home_rounded, size: 26),
+                  icon: _shellNavCountBadge(
+                    label: publicationsBadge,
+                    icon: const Icon(Icons.home_outlined, size: 26),
+                  ),
+                  selectedIcon: _shellNavCountBadge(
+                    label: publicationsBadge,
+                    icon: const Icon(Icons.home_rounded, size: 26),
+                  ),
                   label: 'Публикации',
                 ),
-                NavigationDestination(
+                const NavigationDestination(
                   icon: Icon(Icons.search_outlined, size: 26),
                   selectedIcon: Icon(Icons.search_rounded, size: 26),
                   label: 'Поиск',
                 ),
-                NavigationDestination(
+                const NavigationDestination(
                   icon: Icon(Icons.map_outlined, size: 26),
                   selectedIcon: Icon(Icons.map_rounded, size: 26),
                   label: 'Рядом',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.chat_bubble_outline_rounded, size: 26),
-                  selectedIcon: Icon(Icons.chat_rounded, size: 26),
+                  icon: Badge(
+                    isLabelVisible: chatsBadge.isNotEmpty,
+                    backgroundColor: const Color(0xFF2563EB),
+                    textColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    label: Text(
+                      chatsBadge,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Icon(Icons.chat_bubble_outline_rounded, size: 26),
+                  ),
+                  selectedIcon: Badge(
+                    isLabelVisible: chatsBadge.isNotEmpty,
+                    backgroundColor: const Color(0xFF2563EB),
+                    textColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    label: Text(
+                      chatsBadge,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    child: const Icon(Icons.chat_rounded, size: 26),
+                  ),
                   label: 'Чаты',
                 ),
                 NavigationDestination(
-                  icon: Icon(Icons.article_outlined, size: 26),
-                  selectedIcon: Icon(Icons.article_rounded, size: 26),
+                  icon: _shellNavCountBadge(
+                    label: newsBadge,
+                    icon: const Icon(Icons.article_outlined, size: 26),
+                  ),
+                  selectedIcon: _shellNavCountBadge(
+                    label: newsBadge,
+                    icon: const Icon(Icons.article_rounded, size: 26),
+                  ),
                   label: 'Новости',
                 ),
-                NavigationDestination(
+                const NavigationDestination(
                   icon: Icon(Icons.person_outline_rounded, size: 26),
                   selectedIcon: Icon(Icons.person_rounded, size: 26),
                   label: 'Профиль',

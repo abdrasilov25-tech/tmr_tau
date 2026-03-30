@@ -17,6 +17,7 @@ import '../../domain/entities/notification_entity.dart';
 import '../../domain/entities/top_user_rank_entity.dart';
 import '../../domain/repositories/notifications_repository.dart';
 import '../notification_activity_peek_bus.dart';
+import '../notification_tab_badge_controller.dart';
 
 class _ActivityRow {
   _ActivityRow(this.members) : assert(members.isNotEmpty);
@@ -167,6 +168,9 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     if (!context.mounted) return;
     try {
       context.read<NotificationActivityPeekBus>().notifyUnreadMayHaveChanged();
+    } catch (_) {}
+    try {
+      unawaited(context.read<NotificationTabBadgeController>().refresh());
     } catch (_) {}
   }
 

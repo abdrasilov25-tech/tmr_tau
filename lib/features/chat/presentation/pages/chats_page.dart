@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -15,7 +15,7 @@ import '../../../stories/domain/entities/story_entity.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../widgets/chat_stories_friends_strip.dart';
 import '../../data/group_chat_system_api.dart';
-import '../../data/invite_candidates.dart';
+import '../../domain/temirtau_city_group_config.dart';
 import '../chat_unread_badge_controller.dart';
 import '../widgets/channel_create_wizard_sheet.dart';
 
@@ -30,6 +30,31 @@ class _DirectThreadsComputeArgs {
   final List<Map<String, dynamic>> rows;
   final String currentUserId;
   final Map<String, String?> lastReadIsoByPeer;
+}
+
+String _normalizeForChatSearch(String? s) {
+  if (s == null || s.isEmpty) return '';
+  return s.toLowerCase().trim().replaceAll('ё', 'е');
+}
+
+String _normalizeChatSearchQuery(String raw) =>
+    _normalizeForChatSearch(raw.trim());
+
+/// Все непустые токены из [queryNorm] должны встречаться в [haystackNorm].
+bool _haystackMatchesChatSearchQuery(String haystackNorm, String queryNorm) {
+  if (queryNorm.isEmpty) return true;
+  if (haystackNorm.isEmpty) return false;
+  for (final tok in queryNorm.split(RegExp(r'\s+')).where((x) => x.isNotEmpty)) {
+    if (!haystackNorm.contains(tok)) return false;
+  }
+  return true;
+}
+
+/// Убираем символы шаблона LIKE и ограничиваем длину (PostgREST ilike).
+String _sanitizeIlikeUserInput(String raw) {
+  var s = raw.trim().replaceAll('%', '').replaceAll('_', '');
+  if (s.length > 48) s = s.substring(0, 48);
+  return s;
 }
 
 String _displayTextForDirectThread(String rawText) {
@@ -52,7 +77,9 @@ String _displayTextForDirectThread(String rawText) {
 }
 
 /// Сборка списка диалогов из сырых сообщений (без Supabase/SharedPreferences).
-List<_ChatThread> _computeDirectThreadsFromRows(_DirectThreadsComputeArgs args) {
+List<_ChatThread> _computeDirectThreadsFromRows(
+  _DirectThreadsComputeArgs args,
+) {
   final rows = args.rows;
   final currentUserId = args.currentUserId;
   final lastReadIsoByPeer = args.lastReadIsoByPeer;
@@ -85,7 +112,9 @@ List<_ChatThread> _computeDirectThreadsFromRows(_DirectThreadsComputeArgs args) 
     if (!isIncoming) continue;
 
     final lastReadStr = lastReadIsoByPeer[peerId];
-    final lastRead = lastReadStr != null ? DateTime.tryParse(lastReadStr) : null;
+    final lastRead = lastReadStr != null
+        ? DateTime.tryParse(lastReadStr)
+        : null;
 
     final prevIncoming = lastIncomingByPeer[peerId];
     if (prevIncoming == null || createdAt.isAfter(prevIncoming)) {
@@ -98,14 +127,16 @@ List<_ChatThread> _computeDirectThreadsFromRows(_DirectThreadsComputeArgs args) 
 
   if (threadsByPeer.isEmpty) return const [];
 
-  return threadsByPeer.entries.map((e) {
-    final peerId = e.key;
-    final t = e.value;
-    return t.copyWith(
-      unreadCount: unreadByPeer[peerId] ?? 0,
-      lastIncomingAt: lastIncomingByPeer[peerId],
-    );
-  }).toList(growable: false);
+  return threadsByPeer.entries
+      .map((e) {
+        final peerId = e.key;
+        final t = e.value;
+        return t.copyWith(
+          unreadCount: unreadByPeer[peerId] ?? 0,
+          lastIncomingAt: lastIncomingByPeer[peerId],
+        );
+      })
+      .toList(growable: false);
 }
 
 class ChatsPage extends StatefulWidget {
@@ -118,10 +149,20 @@ class ChatsPage extends StatefulWidget {
 class _ChatsPageState extends State<ChatsPage> {
   /// Лимит сообщений для построения списка диалогов (не вся история).
   static const int _kMessagesListLimit = 500;
+
   /// Лимит сторис для полосы друзей (без блокировки refresh).
   static const int _kStoriesStripLimit = 120;
-  static const Duration _warmCacheTtl = Duration(seconds: 30);
+  static const Duration _warmCacheTtl = Duration(seconds: 75);
+
+  /// Не дергать полный resolve Temirtau чаще (меньше запросов при каждом refresh).
+  static const Duration _temirtauIdCacheTtl = Duration(minutes: 4);
   static _ChatsWarmCache? _warmCache;
+  static _TemirtauIdCache? _temirtauIdCache;
+
+  static void _clearChatsTransientCaches() {
+    _warmCache = null;
+    _temirtauIdCache = null;
+  }
 
   late final SupabaseClient _client;
   String _sessionUserId = '';
@@ -138,10 +179,25 @@ class _ChatsPageState extends State<ChatsPage> {
   /// Поколение фоновой загрузки сторис (отмена устаревших результатов при быстром refresh).
   int _storiesLoadGeneration = 0;
 
-  String _searchQuery = '';
+  static const int _kGlobalChatSearchLimit = 40;
+  static const Duration _kRemoteSearchDebounce = Duration(milliseconds: 460);
+  static const Duration _kBlockedIdsCacheTtl = Duration(seconds: 75);
+
+  /// Поиск без setState всей стран при каждом символе.
+  final ValueNotifier<String> _searchQueryListenable = ValueNotifier<String>(
+    '',
+  );
+  /// Результаты глобального поиска — только список чатов пересобирается (без лишних rebuild всей страницы).
+  final ValueNotifier<List<_ChatThread>> _remoteSearchNotifier =
+      ValueNotifier<List<_ChatThread>>(const []);
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchRemoteDebounce;
+  int _searchRemoteGen = 0;
+  Set<String>? _blockedPeerIdsCache;
+  DateTime? _blockedPeerIdsCacheAt;
   bool _threadSelectionMode = false;
   final Set<String> _selectedThreadKeys = <String>{};
+
   /// Оптимистичные значения только для [_optimisticMyStoryNoteOwnerId] — иначе после смены аккаунта
   /// чужая заметка попадала бы в полоску сторис под новым user id.
   String? _optimisticMyStoryNote;
@@ -169,7 +225,8 @@ class _ChatsPageState extends State<ChatsPage> {
     }
     _sessionUserId = authState.user.id;
     final cache = _warmCache;
-    final canUseCache = cache != null &&
+    final canUseCache =
+        cache != null &&
         cache.userId == _sessionUserId &&
         DateTime.now().difference(cache.createdAt) <= _warmCacheTtl;
     // Start loading after first frame to keep navigation into chats responsive.
@@ -186,10 +243,33 @@ class _ChatsPageState extends State<ChatsPage> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final cache = _warmCache;
+      final sameUser = cache != null && cache.userId == _sessionUserId;
+      final veryFresh =
+          sameUser &&
+          DateTime.now().difference(cache.createdAt) <
+              const Duration(seconds: 12);
+      if (veryFresh) {
+        unawaited(_reloadChatsSilentlyReplaceFuture());
+        return;
+      }
       setState(() {
         _pageFuture = _loadPageData();
       });
     });
+  }
+
+  /// Обновление без мигания загрузчика: текущий Future уже data из warm cache.
+  Future<void> _reloadChatsSilentlyReplaceFuture() async {
+    try {
+      final data = await _loadPageData();
+      if (!mounted) return;
+      setState(() {
+        _pageFuture = Future.value(data);
+      });
+    } catch (e, st) {
+      debugPrint('ChatsPage._reloadChatsSilentlyReplaceFuture: $e\n$st');
+    }
   }
 
   @override
@@ -202,8 +282,232 @@ class _ChatsPageState extends State<ChatsPage> {
 
   @override
   void dispose() {
+    _searchRemoteDebounce?.cancel();
+    _remoteSearchNotifier.dispose();
+    _searchQueryListenable.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  bool _sameRemoteSearchHits(List<_ChatThread> a, List<_ChatThread> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].storageKey != b[i].storageKey) return false;
+    }
+    return true;
+  }
+
+  void _publishRemoteSearchHits(List<_ChatThread> next) {
+    final prev = _remoteSearchNotifier.value;
+    if (_sameRemoteSearchHits(prev, next)) return;
+    _remoteSearchNotifier.value = next;
+  }
+
+  Future<Set<String>> _blockedPeerIdsForSearch() async {
+    final now = DateTime.now();
+    if (_blockedPeerIdsCache != null &&
+        _blockedPeerIdsCacheAt != null &&
+        now.difference(_blockedPeerIdsCacheAt!) < _kBlockedIdsCacheTtl) {
+      return _blockedPeerIdsCache!;
+    }
+    try {
+      final blockedRes = await _client
+          .from('blocked_users')
+          .select('blocked_user_id')
+          .eq('blocker_id', _sessionUserId);
+      final blocked = (blockedRes as List)
+          .map((e) => (e as Map)['blocked_user_id'] as String)
+          .toSet();
+      _blockedPeerIdsCache = blocked;
+      _blockedPeerIdsCacheAt = now;
+      return blocked;
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  void _onChatsSearchChanged(String v) {
+    _searchQueryListenable.value = v;
+    _scheduleRemoteChatsSearch(v);
+  }
+
+  void _scheduleRemoteChatsSearch(String raw) {
+    _searchRemoteDebounce?.cancel();
+    final safe = _sanitizeIlikeUserInput(raw);
+    if (safe.length < 2) {
+      _publishRemoteSearchHits(const []);
+      return;
+    }
+    final gen = ++_searchRemoteGen;
+    _searchRemoteDebounce = Timer(_kRemoteSearchDebounce, () {
+      _runRemoteChatsSearch(raw, safe, gen);
+    });
+  }
+
+  Future<void> _runRemoteChatsSearch(
+    String raw,
+    String ilikeSafe,
+    int gen,
+  ) async {
+    if (!mounted || gen != _searchRemoteGen) return;
+    if (_sessionUserId.isEmpty) return;
+    final queryNorm = _normalizeChatSearchQuery(raw);
+    if (queryNorm.length < 2) {
+      if (mounted) _publishRemoteSearchHits(const []);
+      return;
+    }
+    final pattern = '%$ilikeSafe%';
+    try {
+      final blocked = await _blockedPeerIdsForSearch();
+
+      final usersF = _client
+          .from(SupabaseConstants.usersTable)
+          .select('id,name,avatar')
+          .ilike('name', pattern)
+          .neq('id', _sessionUserId)
+          .limit(_kGlobalChatSearchLimit);
+
+      final channelsF = _client
+          .from(SupabaseConstants.userChannelsTable)
+          .select('id,title,avatar_url')
+          .ilike('title', pattern)
+          .limit(_kGlobalChatSearchLimit);
+
+      final groupsF = _client
+          .from(SupabaseConstants.chatGroupsTable)
+          .select('id,title,avatar_url,is_official_city_chat')
+          .ilike('title', pattern)
+          .limit(_kGlobalChatSearchLimit);
+
+      final results = await Future.wait<Object?>([
+        usersF,
+        channelsF,
+        groupsF,
+      ]);
+      if (!mounted || gen != _searchRemoteGen) return;
+
+      final usersRows = (results[0] as List).cast<Map<String, dynamic>>();
+      final channelRows = (results[1] as List).cast<Map<String, dynamic>>();
+      final groupRows = (results[2] as List).cast<Map<String, dynamic>>();
+
+      final placeholderAt = DateTime.fromMillisecondsSinceEpoch(0);
+      final out = <_ChatThread>[];
+
+      for (final row in usersRows) {
+        final id = row['id'] as String?;
+        if (id == null || blocked.contains(id)) continue;
+        final name = (row['name'] as String?)?.trim();
+        if (name == null || name.isEmpty) continue;
+        if (!_haystackMatchesChatSearchQuery(
+          _normalizeForChatSearch(name),
+          queryNorm,
+        )) {
+          continue;
+        }
+        out.add(
+          _ChatThread(
+            kind: _ChatThreadKind.direct,
+            peerId: id,
+            peerName: name,
+            peerAvatarUrl: row['avatar'] as String?,
+            lastMessageText: 'Написать',
+            lastMessageAt: placeholderAt,
+            lastMessageSenderId: id,
+            unreadCount: 0,
+            lastIncomingAt: null,
+            fromGlobalSearch: true,
+          ),
+        );
+      }
+
+      for (final row in groupRows) {
+        final id = row['id'] as String?;
+        if (id == null) continue;
+        final title = (row['title'] as String?)?.trim() ?? '';
+        if (title.isEmpty) continue;
+        if (!_haystackMatchesChatSearchQuery(
+          _normalizeForChatSearch(title),
+          queryNorm,
+        )) {
+          continue;
+        }
+        final isOfficial =
+            (row['is_official_city_chat'] as bool?) == true ||
+            TemirtauCityGroupConfig.isOfficialCityChatTitle(title);
+        out.add(
+          _ChatThread(
+            kind: _ChatThreadKind.group,
+            peerId: id,
+            peerName: title,
+            peerAvatarUrl: row['avatar_url'] as String?,
+            lastMessageText: isOfficial
+                ? TemirtauCityGroupConfig.listSubtitle
+                : 'Групповой чат',
+            lastMessageAt: placeholderAt,
+            lastMessageSenderId: _sessionUserId,
+            unreadCount: 0,
+            lastIncomingAt: null,
+            isTemirtauCity: isOfficial,
+            fromGlobalSearch: true,
+          ),
+        );
+      }
+
+      for (final row in channelRows) {
+        final id = row['id'] as String?;
+        if (id == null) continue;
+        final title = (row['title'] as String?)?.trim() ?? '';
+        if (title.isEmpty) continue;
+        if (!_haystackMatchesChatSearchQuery(
+          _normalizeForChatSearch(title),
+          queryNorm,
+        )) {
+          continue;
+        }
+        out.add(
+          _ChatThread(
+            kind: _ChatThreadKind.channel,
+            peerId: id,
+            peerName: title,
+            peerAvatarUrl: row['avatar_url'] as String?,
+            lastMessageText: 'Канал',
+            lastMessageAt: placeholderAt,
+            lastMessageSenderId: _sessionUserId,
+            unreadCount: 0,
+            lastIncomingAt: null,
+            fromGlobalSearch: true,
+          ),
+        );
+      }
+
+      out.sort(
+        (a, b) => a.peerName.toLowerCase().compareTo(b.peerName.toLowerCase()),
+      );
+
+      if (!mounted || gen != _searchRemoteGen) return;
+      _publishRemoteSearchHits(out);
+    } catch (e, st) {
+      debugPrint('ChatsPage._runRemoteChatsSearch: $e\n$st');
+      if (!mounted || gen != _searchRemoteGen) return;
+      _publishRemoteSearchHits(const []);
+    }
+  }
+
+  /// Доп. строки из поиска по БД (пользователь / канал / группа), без дубликатов с [allLoaded].
+  List<_ChatThread> _mergeGlobalSearchRows(
+    List<_ChatThread> allLoaded,
+    List<_ChatThread> tabFiltered,
+    List<_ChatThread> globalHits,
+  ) {
+    final existing = {for (final t in allLoaded) t.storageKey};
+    final merged = [...tabFiltered];
+    for (final t in globalHits) {
+      if (existing.contains(t.storageKey)) continue;
+      merged.add(t);
+      existing.add(t.storageKey);
+    }
+    return merged;
   }
 
   void _syncChatBadge() {
@@ -217,17 +521,21 @@ class _ChatsPageState extends State<ChatsPage> {
       userId: _sessionUserId,
       data: _ChatsPageData(
         threads: List<_ChatThread>.from(data.threads),
-        visibleStoryGroups: List<StoryGroupEntity>.from(data.visibleStoryGroups),
+        visibleStoryGroups: List<StoryGroupEntity>.from(
+          data.visibleStoryGroups,
+        ),
         newStoriesByUserId: Map<String, bool>.from(data.newStoriesByUserId),
         storyNotesByUserId: Map<String, String>.from(data.storyNotesByUserId),
-        storyLocationsByUserId: Map<String, String>.from(data.storyLocationsByUserId),
+        storyLocationsByUserId: Map<String, String>.from(
+          data.storyLocationsByUserId,
+        ),
         followingPeerIds: Set<String>.from(data.followingPeerIds),
       ),
     );
   }
 
   Future<({Map<String, String> notes, Map<String, String> locations})>
-      _loadStoryNotes(Set<String> userIds) async {
+  _loadStoryNotes(Set<String> userIds) async {
     if (userIds.isEmpty) {
       return (
         notes: const <String, String>{},
@@ -270,8 +578,9 @@ class _ChatsPageState extends State<ChatsPage> {
     String currentLocation = '',
   }) async {
     final controller = TextEditingController(text: currentNote);
-    final locationController =
-        TextEditingController(text: _optimisticMyStoryLocation ?? currentLocation);
+    final locationController = TextEditingController(
+      text: _optimisticMyStoryLocation ?? currentLocation,
+    );
     var shareLocation = (locationController.text.trim().isNotEmpty);
     final action = await showModalBottomSheet<String>(
       context: context,
@@ -358,8 +667,9 @@ class _ChatsPageState extends State<ChatsPage> {
           'share_location': shareLocation,
         }, onConflict: 'user_id');
         _optimisticMyStoryNote = controller.text.trim();
-        _optimisticMyStoryLocation =
-            shareLocation ? locationController.text.trim() : '';
+        _optimisticMyStoryLocation = shareLocation
+            ? locationController.text.trim()
+            : '';
         _optimisticMyStoryNoteOwnerId = _sessionUserId;
       }
       if (!mounted) return;
@@ -369,7 +679,8 @@ class _ChatsPageState extends State<ChatsPage> {
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString();
-      final isMissingRelation = msg.contains('user_story_settings') ||
+      final isMissingRelation =
+          msg.contains('user_story_settings') ||
           (msg.contains('story_note') && msg.toLowerCase().contains('column'));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -403,6 +714,11 @@ class _ChatsPageState extends State<ChatsPage> {
         if (aUnread != bUnread) return aUnread ? -1 : 1;
         return b.lastMessageAt.compareTo(a.lastMessageAt);
       });
+    final pinnedIdx = threads.indexWhere((t) => t.isTemirtauCity);
+    if (pinnedIdx > 0) {
+      final pinned = threads.removeAt(pinnedIdx);
+      threads.insert(0, pinned);
+    }
 
     _cachedThreadsForStories = threads;
 
@@ -415,7 +731,9 @@ class _ChatsPageState extends State<ChatsPage> {
     final followingPeerIds = await followingFuture;
     _lastFollowingPeerIds = followingPeerIds;
     final storyNotesByUserId = Map<String, String>.from(storyMeta.notes);
-    final storyLocationsByUserId = Map<String, String>.from(storyMeta.locations);
+    final storyLocationsByUserId = Map<String, String>.from(
+      storyMeta.locations,
+    );
     if (_optimisticMyStoryNote != null &&
         _optimisticMyStoryNoteOwnerId != null &&
         _optimisticMyStoryNoteOwnerId == _sessionUserId) {
@@ -586,7 +904,9 @@ class _ChatsPageState extends State<ChatsPage> {
                                   setStateDialog(() => loading = true);
                                   try {
                                     final res = await fetchSuggestions(v);
-                                    if (!mounted || !sheetOpen || !ctx.mounted) {
+                                    if (!mounted ||
+                                        !sheetOpen ||
+                                        !ctx.mounted) {
                                       return;
                                     }
                                     setStateDialog(() {
@@ -594,7 +914,9 @@ class _ChatsPageState extends State<ChatsPage> {
                                       loading = false;
                                     });
                                   } catch (_) {
-                                    if (!mounted || !sheetOpen || !ctx.mounted) {
+                                    if (!mounted ||
+                                        !sheetOpen ||
+                                        !ctx.mounted) {
                                       return;
                                     }
                                     setStateDialog(() {
@@ -624,7 +946,9 @@ class _ChatsPageState extends State<ChatsPage> {
                               itemBuilder: (c, i) {
                                 final s = suggestions[i];
                                 return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 3),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 3,
+                                  ),
                                   child: Material(
                                     color: Colors.grey.shade100,
                                     borderRadius: BorderRadius.circular(14),
@@ -672,185 +996,6 @@ class _ChatsPageState extends State<ChatsPage> {
     });
   }
 
-  Future<List<_MutualUser>> _loadInviteCandidates() async {
-    final list = await loadInviteCandidates(_client, _sessionUserId);
-    return list
-        .map(
-          (e) => _MutualUser(
-            id: e.id,
-            name: e.name,
-            avatarUrl: e.avatarUrl,
-          ),
-        )
-        .toList(growable: false);
-  }
-
-  Future<void> _showCreateGroupChatDialog() async {
-    final rootContext = context;
-    try {
-      final users = await _loadInviteCandidates();
-      if (!mounted) return;
-      if (users.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Нет контактов для группы. Подпишитесь на людей или получите подписчиков.',
-            ),
-          ),
-        );
-        return;
-      }
-
-      final titleController = TextEditingController();
-      final selected = <String>{};
-      String draftTitle = '';
-      final created = await showModalBottomSheet<bool>(
-        context: context,
-        isScrollControlled: true,
-        backgroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-        ),
-        builder: (ctx) {
-          final media = MediaQuery.of(ctx);
-          return StatefulBuilder(
-            builder: (ctx, setStateSheet) {
-              return AnimatedPadding(
-                duration: const Duration(milliseconds: 150),
-                padding: EdgeInsets.only(
-                  bottom: media.viewInsets.bottom,
-                ),
-                child: DraggableScrollableSheet(
-                  expand: false,
-                  initialChildSize: 0.78,
-                  minChildSize: 0.45,
-                  maxChildSize: 0.95,
-                  builder: (context, scrollController) {
-                    return ListView(
-                      controller: scrollController,
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                      children: [
-                        TextField(
-                          controller: titleController,
-                          decoration: const InputDecoration(
-                            labelText: 'Название группы',
-                            hintText: 'Например: Друзья',
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          'Кого пригласить (подписчики и подписки)',
-                          style: Theme.of(ctx).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        ...List.generate(users.length, (i) {
-                          final u = users[i];
-                          final isChecked = selected.contains(u.id);
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 3),
-                            child: Material(
-                              color: Colors.grey.shade100,
-                              borderRadius: BorderRadius.circular(14),
-                              child: CheckboxListTile(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                value: isChecked,
-                                onChanged: (v) {
-                                  setStateSheet(() {
-                                    if (v == true) {
-                                      selected.add(u.id);
-                                    } else {
-                                      selected.remove(u.id);
-                                    }
-                                  });
-                                },
-                                secondary: CachedAvatar(
-                                  imageUrl: u.avatarUrl,
-                                  radius: 18,
-                                  fallbackText: u.name,
-                                ),
-                                title: Text(u.name),
-                                controlAffinity:
-                                    ListTileControlAffinity.trailing,
-                              ),
-                            ),
-                          );
-                        }),
-                        const SizedBox(height: 10),
-                        FilledButton(
-                          onPressed: selected.isEmpty
-                              ? null
-                              : () {
-                                  draftTitle = titleController.text.trim();
-                                  Navigator.pop(ctx, true);
-                                },
-                          child: const Text('Создать групповой чат'),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            draftTitle = titleController.text.trim();
-                            Navigator.pop(ctx, false);
-                          },
-                          child: const Text('Отмена'),
-                        ),
-                        const SizedBox(height: 6),
-                      ],
-                    );
-                  },
-                ),
-              );
-            },
-          );
-        },
-      );
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        titleController.dispose();
-      });
-      if (created != true || !rootContext.mounted) return;
-      final title = draftTitle.isEmpty ? 'Групповой чат' : draftTitle;
-      final groupRes = await _client
-          .from(SupabaseConstants.chatGroupsTable)
-          .insert({'owner_id': _sessionUserId, 'title': title})
-          .select('id')
-          .single();
-      final groupId = groupRes['id'] as String;
-      final members = <Map<String, dynamic>>[
-        {'group_id': groupId, 'user_id': _sessionUserId},
-        ...selected.map((id) => {'group_id': groupId, 'user_id': id}),
-      ];
-      await _client
-          .from(SupabaseConstants.chatGroupMembersTable)
-          .upsert(members);
-
-      await GroupChatSystemApi.notifyGroupCreated(
-        _client,
-        groupId: groupId,
-        ownerId: _sessionUserId,
-        title: title,
-      );
-      for (final uid in selected) {
-        final u = users.firstWhere((x) => x.id == uid);
-        await GroupChatSystemApi.notifyMemberJoined(
-          _client,
-          groupId: groupId,
-          ownerId: _sessionUserId,
-          memberName: u.name,
-        );
-      }
-
-      if (!rootContext.mounted) return;
-      await rootContext.push(
-        '/chat-group/$groupId?name=${Uri.encodeComponent(title)}',
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось создать групповой чат: $e')),
-      );
-    }
-  }
-
   Future<void> _openMyChannel() async {
     try {
       final existing = await _client
@@ -896,11 +1041,6 @@ class _ChatsPageState extends State<ChatsPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.group_add_outlined),
-              title: const Text('Создать групповой чат'),
-              onTap: () => Navigator.pop(ctx, 'group'),
-            ),
-            ListTile(
               leading: const Icon(Icons.campaign_outlined),
               title: const Text('Мой канал'),
               onTap: () => Navigator.pop(ctx, 'channel'),
@@ -911,10 +1051,6 @@ class _ChatsPageState extends State<ChatsPage> {
       ),
     );
     if (!mounted || selected == null) return;
-    if (selected == 'group') {
-      await _showCreateGroupChatDialog();
-      return;
-    }
     await _openMyChannel();
   }
 
@@ -968,9 +1104,9 @@ class _ChatsPageState extends State<ChatsPage> {
 
     try {
       final usersRes = await _client
-        .from(SupabaseConstants.usersTable)
-        .select('id, name, avatar')
-        .inFilter('id', peerIdList);
+          .from(SupabaseConstants.usersTable)
+          .select('id, name, avatar')
+          .inFilter('id', peerIdList);
       final users = (usersRes as List).cast<Map<String, dynamic>>();
       for (final u in users) {
         final peerId = u['id'] as String?;
@@ -992,12 +1128,16 @@ class _ChatsPageState extends State<ChatsPage> {
     return threadsByPeer.values.toList();
   }
 
-  Future<List<StoryGroupEntity>> _loadVisibleStoryGroups(Set<String> peerIds) async {
+  Future<List<StoryGroupEntity>> _loadVisibleStoryGroups(
+    Set<String> peerIds,
+  ) async {
     if (peerIds.isEmpty) return const [];
     try {
       final storiesRes = await _client
           .from(SupabaseConstants.storiesTable)
-          .select('id,user_id,image_url,video_url,caption,created_at,expires_at')
+          .select(
+            'id,user_id,image_url,video_url,caption,created_at,expires_at',
+          )
           .inFilter('user_id', peerIds.toList(growable: false))
           .gt('expires_at', DateTime.now().toIso8601String())
           .order('created_at', ascending: false)
@@ -1036,15 +1176,17 @@ class _ChatsPageState extends State<ChatsPage> {
         grouped.putIfAbsent(userId, () => []).add(story);
       }
 
-      return grouped.entries.map((e) {
-        final first = e.value.first;
-        return StoryGroupEntity(
-          userId: e.key,
-          stories: e.value,
-          userName: first.userName,
-          userAvatarUrl: first.userAvatarUrl,
-        );
-      }).toList(growable: false);
+      return grouped.entries
+          .map((e) {
+            final first = e.value.first;
+            return StoryGroupEntity(
+              userId: e.key,
+              stories: e.value,
+              userName: first.userName,
+              userAvatarUrl: first.userAvatarUrl,
+            );
+          })
+          .toList(growable: false);
     } catch (_) {
       return const [];
     }
@@ -1052,15 +1194,9 @@ class _ChatsPageState extends State<ChatsPage> {
 
   Future<List<_ChatThread>> _loadGroupThreads() async {
     try {
-      final membershipRes = await _client
-          .from(SupabaseConstants.chatGroupMembersTable)
-          .select('group_id')
-          .eq('user_id', _sessionUserId);
-      final groupIds = (membershipRes as List)
-          .map((e) => (e as Map<String, dynamic>)['group_id'] as String?)
-          .whereType<String>()
-          .toList(growable: false);
-      if (groupIds.isEmpty) return const [];
+      final temirtau = await _ensureTemirtauCityGroup();
+      // В ленте только городской чат — не тянем остальные группы из memberships.
+      final groupIds = <String>[temirtau.id];
 
       final groupsRes = await _client
           .from(SupabaseConstants.chatGroupsTable)
@@ -1074,7 +1210,8 @@ class _ChatsPageState extends State<ChatsPage> {
           .inFilter('group_id', groupIds)
           .order('created_at', ascending: false)
           .limit(400);
-      final allMessages = (groupMessagesRes as List).cast<Map<String, dynamic>>();
+      final allMessages = (groupMessagesRes as List)
+          .cast<Map<String, dynamic>>();
       final latestByGroup = <String, Map<String, dynamic>>{};
       for (final m in allMessages) {
         final gid = m['group_id'] as String?;
@@ -1102,34 +1239,133 @@ class _ChatsPageState extends State<ChatsPage> {
         }
       }
 
-      return groups.map((g) {
-        final id = g['id'] as String;
-        final title = (g['title'] as String?) ?? 'Групповой чат';
-        final latest = latestByGroup[id];
-        final createdAtRaw = g['created_at'] as String?;
-        final fallbackCreatedAt = createdAtRaw != null
-            ? DateTime.tryParse(createdAtRaw)
-            : null;
-        return _ChatThread(
-          kind: _ChatThreadKind.group,
-          peerId: id,
-          peerName: title,
-          peerAvatarUrl: (g['avatar_url'] as String?)?.trim().isEmpty == true
-              ? null
-              : g['avatar_url'] as String?,
-          lastMessageText: (latest?['text'] as String?) ?? 'Группа создана',
-          lastMessageAt: latest != null
-              ? DateTime.parse(latest['created_at'] as String)
-              : (fallbackCreatedAt ?? DateTime.now()),
-          lastMessageSenderId:
-              (latest?['sender_id'] as String?) ?? _sessionUserId,
-          unreadCount: unreadByGroupId[id] ?? 0,
-          lastIncomingAt: lastIncomingByGroup[id],
-        );
-      }).toList(growable: false);
-    } catch (_) {
+      final mapped = groups
+          .map((g) {
+            final id = g['id'] as String;
+            final title = (g['title'] as String?) ?? 'Групповой чат';
+            final latest = latestByGroup[id];
+            final createdAtRaw = g['created_at'] as String?;
+            final fallbackCreatedAt = createdAtRaw != null
+                ? DateTime.tryParse(createdAtRaw)
+                : null;
+            final kind = latest?['kind'] as String? ?? 'text';
+            final lastPreview =
+                kind == TemirtauCityGroupConfig.messageKindCityRules
+                ? 'Правила сообщества'
+                : (latest?['text'] as String?) ?? 'Группа создана';
+            return _ChatThread(
+              kind: _ChatThreadKind.group,
+              peerId: id,
+              peerName: title,
+              peerAvatarUrl:
+                  (g['avatar_url'] as String?)?.trim().isEmpty == true
+                  ? null
+                  : g['avatar_url'] as String?,
+              lastMessageText: lastPreview,
+              lastMessageAt: latest != null
+                  ? DateTime.parse(latest['created_at'] as String)
+                  : (fallbackCreatedAt ?? DateTime.now()),
+              lastMessageSenderId:
+                  (latest?['sender_id'] as String?) ?? _sessionUserId,
+              unreadCount: unreadByGroupId[id] ?? 0,
+              lastIncomingAt: lastIncomingByGroup[id],
+              isTemirtauCity: id == temirtau.id,
+            );
+          })
+          .toList(growable: false);
+      mapped.sort((a, b) => b.lastMessageAt.compareTo(a.lastMessageAt));
+      return mapped;
+    } catch (e, st) {
+      debugPrint('ChatsPage._loadGroupThreads: $e\n$st');
       return const [];
     }
+  }
+
+  Future<({String id, String title})> _ensureTemirtauCityGroup() async {
+    final now = DateTime.now();
+    final tc = _temirtauIdCache;
+    if (tc != null &&
+        tc.userId == _sessionUserId &&
+        now.difference(tc.at) <= _temirtauIdCacheTtl) {
+      try {
+        await _client.from(SupabaseConstants.chatGroupMembersTable).insert({
+          'group_id': tc.id,
+          'user_id': _sessionUserId,
+        }, defaultToNull: false);
+      } on PostgrestException catch (e) {
+        if (e.code != '23505') rethrow;
+      }
+      return (id: tc.id, title: tc.title);
+    }
+
+    final existingRes = await _client
+        .from(SupabaseConstants.chatGroupsTable)
+        .select('id,title')
+        .eq('title', TemirtauCityGroupConfig.title)
+        .order('created_at', ascending: true)
+        .limit(1);
+    String id;
+    String title;
+    if ((existingRes as List).isNotEmpty) {
+      final row = Map<String, dynamic>.from(existingRes.first as Map);
+      id = row['id'] as String;
+      title = (row['title'] as String?) ?? TemirtauCityGroupConfig.title;
+      try {
+        await _client
+            .from(SupabaseConstants.chatGroupsTable)
+            .update({
+              'description': TemirtauCityGroupConfig.communityDescription,
+              'is_official_city_chat': true,
+              'is_discoverable': true,
+            })
+            .eq('id', id);
+      } catch (_) {
+        // Старый проект без колонки — после миграции заработает.
+      }
+    } else {
+      final created = await _client
+          .from(SupabaseConstants.chatGroupsTable)
+          .insert({
+            'owner_id': _sessionUserId,
+            'title': TemirtauCityGroupConfig.title,
+            'description': TemirtauCityGroupConfig.communityDescription,
+            'is_official_city_chat': true,
+            'is_discoverable': true,
+          })
+          .select('id,title')
+          .single();
+      final row = Map<String, dynamic>.from(created);
+      id = row['id'] as String;
+      title = (row['title'] as String?) ?? TemirtauCityGroupConfig.title;
+      await GroupChatSystemApi.notifyGroupCreated(
+        _client,
+        groupId: id,
+        ownerId: _sessionUserId,
+        title: title,
+      );
+      await _client.from(SupabaseConstants.chatGroupMessagesTable).insert({
+        'group_id': id,
+        'sender_id': _sessionUserId,
+        'text': TemirtauCityGroupConfig.systemWelcomeMessage,
+        'kind': 'system_created',
+      });
+    }
+    try {
+      await _client.from(SupabaseConstants.chatGroupMembersTable).insert({
+        'group_id': id,
+        'user_id': _sessionUserId,
+      }, defaultToNull: false);
+    } on PostgrestException catch (e) {
+      // Already a member (unique key) is expected on repeated loads.
+      if (e.code != '23505') rethrow;
+    }
+    _temirtauIdCache = _TemirtauIdCache(
+      userId: _sessionUserId,
+      id: id,
+      title: title,
+      at: DateTime.now(),
+    );
+    return (id: id, title: title);
   }
 
   Future<List<_ChatThread>> _loadChannelThreads() async {
@@ -1157,8 +1393,8 @@ class _ChatsPageState extends State<ChatsPage> {
           .inFilter('channel_id', channelIds)
           .order('created_at', ascending: false)
           .limit(400);
-      final allMessages =
-          (channelMessagesRes as List).cast<Map<String, dynamic>>();
+      final allMessages = (channelMessagesRes as List)
+          .cast<Map<String, dynamic>>();
 
       final latestByChannel = <String, Map<String, dynamic>>{};
       final unreadByChannel = <String, int>{};
@@ -1180,31 +1416,34 @@ class _ChatsPageState extends State<ChatsPage> {
         }
       }
 
-      return channels.map((c) {
-        final id = c['id'] as String;
-        final title = (c['title'] as String?) ?? 'Канал';
-        final latest = latestByChannel[id];
-        final createdAtRaw = c['created_at'] as String?;
-        final fallbackCreatedAt = createdAtRaw != null
-            ? DateTime.tryParse(createdAtRaw)
-            : null;
-        return _ChatThread(
-          kind: _ChatThreadKind.channel,
-          peerId: id,
-          peerName: title,
-          peerAvatarUrl: (c['avatar_url'] as String?)?.trim().isEmpty == true
-              ? null
-              : c['avatar_url'] as String?,
-          lastMessageText: (latest?['text'] as String?) ?? 'Канал создан',
-          lastMessageAt: latest != null
-              ? DateTime.parse(latest['created_at'] as String)
-              : (fallbackCreatedAt ?? DateTime.now()),
-          lastMessageSenderId:
-              (latest?['sender_id'] as String?) ?? _sessionUserId,
-          unreadCount: unreadByChannel[id] ?? 0,
-          lastIncomingAt: lastIncomingByChannel[id],
-        );
-      }).toList(growable: false);
+      return channels
+          .map((c) {
+            final id = c['id'] as String;
+            final title = (c['title'] as String?) ?? 'Канал';
+            final latest = latestByChannel[id];
+            final createdAtRaw = c['created_at'] as String?;
+            final fallbackCreatedAt = createdAtRaw != null
+                ? DateTime.tryParse(createdAtRaw)
+                : null;
+            return _ChatThread(
+              kind: _ChatThreadKind.channel,
+              peerId: id,
+              peerName: title,
+              peerAvatarUrl:
+                  (c['avatar_url'] as String?)?.trim().isEmpty == true
+                  ? null
+                  : c['avatar_url'] as String?,
+              lastMessageText: (latest?['text'] as String?) ?? 'Канал создан',
+              lastMessageAt: latest != null
+                  ? DateTime.parse(latest['created_at'] as String)
+                  : (fallbackCreatedAt ?? DateTime.now()),
+              lastMessageSenderId:
+                  (latest?['sender_id'] as String?) ?? _sessionUserId,
+              unreadCount: unreadByChannel[id] ?? 0,
+              lastIncomingAt: lastIncomingByChannel[id],
+            );
+          })
+          .toList(growable: false);
     } catch (_) {
       return const [];
     }
@@ -1258,31 +1497,49 @@ class _ChatsPageState extends State<ChatsPage> {
     return true;
   }
 
-  List<_ChatThread> _filterByTab(_ChatsPageData data, int tabIndex) {
+  List<_ChatThread> _filterByTab(
+    _ChatsPageData data,
+    int tabIndex,
+    String searchRaw,
+  ) {
     final threads = data.threads;
     final followingPeerIds = data.followingPeerIds;
     final archived = _chatStorage.getArchivedPeerIds();
-    final q = _searchQuery.trim().toLowerCase();
+    final q = _normalizeChatSearchQuery(searchRaw);
 
     bool matchesSearch(_ChatThread t) {
       if (q.isEmpty) return true;
-      return t.peerName.toLowerCase().contains(q);
+      final name = _normalizeForChatSearch(t.peerName);
+      final sub = _normalizeForChatSearch(t.lastMessageText);
+      return _haystackMatchesChatSearchQuery('$name $sub', q);
     }
 
     if (tabIndex == 0) {
-      return threads
+      final list = threads
           .where(
             (t) =>
-                !archived.contains(t.storageKey) &&
+                (t.isTemirtauCity || !archived.contains(t.storageKey)) &&
                 (!_isStrangerIncomingThread(t, followingPeerIds) ||
                     _chatStorage.isAccepted(t.peerId)) &&
                 matchesSearch(t),
           )
           .toList();
+      list.sort((a, b) {
+        if (a.isTemirtauCity != b.isTemirtauCity) {
+          return a.isTemirtauCity ? -1 : 1;
+        }
+        return b.lastMessageAt.compareTo(a.lastMessageAt);
+      });
+      return list;
     }
     if (tabIndex == 1) {
       return threads
-          .where((t) => archived.contains(t.storageKey) && matchesSearch(t))
+          .where(
+            (t) =>
+                !t.isTemirtauCity &&
+                archived.contains(t.storageKey) &&
+                matchesSearch(t),
+          )
           .toList();
     }
     return threads
@@ -1314,7 +1571,7 @@ class _ChatsPageState extends State<ChatsPage> {
             .eq('receiver_id', _sessionUserId);
       }
       await _chatStorage.clearPeerState(t.storageKey);
-      _warmCache = null;
+      _clearChatsTransientCaches();
       if (mounted) {
         setState(() {
           _pageFuture = _loadPageData();
@@ -1395,12 +1652,13 @@ class _ChatsPageState extends State<ChatsPage> {
     setState(() {
       _threadSelectionMode = false;
       _selectedThreadKeys.clear();
-      _warmCache = null;
+      _ChatsPageState._clearChatsTransientCaches();
       _pageFuture = _loadPageData();
     });
   }
 
   Future<void> _deleteThreadByKind(_ChatThread t) async {
+    if (t.isTemirtauCity) return;
     if (t.kind == _ChatThreadKind.direct) {
       await _deleteChat(t);
       return;
@@ -1448,7 +1706,9 @@ class _ChatsPageState extends State<ChatsPage> {
     setState(() {
       _selectedThreadKeys
         ..clear()
-        ..addAll(data.threads.map((t) => t.storageKey));
+        ..addAll(
+          data.threads.where((t) => !t.isTemirtauCity).map((t) => t.storageKey),
+        );
     });
   }
 
@@ -1476,13 +1736,24 @@ class _ChatsPageState extends State<ChatsPage> {
 
     return BlocListener<AuthBloc, AuthState>(
       listenWhen: (prev, curr) {
-        if (curr is! AuthAuthenticated) return false;
-        if (prev is! AuthAuthenticated) return true;
-        return prev.user.id != curr.user.id;
+        final lostAuth =
+            prev is AuthAuthenticated && curr is! AuthAuthenticated;
+        final gainedAuth =
+            prev is! AuthAuthenticated && curr is AuthAuthenticated;
+        final switchedUser =
+            prev is AuthAuthenticated &&
+            curr is AuthAuthenticated &&
+            prev.user.id != curr.user.id;
+        return lostAuth || gainedAuth || switchedUser;
       },
       listener: (context, state) {
+        _ChatsPageState._clearChatsTransientCaches();
+        _searchRemoteDebounce?.cancel();
+        _searchRemoteGen++;
+        _blockedPeerIdsCache = null;
+        _blockedPeerIdsCacheAt = null;
+        _remoteSearchNotifier.value = const [];
         if (state is! AuthAuthenticated) return;
-        _warmCache = null;
         setState(() {
           _sessionUserId = state.user.id;
           _optimisticMyStoryNote = null;
@@ -1494,197 +1765,226 @@ class _ChatsPageState extends State<ChatsPage> {
       child: DefaultTabController(
         length: 3,
         child: Scaffold(
-        appBar: AppBar(
-          title: _threadSelectionMode
-              ? Text('Выбрано: ${_selectedThreadKeys.length}')
-              : const Text('Мои чаты'),
-          actions: [
-            if (_threadSelectionMode) ...[
-              FutureBuilder<_ChatsPageData>(
-                future: _pageFuture,
-                builder: (context, snapshot) {
-                  final data = snapshot.data;
-                  return IconButton(
-                    tooltip: 'Выбрать все',
-                    icon: const Icon(Icons.select_all_rounded),
-                    onPressed: data == null ? null : () => _selectAllThreads(data),
-                  );
-                },
-              ),
-              IconButton(
-                tooltip: 'Удалить выбранные',
-                icon: const Icon(Icons.delete_outline),
-                onPressed:
-                    _selectedThreadKeys.isEmpty ? null : _deleteSelectedThreads,
-              ),
-              IconButton(
-                tooltip: 'Закрыть выбор',
-                icon: const Icon(Icons.close),
-                onPressed: () => _toggleThreadSelectionMode(false),
-              ),
-            ] else ...[
-              IconButton(
-                icon: const Icon(Icons.person_add_alt_1_outlined),
-                onPressed: () => _showCreateChatDialog(),
-              ),
-              IconButton(
-                icon: const Icon(Icons.more_horiz),
-                onPressed: _showChatsTopMenu,
-              ),
-            ],
-          ],
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Чаты'),
-              Tab(text: 'Архив'),
-              Tab(text: 'Запросы'),
-            ],
-          ),
-        ),
-        body: FutureBuilder<_ChatsPageData>(
-          future: _pageFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Text('Не удалось загрузить чаты'),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: () {
-                        setState(() {
-                          _pageFuture = _loadPageData();
-                        });
-                      },
-                      child: const Text('Повторить'),
-                    ),
-                  ],
-                ),
-              );
-            }
-            final data = snapshot.data;
-            if (data == null) {
-              return const SizedBox.shrink();
-            }
-
-            return Column(
-              children: [
-                ChatStoriesFriendsStrip(
-                  groups: data.visibleStoryGroups,
-                  newStoriesByUserId: data.newStoriesByUserId,
-                  storyNotesByUserId: data.storyNotesByUserId,
-                  storyLocationsByUserId: data.storyLocationsByUserId,
-                  currentUserId: authState.user.id,
-                  currentUserAvatarUrl: authState.user.avatarUrl,
-                  onOwnNoteTap: (currentNote) {
-                    final uid = authState.user.id;
-                    final effective =
-                        (_optimisticMyStoryNoteOwnerId == uid &&
-                                _optimisticMyStoryNote != null)
-                            ? _optimisticMyStoryNote!
-                            : currentNote;
-                    final location =
-                        (_optimisticMyStoryNoteOwnerId == uid &&
-                                _optimisticMyStoryLocation != null)
-                            ? _optimisticMyStoryLocation!
-                            : (data.storyLocationsByUserId[uid] ?? '');
-                    _showOwnStoryNoteSheet(
-                      effective,
-                      currentLocation: location,
-                    );
-                  },
-                  onAddStoryTap: () async {
-                    await context.push('/add-story');
-                    if (!mounted) return;
-                    setState(() {
-                      _pageFuture = _loadPageData();
-                    });
-                  },
-                  onStoryTap: (group) async {
-                    if (group.stories.isEmpty) return;
-                    final latestStoryAt = group.firstStory.createdAt;
-                    await _storySeenStorage.setLastSeenAt(
-                      group.userId,
-                      latestStoryAt,
-                    );
-                    if (!mounted) return;
-                    setState(() {
-                      _pageFuture = _loadPageData();
-                    });
-                    if (!context.mounted) return;
-                    await context.push(
-                      '/stories',
-                      extra: StoryViewerArgs(
-                        groups: [group],
-                        initialGroupIndex: 0,
-                      ),
+          appBar: AppBar(
+            title: _threadSelectionMode
+                ? Text('Выбрано: ${_selectedThreadKeys.length}')
+                : const Text('Мои чаты'),
+            actions: [
+              if (_threadSelectionMode) ...[
+                FutureBuilder<_ChatsPageData>(
+                  future: _pageFuture,
+                  builder: (context, snapshot) {
+                    final data = snapshot.data;
+                    return IconButton(
+                      tooltip: 'Выбрать все',
+                      icon: const Icon(Icons.select_all_rounded),
+                      onPressed: data == null
+                          ? null
+                          : () => _selectAllThreads(data),
                     );
                   },
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-                  child: TextField(
-                    controller: _searchController,
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                    decoration: InputDecoration(
-                      hintText: 'Поиск по пользователю',
-                      prefixIcon: const Icon(Icons.search_rounded),
-                      filled: true,
-                      fillColor: Colors.grey.shade900.withValues(alpha: 0.2),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: Colors.grey.shade700),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: Colors.grey.shade700),
-                      ),
-                    ),
-                  ),
+                IconButton(
+                  tooltip: 'Удалить выбранные',
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: _selectedThreadKeys.isEmpty
+                      ? null
+                      : _deleteSelectedThreads,
                 ),
-                Expanded(
-                  child: TabBarView(
-                    children: [0, 1, 2].map((tabIndex) {
-                      final threads = _filterByTab(data, tabIndex);
-                      if (threads.isEmpty) {
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 56,
-                                color: Colors.grey.shade400,
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                tabIndex == 0
-                                    ? 'Пока нет чатов'
-                                    : tabIndex == 1
-                                        ? 'В архиве пусто'
-                                        : 'Нет запросов на сообщения',
-                                style: TextStyle(color: Colors.grey.shade600),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-                      return _buildThreadList(
-                        context,
-                        threads,
-                        requestsTab: tabIndex == 2,
-                      );
-                    }).toList(),
-                  ),
+                IconButton(
+                  tooltip: 'Закрыть выбор',
+                  icon: const Icon(Icons.close),
+                  onPressed: () => _toggleThreadSelectionMode(false),
+                ),
+              ] else ...[
+                IconButton(
+                  icon: const Icon(Icons.person_add_alt_1_outlined),
+                  onPressed: () => _showCreateChatDialog(),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.more_horiz),
+                  onPressed: _showChatsTopMenu,
                 ),
               ],
-            );
-          },
-        ),
+            ],
+            bottom: const TabBar(
+              tabs: [
+                Tab(text: 'Чаты'),
+                Tab(text: 'Архив'),
+                Tab(text: 'Запросы'),
+              ],
+            ),
+          ),
+          body: FutureBuilder<_ChatsPageData>(
+            future: _pageFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text('Не удалось загрузить чаты'),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: () {
+                          setState(() {
+                            _pageFuture = _loadPageData();
+                          });
+                        },
+                        child: const Text('Повторить'),
+                      ),
+                    ],
+                  ),
+                );
+              }
+              final data = snapshot.data;
+              if (data == null) {
+                return const SizedBox.shrink();
+              }
+
+              return Column(
+                children: [
+                  ChatStoriesFriendsStrip(
+                    groups: data.visibleStoryGroups,
+                    newStoriesByUserId: data.newStoriesByUserId,
+                    storyNotesByUserId: data.storyNotesByUserId,
+                    storyLocationsByUserId: data.storyLocationsByUserId,
+                    currentUserId: authState.user.id,
+                    currentUserAvatarUrl: authState.user.avatarUrl,
+                    onOwnNoteTap: (currentNote) {
+                      final uid = authState.user.id;
+                      final effective =
+                          (_optimisticMyStoryNoteOwnerId == uid &&
+                              _optimisticMyStoryNote != null)
+                          ? _optimisticMyStoryNote!
+                          : currentNote;
+                      final location =
+                          (_optimisticMyStoryNoteOwnerId == uid &&
+                              _optimisticMyStoryLocation != null)
+                          ? _optimisticMyStoryLocation!
+                          : (data.storyLocationsByUserId[uid] ?? '');
+                      _showOwnStoryNoteSheet(
+                        effective,
+                        currentLocation: location,
+                      );
+                    },
+                    onAddStoryTap: () async {
+                      await context.push('/add-story');
+                      if (!mounted) return;
+                      setState(() {
+                        _pageFuture = _loadPageData();
+                      });
+                    },
+                    onStoryTap: (group) async {
+                      if (group.stories.isEmpty) return;
+                      final latestStoryAt = group.firstStory.createdAt;
+                      await _storySeenStorage.setLastSeenAt(
+                        group.userId,
+                        latestStoryAt,
+                      );
+                      if (!mounted) return;
+                      setState(() {
+                        _pageFuture = _loadPageData();
+                      });
+                      if (!context.mounted) return;
+                      await context.push(
+                        '/stories',
+                        extra: StoryViewerArgs(
+                          groups: [group],
+                          initialGroupIndex: 0,
+                        ),
+                      );
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+                    child: TextField(
+                      controller: _searchController,
+                      onChanged: _onChatsSearchChanged,
+                      decoration: InputDecoration(
+                        hintText:
+                            'Имя, чат, канал или текст в последнем сообщении',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        filled: true,
+                        fillColor: Colors.grey.shade900.withValues(alpha: 0.2),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.shade700),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.shade700),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: ValueListenableBuilder<String>(
+                      valueListenable: _searchQueryListenable,
+                      builder: (context, searchRaw, _) {
+                        return ValueListenableBuilder<List<_ChatThread>>(
+                          valueListenable: _remoteSearchNotifier,
+                          builder: (context, remoteHits, _) {
+                            return TabBarView(
+                              children: [0, 1, 2].map((tabIndex) {
+                                var threads = _filterByTab(
+                                  data,
+                                  tabIndex,
+                                  searchRaw,
+                                );
+                                if (tabIndex == 0 &&
+                                    searchRaw.trim().isNotEmpty) {
+                                  threads = _mergeGlobalSearchRows(
+                                    data.threads,
+                                    threads,
+                                    remoteHits,
+                                  );
+                                }
+                                if (threads.isEmpty) {
+                                  return Center(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          Icons.chat_bubble_outline,
+                                          size: 56,
+                                          color: Colors.grey.shade400,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          tabIndex == 0
+                                              ? 'Пока нет чатов'
+                                              : tabIndex == 1
+                                                  ? 'В архиве пусто'
+                                                  : 'Нет запросов на сообщения',
+                                          style: TextStyle(
+                                            color: Colors.grey.shade600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }
+                                return _buildThreadList(
+                                  context,
+                                  threads,
+                                  requestsTab: tabIndex == 2,
+                                );
+                              }).toList(),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -1705,8 +2005,10 @@ class _ChatsPageState extends State<ChatsPage> {
     }
 
     if (t.kind == _ChatThreadKind.group) {
-      await context
-          .push('/chat-group/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}');
+      final city = t.isTemirtauCity ? '&city=1' : '';
+      await context.push(
+        '/chat-group/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}$city',
+      );
       if (mounted) {
         setState(() {
           _pageFuture = _loadPageData();
@@ -1718,21 +2020,31 @@ class _ChatsPageState extends State<ChatsPage> {
 
     final chatsData = await _pageFuture;
     if (!mounted) return;
-    final suppressFirstMessageDialog =
-        _isMessageRequestRow(t, chatsData.followingPeerIds);
+    final followingPeerIds = chatsData.followingPeerIds;
+    // Подписки (ваши «друзья» в ленте): без диалога «принять» при каждом новом сообщении.
+    if (followingPeerIds.contains(t.peerId)) {
+      await _chatStorage.setAccepted(t.peerId, true);
+    }
+    final suppressFirstMessageDialog = _isMessageRequestRow(
+      t,
+      followingPeerIds,
+    );
 
     final isUnread = t.unreadCount > 0;
     final lastIncoming = t.lastIncomingAt;
     final lastDialog = _chatStorage.getLastDialogShownAt(t.peerId);
     final alreadyAccepted = _chatStorage.isAccepted(t.peerId);
+    final isFollowingPeer = followingPeerIds.contains(t.peerId);
     final shouldShowDialog =
         isUnread &&
         !alreadyAccepted &&
         !suppressFirstMessageDialog &&
+        !isFollowingPeer &&
         lastIncoming != null &&
         (lastDialog == null || lastIncoming.isAfter(lastDialog));
 
     if (shouldShowDialog) {
+      if (!mounted) return;
       final accept = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -1765,6 +2077,7 @@ class _ChatsPageState extends State<ChatsPage> {
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
       );
     } else {
+      if (!mounted) return;
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}',
       );
@@ -1790,6 +2103,7 @@ class _ChatsPageState extends State<ChatsPage> {
   }
 
   Future<void> _setThreadArchived(_ChatThread t, bool archived) async {
+    if (t.isTemirtauCity) return;
     await _chatStorage.setArchived(t.storageKey, archived);
     if (!mounted) return;
     setState(() {
@@ -1801,8 +2115,9 @@ class _ChatsPageState extends State<ChatsPage> {
   Future<void> _acceptMessageRequest(_ChatThread t) async {
     await _chatStorage.setDeclined(t.peerId, false);
     await _chatStorage.setAccepted(t.peerId, true);
-    final at = (t.lastIncomingAt ?? t.lastMessageAt)
-        .add(const Duration(milliseconds: 1));
+    final at = (t.lastIncomingAt ?? t.lastMessageAt).add(
+      const Duration(milliseconds: 1),
+    );
     await _chatStorage.setLastReadAt(t.peerId, at);
     if (!mounted) return;
     setState(() {
@@ -1869,17 +2184,57 @@ class _ChatsPageState extends State<ChatsPage> {
         }
         if (mounted) _syncChatBadge();
       },
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: threads.length,
-        itemBuilder: (context, index) {
-          final t = threads[index];
-          final isUnread = t.unreadCount > 0;
-          final isOnline = _isProbablyOnline(t);
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
-            child: (_threadSelectionMode
-                    ? Material(
+      child: RepaintBoundary(
+        child: ListView.builder(
+          physics: const AlwaysScrollableScrollPhysics(),
+          itemCount: threads.length,
+          itemBuilder: (context, index) {
+            final t = threads[index];
+            final isUnread = t.unreadCount > 0;
+            final isOnline = _isProbablyOnline(t);
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+              child: (t.isTemirtauCity ||
+                      _threadSelectionMode ||
+                      t.fromGlobalSearch
+                  ? Material(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(18),
+                      child: _buildThreadTile(
+                        context,
+                        t,
+                        isUnread,
+                        isOnline,
+                        showRequestActions: requestsTab,
+                      ),
+                    )
+                  : Dismissible(
+                      key: ValueKey(t.storageKey),
+                      direction: DismissDirection.horizontal,
+                      confirmDismiss: (direction) async {
+                        if (direction == DismissDirection.startToEnd) {
+                          await _markThreadRead(t);
+                          return false;
+                        }
+                        if (direction == DismissDirection.endToStart) {
+                          await _setThreadArchived(t, true);
+                          return false;
+                        }
+                        return false;
+                      },
+                      background: _SwipeActionBackground(
+                        color: Colors.blue.withValues(alpha: 0.18),
+                        icon: Icons.mark_chat_read_outlined,
+                        label: 'Прочитано',
+                        alignRight: false,
+                      ),
+                      secondaryBackground: _SwipeActionBackground(
+                        color: Colors.orange.withValues(alpha: 0.18),
+                        icon: Icons.archive_outlined,
+                        label: 'В архив',
+                        alignRight: true,
+                      ),
+                      child: Material(
                         color: Colors.grey.shade100,
                         borderRadius: BorderRadius.circular(18),
                         child: _buildThreadTile(
@@ -1889,47 +2244,11 @@ class _ChatsPageState extends State<ChatsPage> {
                           isOnline,
                           showRequestActions: requestsTab,
                         ),
-                      )
-                    : Dismissible(
-                        key: ValueKey(t.storageKey),
-                        direction: DismissDirection.horizontal,
-                        confirmDismiss: (direction) async {
-                          if (direction == DismissDirection.startToEnd) {
-                            await _markThreadRead(t);
-                            return false;
-                          }
-                          if (direction == DismissDirection.endToStart) {
-                            await _setThreadArchived(t, true);
-                            return false;
-                          }
-                          return false;
-                        },
-                        background: _SwipeActionBackground(
-                          color: Colors.blue.withValues(alpha: 0.18),
-                          icon: Icons.mark_chat_read_outlined,
-                          label: 'Прочитано',
-                          alignRight: false,
-                        ),
-                        secondaryBackground: _SwipeActionBackground(
-                          color: Colors.orange.withValues(alpha: 0.18),
-                          icon: Icons.archive_outlined,
-                          label: 'В архив',
-                          alignRight: true,
-                        ),
-                        child: Material(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(18),
-                          child: _buildThreadTile(
-                            context,
-                            t,
-                            isUnread,
-                            isOnline,
-                            showRequestActions: requestsTab,
-                          ),
-                        ),
-                      )),
-          );
-        },
+                      ),
+                    )),
+            );
+          },
+        ),
       ),
     );
   }
@@ -1945,15 +2264,17 @@ class _ChatsPageState extends State<ChatsPage> {
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        border: isSelected
+        border: t.isTemirtauCity
+            ? Border.all(color: const Color(0xFF0EA5E9), width: 1.1)
+            : isSelected
             ? Border.all(color: const Color(0xFF2563EB), width: 1.4)
             : null,
-        color: isSelected ? const Color(0x1A2563EB) : Colors.grey.shade100,
+        color: t.isTemirtauCity
+            ? const Color(0xFFF0F9FF)
+            : (isSelected ? const Color(0x1A2563EB) : Colors.grey.shade100),
       ),
       child: ListTile(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         minVerticalPadding: 10,
         leading: SizedBox(
           width: 52,
@@ -1962,11 +2283,33 @@ class _ChatsPageState extends State<ChatsPage> {
             child: Stack(
               clipBehavior: Clip.none,
               children: [
-                CachedAvatar(
-                  imageUrl: t.peerAvatarUrl,
-                  radius: 26,
-                  fallbackText: t.peerName,
-                ),
+                t.isTemirtauCity
+                    ? Container(
+                        width: 52,
+                        height: 52,
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: <Color>[
+                              Color(0xFF0284C7),
+                              Color(0xFF0EA5E9),
+                              Color(0xFF22D3EE),
+                            ],
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.location_city_rounded,
+                          color: Colors.white,
+                          size: 26,
+                        ),
+                      )
+                    : CachedAvatar(
+                        imageUrl: t.peerAvatarUrl,
+                        radius: 26,
+                        fallbackText: t.peerName,
+                      ),
                 if (isOnline)
                   Positioned(
                     right: -1,
@@ -1977,10 +2320,7 @@ class _ChatsPageState extends State<ChatsPage> {
                       decoration: BoxDecoration(
                         color: const Color(0xFF22C55E),
                         shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white,
-                          width: 2,
-                        ),
+                        border: Border.all(color: Colors.white, width: 2),
                       ),
                     ),
                   ),
@@ -1988,19 +2328,34 @@ class _ChatsPageState extends State<ChatsPage> {
             ),
           ),
         ),
-        title: Text(
-          t.peerName,
-          style: TextStyle(
-            fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600,
-            letterSpacing: -0.1,
-          ),
+        title: Row(
+          children: [
+            Flexible(
+              child: Text(
+                t.peerName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: isUnread ? FontWeight.w700 : FontWeight.w600,
+                  letterSpacing: -0.1,
+                  color: t.isTemirtauCity ? const Color(0xFF0C4A6E) : null,
+                ),
+              ),
+            ),
+            if (t.isTemirtauCity) ...[
+              const SizedBox(width: 8),
+              const _CityListBadge(),
+            ],
+          ],
         ),
         subtitle: Text(
           t.lastMessageText,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
-            color: Colors.grey.shade600,
+            color: t.isTemirtauCity
+                ? const Color(0xFF0369A1)
+                : Colors.grey.shade600,
             fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
           ),
         ),
@@ -2017,13 +2372,13 @@ class _ChatsPageState extends State<ChatsPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: isUnread
-                                ? const Color(0xFF2563EB)
-                                : Colors.grey.shade500,
-                            fontWeight: isUnread
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                          ),
+                        color: isUnread
+                            ? const Color(0xFF2563EB)
+                            : Colors.grey.shade500,
+                        fontWeight: isUnread
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Wrap(
@@ -2061,19 +2416,30 @@ class _ChatsPageState extends State<ChatsPage> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(
-                      _timeAgo(t.lastMessageAt),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: isUnread
-                                ? const Color(0xFF2563EB)
-                                : Colors.grey.shade500,
-                            fontWeight: isUnread
-                                ? FontWeight.w600
-                                : FontWeight.w500,
-                          ),
-                    ),
+                    if (!t.fromGlobalSearch)
+                      Text(
+                        _timeAgo(t.lastMessageAt),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: isUnread
+                              ? const Color(0xFF2563EB)
+                              : Colors.grey.shade500,
+                          fontWeight: isUnread
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                        ),
+                      )
+                    else
+                      Text(
+                        'поиск',
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey.shade500,
+                          fontWeight: FontWeight.w500,
+                          fontSize: 11,
+                        ),
+                      ),
                     const SizedBox(height: 6),
                     if (isUnread)
                       if (t.unreadCount > 1)
@@ -2112,12 +2478,14 @@ class _ChatsPageState extends State<ChatsPage> {
               ),
         onTap: () {
           if (_threadSelectionMode) {
+            if (t.isTemirtauCity) return;
             _toggleThreadSelection(t);
             return;
           }
           _openChat(t);
         },
         onLongPress: () {
+          if (t.isTemirtauCity) return;
           if (!_threadSelectionMode) {
             _toggleThreadSelectionMode(true);
           }
@@ -2131,6 +2499,40 @@ class _ChatsPageState extends State<ChatsPage> {
     if (t.kind != _ChatThreadKind.direct) return false;
     final diff = DateTime.now().difference(t.lastMessageAt);
     return diff.inMinutes <= 5;
+  }
+}
+
+/// Бейдж официального городского чата в списке диалогов.
+class _CityListBadge extends StatelessWidget {
+  const _CityListBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: <Color>[Color(0xFF0284C7), Color(0xFF0EA5E9)],
+        ),
+        borderRadius: BorderRadius.circular(8),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: const Color(0xFF0EA5E9).withValues(alpha: 0.35),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: const Text(
+        'CITY',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.6,
+        ),
+      ),
+    );
   }
 }
 
@@ -2183,6 +2585,8 @@ class _ChatThread {
     this.unreadCount = 0,
     this.lastIncomingAt,
     this.isBlocked = false,
+    this.isTemirtauCity = false,
+    this.fromGlobalSearch = false,
   });
 
   final _ChatThreadKind kind;
@@ -2195,6 +2599,9 @@ class _ChatThread {
   final int unreadCount;
   final DateTime? lastIncomingAt;
   final bool isBlocked;
+  final bool isTemirtauCity;
+  /// Строка из отложенного поиска по БД — без свайпов «архив», время в списке скрыто.
+  final bool fromGlobalSearch;
   String get storageKey => '${kind.name}:$peerId';
 
   _ChatThread copyWith({
@@ -2204,6 +2611,8 @@ class _ChatThread {
     int? unreadCount,
     DateTime? lastIncomingAt,
     bool? isBlocked,
+    bool? isTemirtauCity,
+    bool? fromGlobalSearch,
   }) {
     return _ChatThread(
       kind: kind ?? this.kind,
@@ -2216,6 +2625,8 @@ class _ChatThread {
       unreadCount: unreadCount ?? this.unreadCount,
       lastIncomingAt: lastIncomingAt ?? this.lastIncomingAt,
       isBlocked: isBlocked ?? this.isBlocked,
+      isTemirtauCity: isTemirtauCity ?? this.isTemirtauCity,
+      fromGlobalSearch: fromGlobalSearch ?? this.fromGlobalSearch,
     );
   }
 }
@@ -2237,6 +2648,7 @@ class _ChatsPageData {
   final Map<String, bool> newStoriesByUserId;
   final Map<String, String> storyNotesByUserId;
   final Map<String, String> storyLocationsByUserId;
+
   /// `following_id` для auth-пользователя — для вкладки «Запросы» (как в Instagram).
   final Set<String> followingPeerIds;
 }
@@ -2253,6 +2665,20 @@ class _ChatsWarmCache {
   final _ChatsPageData data;
 }
 
+class _TemirtauIdCache {
+  const _TemirtauIdCache({
+    required this.userId,
+    required this.id,
+    required this.title,
+    required this.at,
+  });
+
+  final String userId;
+  final String id;
+  final String title;
+  final DateTime at;
+}
+
 class _UserSuggestion {
   const _UserSuggestion({
     required this.userId,
@@ -2262,18 +2688,6 @@ class _UserSuggestion {
 
   final String userId;
   final String? name;
-  final String? avatarUrl;
-}
-
-class _MutualUser {
-  const _MutualUser({
-    required this.id,
-    required this.name,
-    required this.avatarUrl,
-  });
-
-  final String id;
-  final String name;
   final String? avatarUrl;
 }
 

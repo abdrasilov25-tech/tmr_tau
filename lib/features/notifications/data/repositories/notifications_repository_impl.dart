@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/notification_entity.dart';
+import '../../domain/entities/notification_feed_unread_counts.dart';
 import '../../domain/entities/top_user_rank_entity.dart';
 import '../../domain/entities/notification_unread_summary.dart';
 import '../../domain/repositories/notifications_repository.dart';
@@ -129,6 +130,32 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
   @override
   Future<int> getUnreadCount(String userId) async {
     return _countUnread(userId);
+  }
+
+  @override
+  Future<NotificationFeedUnreadCounts> getFeedUnreadCounts(String userId) async {
+    try {
+      final res = await _client.rpc(
+        'notification_feed_unread_counts',
+        params: {'p_user_id': userId},
+      );
+      final rows = res as List;
+      if (rows.isEmpty) {
+        return const NotificationFeedUnreadCounts(publications: 0, news: 0);
+      }
+      final row = rows.first as Map<String, dynamic>;
+      final p =
+          (row['publications_count'] as num?)?.toInt() ??
+          (row['publicationsCount'] as num?)?.toInt() ??
+          0;
+      final n =
+          (row['news_count'] as num?)?.toInt() ??
+          (row['newsCount'] as num?)?.toInt() ??
+          0;
+      return NotificationFeedUnreadCounts(publications: p, news: n);
+    } catch (_) {
+      return const NotificationFeedUnreadCounts(publications: 0, news: 0);
+    }
   }
 
   @override
