@@ -42,10 +42,16 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
+  bool _didInitialFetch = false;
   String? _error;
+  int _dbOffset = 0;
+  _PublicationPageChunk? _prefetchedNextPage;
+  bool _prefetching = false;
 
   final ScrollController _scrollController = ScrollController();
   static const int _pageSize = 12;
+  static const Duration _warmCacheTtl = Duration(seconds: 90);
+  static _PublicationFeedWarmCache? _warmCache;
 
   String? get _currentUserId {
     final state = context.read<AuthBloc>().state;
@@ -60,8 +66,22 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
   @override
   void initState() {
     super.initState();
+    final cache = _warmCache;
+    final uid = _currentUserId ?? '';
+    if (cache != null &&
+        cache.userId == uid &&
+        DateTime.now().difference(cache.createdAt) <= _warmCacheTtl) {
+      _posts = List<PostEntity>.from(cache.posts);
+      _dbOffset = cache.dbOffset;
+      _hasMore = cache.hasMore;
+      _loading = false;
+      _didInitialFetch = true;
+    }
     _scrollController.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _load(showLoader: _posts.isEmpty);
+    });
   }
 
   @override
@@ -74,42 +94,93 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
 
   // ── Скролл до конца → подгружаем ───────────────────────────
   void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 300) {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    if (position.maxScrollExtent > 0 &&
+        position.pixels >= position.maxScrollExtent * 0.7) {
+      _schedulePrefetchIfNeeded();
+    }
+    if (position.pixels >= position.maxScrollExtent - 300) {
       _loadMore();
     }
   }
 
   // ── Первая загрузка ────────────────────────────────────────
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final posts = await _postRepo.getFeedPosts(
-        limit: _pageSize,
-        offset: 0,
-        currentUserId: _currentUserId,
-      );
-      // Только публикации (не новости)
-      final pubs = posts
-          .where((p) => p.kind.trim().toLowerCase() == 'publication')
-          .toList(growable: false);
-
-      if (!mounted) return;
+  Future<void> _load({bool showLoader = true}) async {
+    if (showLoader) {
       setState(() {
-        _posts = pubs;
-        _hasMore = posts.length >= _pageSize;
-        _loading = false;
+        _loading = true;
+        _error = null;
       });
+    } else {
+      _error = null;
+    }
+    try {
+      final page = await _fetchPublicationPage(
+        offset: 0,
+        targetCount: _pageSize,
+      );
+      if (!mounted) return;
+      _warmCache = _PublicationFeedWarmCache(
+        createdAt: DateTime.now(),
+        userId: _currentUserId ?? '',
+        posts: page.posts,
+        dbOffset: page.nextOffset,
+        hasMore: page.hasMore,
+      );
+      setState(() {
+        _posts = page.posts;
+        _dbOffset = page.nextOffset;
+        _hasMore = page.hasMore;
+        _loading = false;
+        _didInitialFetch = true;
+      });
+      _schedulePrefetchIfNeeded();
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
+        _didInitialFetch = true;
       });
     }
+  }
+
+  Future<_PublicationPageChunk> _fetchPublicationPage({
+    required int offset,
+    required int targetCount,
+  }) async {
+    final collected = <PostEntity>[];
+    var nextOffset = offset;
+    var hasMoreRaw = true;
+    var attempts = 0;
+
+    while (collected.length < targetCount && hasMoreRaw && attempts < 4) {
+      attempts++;
+      final batch = await _postRepo.getFeedPosts(
+        limit: _pageSize,
+        offset: nextOffset,
+        currentUserId: _currentUserId,
+      );
+      final pubs = batch
+          .where((p) => p.kind.trim().toLowerCase() == 'publication')
+          .toList(growable: false);
+      if (pubs.isNotEmpty) {
+        collected.addAll(pubs);
+      }
+      nextOffset += batch.length;
+      hasMoreRaw = batch.length >= _pageSize;
+    }
+
+    if (collected.length > targetCount) {
+      collected.removeRange(targetCount, collected.length);
+    }
+
+    return _PublicationPageChunk(
+      posts: collected,
+      nextOffset: nextOffset,
+      hasMore: hasMoreRaw,
+    );
   }
 
   // ── Пагинация ──────────────────────────────────────────────
@@ -117,28 +188,57 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
     if (_loadingMore || !_hasMore || _loading) return;
     setState(() => _loadingMore = true);
     try {
-      final more = await _postRepo.getFeedPosts(
-        limit: _pageSize,
-        offset: _posts.length,
-        currentUserId: _currentUserId,
-      );
-      final pubs = more
-          .where((p) => p.kind.trim().toLowerCase() == 'publication')
-          .toList(growable: false);
+      final page = _prefetchedNextPage != null && _prefetchedNextPage!.nextOffset > _dbOffset
+          ? _prefetchedNextPage!
+          : await _fetchPublicationPage(
+              offset: _dbOffset,
+              targetCount: _pageSize,
+            );
+      _prefetchedNextPage = null;
 
       final existingIds = _posts.map((p) => p.id).toSet();
       final newPosts =
-          pubs.where((p) => !existingIds.contains(p.id)).toList();
+          page.posts.where((p) => !existingIds.contains(p.id)).toList();
 
       if (!mounted) return;
+      final merged = [..._posts, ...newPosts];
+      _warmCache = _PublicationFeedWarmCache(
+        createdAt: DateTime.now(),
+        userId: _currentUserId ?? '',
+        posts: merged,
+        dbOffset: page.nextOffset,
+        hasMore: page.hasMore,
+      );
       setState(() {
-        _posts = [..._posts, ...newPosts];
-        _hasMore = more.length >= _pageSize;
+        _posts = merged;
+        _dbOffset = page.nextOffset;
+        _hasMore = page.hasMore;
         _loadingMore = false;
       });
+      _schedulePrefetchIfNeeded();
     } catch (_) {
       if (mounted) setState(() => _loadingMore = false);
     }
+  }
+
+  void _schedulePrefetchIfNeeded() {
+    if (_prefetching || !_hasMore || _loading || _loadingMore) return;
+    _prefetching = true;
+    Future<void>.microtask(() async {
+      try {
+        final page = await _fetchPublicationPage(
+          offset: _dbOffset,
+          targetCount: _pageSize,
+        );
+        if (!mounted) return;
+        if (page.posts.isEmpty) return;
+        _prefetchedNextPage = page;
+      } catch (_) {
+        // Prefetch must never break visible feed rendering.
+      } finally {
+        _prefetching = false;
+      }
+    });
   }
 
   // ── Оптимистичные обновления ───────────────────────────────
@@ -224,7 +324,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
     if (_error != null) {
       return AppErrorView(message: _error!, onRetry: _load);
     }
-    if (_posts.isEmpty) return const _EmptyFeed();
+    if (_posts.isEmpty && _didInitialFetch) return const _EmptyFeed();
 
     return RefreshIndicator(
       onRefresh: _load,
@@ -277,8 +377,8 @@ class _FeedSkeleton extends StatelessWidget {
     return ListView.separated(
       physics: const NeverScrollableScrollPhysics(),
       itemCount: 3,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (_, __) => const _PostSkeleton(),
+      separatorBuilder: (_, index) => const SizedBox(height: 8),
+      itemBuilder: (_, index) => const _PostSkeleton(),
     );
   }
 }
@@ -384,7 +484,7 @@ class _EmptyFeed extends StatelessWidget {
               color: Theme.of(context)
                   .colorScheme
                   .onSurface
-                  .withOpacity(0.3),
+                  .withValues(alpha: 0.3),
             ),
             const SizedBox(height: 20),
             Text(
@@ -401,7 +501,7 @@ class _EmptyFeed extends StatelessWidget {
                     color: Theme.of(context)
                         .colorScheme
                         .onSurface
-                        .withOpacity(0.5),
+                        .withValues(alpha: 0.5),
                   ),
             ),
           ],
@@ -409,4 +509,32 @@ class _EmptyFeed extends StatelessWidget {
       ),
     );
   }
+}
+
+class _PublicationPageChunk {
+  const _PublicationPageChunk({
+    required this.posts,
+    required this.nextOffset,
+    required this.hasMore,
+  });
+
+  final List<PostEntity> posts;
+  final int nextOffset;
+  final bool hasMore;
+}
+
+class _PublicationFeedWarmCache {
+  const _PublicationFeedWarmCache({
+    required this.createdAt,
+    required this.userId,
+    required this.posts,
+    required this.dbOffset,
+    required this.hasMore,
+  });
+
+  final DateTime createdAt;
+  final String userId;
+  final List<PostEntity> posts;
+  final int dbOffset;
+  final bool hasMore;
 }

@@ -5,15 +5,53 @@ import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/data/kazakhstan_regions.dart';
 import '../../../../core/models/search_filters.dart';
 import '../../domain/entities/product_entity.dart';
+import '../../domain/entities/seller_listing_policy.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../models/product_model.dart';
 
 class ProductRepositoryImpl implements ProductRepository {
+  @override
+  Future<SellerListingPolicy> getSellerListingPolicy(String sellerId) async {
+    final userRow = await _client
+        .from('users')
+        .select('seller_plan, official_page_active')
+        .eq('id', sellerId)
+        .maybeSingle();
+
+    final activeRows = await _client
+        .from(SupabaseConstants.productsTable)
+        .select('id')
+        .eq('seller_id', sellerId);
+
+    final rawPlan = (userRow?['seller_plan'] as String?)?.trim().toLowerCase();
+    final officialActive = userRow?['official_page_active'] as bool? ?? false;
+
+    // Backward compatibility: old paid sellers without seller_plan stay on Standard.
+    final SellerPlanType plan = switch (rawPlan) {
+      'pro' => SellerPlanType.pro,
+      'standard' => SellerPlanType.standard,
+      'free' => SellerPlanType.free,
+      _ => officialActive ? SellerPlanType.standard : SellerPlanType.free,
+    };
+
+    final int? maxActiveProducts = switch (plan) {
+      SellerPlanType.free => 3,
+      SellerPlanType.standard => 20,
+      SellerPlanType.pro => null,
+    };
+
+    return SellerListingPolicy(
+      plan: plan,
+      maxActiveProducts: maxActiveProducts,
+      activeProducts: (activeRows as List).length,
+    );
+  }
+
   ProductRepositoryImpl(this._client);
   final SupabaseClient _client;
 
   static const String _productSelect =
-      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, is_negotiable, is_giveaway, latitude, longitude, contact_phone, promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count, users!seller_id(name, avatar), categories!category_id(name)';
+      'id, title, description, price, image_url, image_urls, category, category_id, seller_id, created_at, city, condition, is_urgent, is_top, is_negotiable, is_giveaway, latitude, longitude, contact_phone, promo_top_until, promo_urgent_until, promo_highlight_until, stats_access_until, view_count, users!seller_id(name, avatar, seller_verified_store, is_verified), categories!category_id(name)';
 
   dynamic _excludeSellerIds(dynamic queryBuilder, Set<String> excludeSellerIds) {
     if (excludeSellerIds.isEmpty) return queryBuilder;
@@ -33,15 +71,23 @@ class ProductRepositoryImpl implements ProductRepository {
     Set<String> excludeSellerIds = const {},
   }) async {
     final safeLimit = limit.clamp(1, 100);
+    final fetchWindow = math.max(safeLimit * 3, 30);
+    final fetchFrom = math.max(offset * 3, 0);
+    final fetchTo = fetchFrom + fetchWindow - 1;
     dynamic queryBuilder = _client
         .from(SupabaseConstants.productsTable)
         .select(_productSelect);
     queryBuilder = _excludeSellerIds(queryBuilder, excludeSellerIds);
     final res = await queryBuilder
         .order('created_at', ascending: false)
-        .range(offset, offset + safeLimit - 1);
-    final list = _mapProducts(res as List);
-    return await _enrichWithUserState(list, currentUserId);
+        .range(fetchFrom, fetchTo);
+    final rawList = _mapProducts(res as List);
+    final ranked = await _rankFeedProducts(
+      source: rawList,
+      currentUserId: currentUserId,
+      limit: safeLimit,
+    );
+    return await _enrichWithUserState(ranked, currentUserId);
   }
 
   @override
@@ -211,7 +257,15 @@ class ProductRepositoryImpl implements ProductRepository {
               centerLongitude: nearbyCenterLng,
             )
           : filteredList;
-      return await _enrichWithUserState(sortedList, currentUserId);
+      final shouldSmartRank = q.isEmpty && (filters?.sort ?? SearchSort.newest) == SearchSort.newest;
+      final ranked = shouldSmartRank
+          ? await _rankFeedProducts(
+              source: sortedList,
+              currentUserId: currentUserId,
+              limit: safeLimit,
+            )
+          : sortedList;
+      return await _enrichWithUserState(ranked, currentUserId);
     } catch (_) {
       // При ошибке возвращаем ленту как "похожие".
       return getFeedProducts(
@@ -232,9 +286,14 @@ class ProductRepositoryImpl implements ProductRepository {
         .from(SupabaseConstants.productsTable)
         .select(_productSelect)
         .order('created_at', ascending: false)
-        .limit(safeLimit);
+        .limit(math.max(safeLimit * 3, 30));
     final list = _mapProducts(res as List);
-    return await _enrichWithUserState(list, currentUserId);
+    final ranked = await _rankFeedProducts(
+      source: list,
+      currentUserId: currentUserId,
+      limit: safeLimit,
+    );
+    return await _enrichWithUserState(ranked, currentUserId);
   }
 
   @override
@@ -256,6 +315,14 @@ class ProductRepositoryImpl implements ProductRepository {
     String? contactPhone,
     required String sellerId,
   }) async {
+    final policy = await getSellerListingPolicy(sellerId);
+    if (!policy.canCreateProduct) {
+      throw Exception(
+        'Достигнут лимит объявлений (${policy.activeProducts}/${policy.maxActiveProducts}) '
+        'для плана ${policy.planLabel}. Подключите подписку выше.',
+      );
+    }
+
     final phoneDb = contactPhone?.trim();
     final urls = imageUrls.map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     final data = <String, dynamic>{
@@ -466,7 +533,9 @@ class ProductRepositoryImpl implements ProductRepository {
       ..remove('categories')
       ..['seller_name'] = userMap?['name']
       ..['seller_avatar'] = userMap?['avatar']
-      ..['seller_is_verified'] = userMap?['is_verified'] ?? false
+      ..['seller_is_verified'] =
+          (userMap?['is_verified'] ?? false) ||
+          (userMap?['seller_verified_store'] ?? false)
       ..['likes_count'] = json['likes_count'] ?? 0
       ..['comments_count'] = json['comments_count'] ?? 0
       ..['category'] = categoryName ?? 'general'
@@ -655,6 +724,134 @@ class ProductRepositoryImpl implements ProductRepository {
       return da.compareTo(db);
     });
     return sorted;
+  }
+
+  Future<List<ProductEntity>> _rankFeedProducts({
+    required List<ProductEntity> source,
+    required String? currentUserId,
+    required int limit,
+  }) async {
+    if (source.length < 2) return source.take(limit).toList(growable: false);
+    final now = DateTime.now();
+    final sellerAffinity = currentUserId == null
+        ? const <String, double>{}
+        : await _loadSellerAffinity(
+            currentUserId: currentUserId,
+            candidateSellerIds: source.map((p) => p.sellerId).toSet(),
+          );
+    final ranked = List<ProductEntity>.from(source);
+    ranked.sort((a, b) {
+      final aScore = _scoreProductForFeed(a, now, sellerAffinity[a.sellerId] ?? 0.0);
+      final bScore = _scoreProductForFeed(b, now, sellerAffinity[b.sellerId] ?? 0.0);
+      return bScore.compareTo(aScore);
+    });
+    return _applyProductDiversityBySeller(
+      products: ranked,
+      limit: limit,
+    );
+  }
+
+  double _scoreProductForFeed(ProductEntity product, DateTime now, double affinity) {
+    final createdAt = product.createdAt ?? now;
+    final ageHours = now.difference(createdAt).inMinutes / 60.0;
+    final freshness = math.exp(-ageHours / 28.0);
+    final engagement = math.log(
+      1 +
+          product.viewCount * 0.08 +
+          product.likesCount * 1.2 +
+          product.commentsCount * 1.6 +
+          product.repostsCount * 2.0,
+    );
+    final promoBoost = (product.isTop ? 0.08 : 0.0) + (product.isUrgent ? 0.05 : 0.0);
+    final mediaBoost = product.imageUrls.isNotEmpty ? 0.05 : 0.0;
+    return freshness * 0.52 + engagement * 0.27 + affinity * 0.16 + promoBoost + mediaBoost;
+  }
+
+  Future<Map<String, double>> _loadSellerAffinity({
+    required String currentUserId,
+    required Set<String> candidateSellerIds,
+  }) async {
+    if (candidateSellerIds.isEmpty) return const <String, double>{};
+    final scores = <String, double>{};
+
+    Future<void> addSignal({
+      required String table,
+      required double weight,
+    }) async {
+      final rows = await _client
+          .from(table)
+          .select('product_id')
+          .eq('user_id', currentUserId)
+          .limit(400);
+      final productIds = (rows as List<dynamic>)
+          .map((e) => (e as Map<String, dynamic>)['product_id'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList(growable: false);
+      if (productIds.isEmpty) return;
+      for (var i = 0; i < productIds.length; i += 120) {
+        final end = math.min(i + 120, productIds.length);
+        final chunk = productIds.sublist(i, end);
+        final productRows = await _client
+            .from(SupabaseConstants.productsTable)
+            .select('id,seller_id')
+            .inFilter('id', chunk);
+        for (final row in (productRows as List<dynamic>)) {
+          final sellerId = ((row as Map<String, dynamic>)['seller_id'] ?? '').toString();
+          if (sellerId.isEmpty || !candidateSellerIds.contains(sellerId)) continue;
+          scores[sellerId] = (scores[sellerId] ?? 0) + weight;
+        }
+      }
+    }
+
+    await addSignal(table: SupabaseConstants.productLikesTable, weight: 1.0);
+    await addSignal(table: SupabaseConstants.productRepostsTable, weight: 1.8);
+    await addSignal(table: SupabaseConstants.favoritesTable, weight: 1.5);
+
+    if (scores.isEmpty) return scores;
+    final maxScore = scores.values.reduce(math.max);
+    if (maxScore <= 0) return scores;
+    for (final key in scores.keys.toList(growable: false)) {
+      scores[key] = scores[key]! / maxScore;
+    }
+    return scores;
+  }
+
+  List<ProductEntity> _applyProductDiversityBySeller({
+    required List<ProductEntity> products,
+    required int limit,
+  }) {
+    if (products.isEmpty || limit <= 0) return const [];
+    final cappedLimit = math.min(limit, products.length);
+    final bySeller = <String, List<ProductEntity>>{};
+    for (final product in products) {
+      bySeller.putIfAbsent(product.sellerId, () => <ProductEntity>[]).add(product);
+    }
+    final out = <ProductEntity>[];
+    String? lastSeller;
+    while (out.length < cappedLimit) {
+      ProductEntity? picked;
+      String? pickedSeller;
+      for (final entry in bySeller.entries) {
+        if (entry.value.isEmpty) continue;
+        if (entry.key == lastSeller) continue;
+        picked = entry.value.removeAt(0);
+        pickedSeller = entry.key;
+        break;
+      }
+      picked ??= () {
+        for (final entry in bySeller.entries) {
+          if (entry.value.isEmpty) continue;
+          pickedSeller = entry.key;
+          return entry.value.removeAt(0);
+        }
+        return null;
+      }();
+      if (picked == null) break;
+      out.add(picked);
+      lastSeller = pickedSeller;
+    }
+    return out;
   }
 
   double _distanceKm(double lat1, double lon1, double lat2, double lon2) {

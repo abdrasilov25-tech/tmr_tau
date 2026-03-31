@@ -78,7 +78,7 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
       res = await _client
           .from(SupabaseConstants.notificationsTable)
           .select(
-            'id, user_id, actor_id, type, title, body, product_id, post_id, comment_id, read_at, created_at, '
+            'id, user_id, actor_id, type, title, body, product_id, post_id, story_id, comment_id, read_at, created_at, '
             'actor:users!notifications_actor_id_fkey(name, avatar), '
             'post:posts!notifications_post_id_fkey(image_url, video_url, kind), '
             'product:products!notifications_product_id_fkey(image_url)',
@@ -166,9 +166,10 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
         'post_like',
         'product_like',
         'product_favorite',
+        'story_like',
       ]),
-      _countUnreadTypes(userId, ['post_comment', 'product_comment']),
-      _countUnreadTypes(userId, ['post_repost', 'product_repost']),
+      _countUnreadTypes(userId, ['post_comment', 'product_comment', 'story_reply']),
+      _countUnreadTypes(userId, ['post_repost', 'product_repost', 'post_mention_story']),
       _previewAvatarUrlsForUnread(userId),
     ]);
 

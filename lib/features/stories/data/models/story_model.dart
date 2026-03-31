@@ -11,6 +11,10 @@ class StoryModel extends StoryEntity {
     super.caption,
     super.userName,
     super.userAvatarUrl,
+    super.originalPostId,
+    super.originalPostAuthorId,
+    super.originalPostAuthorName,
+    super.originalPostPreviewUrl,
   });
 
   factory StoryModel.fromJson(Map<String, dynamic> json) {
@@ -24,6 +28,10 @@ class StoryModel extends StoryEntity {
       expiresAt: _parseDateTime(json['expires_at']),
       userName: json['user_name'] as String?,
       userAvatarUrl: json['user_avatar'] as String?,
+      originalPostId: json['original_post_id'] as String?,
+      originalPostAuthorId: json['original_post_author_id'] as String?,
+      originalPostAuthorName: json['original_post_author_name'] as String?,
+      originalPostPreviewUrl: json['original_post_preview_url'] as String?,
     );
   }
 

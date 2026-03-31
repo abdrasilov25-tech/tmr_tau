@@ -1,4 +1,5 @@
 import '../entities/product_entity.dart';
+import '../entities/seller_listing_policy.dart';
 import '../../../../core/models/search_filters.dart';
 
 abstract class ProductRepository {
@@ -76,4 +77,7 @@ abstract class ProductRepository {
 
   /// Счётчик просмотров (RPC `increment_product_view` в Supabase).
   Future<void> incrementProductView(String productId);
+
+  /// Политика лимитов продавца на активные объявления.
+  Future<SellerListingPolicy> getSellerListingPolicy(String sellerId);
 }

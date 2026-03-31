@@ -105,6 +105,11 @@ class PostRepositoryImpl implements PostRepository {
     int offset = 0,
   }) async {
     final me = currentUserId;
+    final safeLimit = limit <= 0 ? 10 : limit;
+    final safeOffset = offset < 0 ? 0 : offset;
+    final fetchWindow = math.max(safeLimit * 3, 30);
+    final fetchFrom = math.max(safeOffset * 3, 0);
+    final fetchTo = fetchFrom + fetchWindow - 1;
     final following =
         followingUserIds.where((id) => id != me).toList(growable: false);
     if (following.isEmpty) {
@@ -116,14 +121,28 @@ class PostRepositoryImpl implements PostRepository {
         .eq('kind', 'publication')
         .inFilter('user_id', following)
         .order('created_at', ascending: false)
-        .range(offset, offset + limit - 1);
-    final list = (res as List)
+        .range(fetchFrom, fetchTo);
+    final rawList = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
         .toList(growable: false);
+    List<PostEntity> list;
+    if (me != null) {
+      final signals = await _loadRecommendationSignals(me);
+      list = _rankSubscriptionPublications(
+        rawList,
+        signals,
+        safeLimit,
+      );
+    } else {
+      list = _applyDiversityByAuthor(
+        posts: rawList,
+        limit: safeLimit,
+      );
+    }
     final enriched = await _applyPostUserState(list, me);
     return PublicationFeedPageResult(
       posts: enriched,
-      nextOffset: offset + list.length,
+      nextOffset: safeOffset + list.length,
     );
   }
 
@@ -411,7 +430,8 @@ class PostRepositoryImpl implements PostRepository {
       scored.add((p: p, s: s));
     }
     scored.sort((a, b) => b.s.compareTo(a.s));
-    return scored.take(limit).map((e) => e.p).toList(growable: false);
+    final ranked = scored.map((e) => e.p).toList(growable: false);
+    return _applyDiversityByAuthor(posts: ranked, limit: limit);
   }
 
   static double _scorePublication(
@@ -449,12 +469,18 @@ class PostRepositoryImpl implements PostRepository {
     int offset = 0,
     String? currentUserId,
   }) async {
+    final safeLimit = limit <= 0 ? 20 : limit;
+    final safeOffset = offset < 0 ? 0 : offset;
+    final fetchWindow = math.max(safeLimit * 3, 30);
+    final fetchFrom = math.max(safeOffset * 3, 0);
+    final fetchTo = fetchFrom + fetchWindow - 1;
+
     var res = await _client
         .from(SupabaseConstants.postsTable)
         .select('*, users!user_id(name, avatar)')
         .eq('kind', 'news')
         .order('created_at', ascending: false)
-        .range(offset, offset + limit - 1);
+        .range(fetchFrom, fetchTo);
     var list = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
         .toList(growable: false);
@@ -464,12 +490,21 @@ class PostRepositoryImpl implements PostRepository {
           .select()
           .eq('kind', 'news')
           .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
+          .range(fetchFrom, fetchTo);
       list = (plainRes as List)
           .map((e) => _mapPost(e as Map<String, dynamic>))
           .toList(growable: false);
     }
-    if (currentUserId == null || list.isEmpty) return list;
+    if (list.isEmpty) return list;
+    if (currentUserId == null) {
+      list = _applySmartNewsRanking(list).take(safeLimit).toList(growable: false);
+      return list;
+    }
+    list = await _applyPersonalizedSmartNewsRanking(
+      source: list,
+      currentUserId: currentUserId,
+      limit: safeLimit,
+    );
 
     final ids = list.map((e) => e.id).toList(growable: false);
     final likes = await _client
@@ -521,6 +556,166 @@ class PostRepositoryImpl implements PostRepository {
           ),
         )
         .toList(growable: false);
+  }
+
+  List<PostEntity> _applySmartNewsRanking(List<PostEntity> source) {
+    if (source.length < 2) return source;
+    final now = DateTime.now();
+    final ranked = List<PostEntity>.from(source);
+    ranked.sort((a, b) {
+      final aScore = _newsSmartScore(a, now);
+      final bScore = _newsSmartScore(b, now);
+      return bScore.compareTo(aScore);
+    });
+    return _applyDiversityByAuthor(posts: ranked, limit: ranked.length);
+  }
+
+  Future<List<PostEntity>> _applyPersonalizedSmartNewsRanking({
+    required List<PostEntity> source,
+    required String currentUserId,
+    required int limit,
+  }) async {
+    if (source.length < 2) return source.take(limit).toList(growable: false);
+    final affinityByAuthor = await _loadNewsAuthorAffinity(
+      currentUserId: currentUserId,
+      candidateAuthorIds: source.map((p) => p.userId).toSet(),
+    );
+    final now = DateTime.now();
+    final ranked = List<PostEntity>.from(source);
+    ranked.sort((a, b) {
+      final aBase = _newsSmartScore(a, now);
+      final bBase = _newsSmartScore(b, now);
+      final aAffinity = affinityByAuthor[a.userId] ?? 0.0;
+      final bAffinity = affinityByAuthor[b.userId] ?? 0.0;
+      final aScore = aBase * 0.74 + aAffinity * 0.26;
+      final bScore = bBase * 0.74 + bAffinity * 0.26;
+      return bScore.compareTo(aScore);
+    });
+    return _applyDiversityByAuthor(posts: ranked, limit: limit);
+  }
+
+  List<PostEntity> _rankSubscriptionPublications(
+    List<PostEntity> source,
+    _RecommendationSignals signals,
+    int limit,
+  ) {
+    if (source.length < 2) return source.take(limit).toList(growable: false);
+    final now = DateTime.now();
+    final ranked = List<PostEntity>.from(source);
+    ranked.sort((a, b) {
+      final aEng = math.log(1 + a.likesCount + (a.commentsCount * 2) + (a.repostsCount * 2.2));
+      final bEng = math.log(1 + b.likesCount + (b.commentsCount * 2) + (b.repostsCount * 2.2));
+      final aFresh = math.exp(-now.difference(a.createdAt).inHours / 42.0);
+      final bFresh = math.exp(-now.difference(b.createdAt).inHours / 42.0);
+      final aAff = signals.authorNorm[a.userId] ?? 0.0;
+      final bAff = signals.authorNorm[b.userId] ?? 0.0;
+      final aScore = aFresh * 0.5 + aEng * 0.28 + aAff * 0.22;
+      final bScore = bFresh * 0.5 + bEng * 0.28 + bAff * 0.22;
+      return bScore.compareTo(aScore);
+    });
+    return _applyDiversityByAuthor(posts: ranked, limit: limit);
+  }
+
+  static List<PostEntity> _applyDiversityByAuthor({
+    required List<PostEntity> posts,
+    required int limit,
+  }) {
+    if (posts.isEmpty || limit <= 0) return const [];
+    final cappedLimit = limit.clamp(1, posts.length);
+    final byAuthor = <String, List<PostEntity>>{};
+    for (final post in posts) {
+      byAuthor.putIfAbsent(post.userId, () => <PostEntity>[]).add(post);
+    }
+    final result = <PostEntity>[];
+    String? lastAuthor;
+    while (result.length < cappedLimit) {
+      PostEntity? picked;
+      String? pickedAuthor;
+      for (final entry in byAuthor.entries) {
+        final queue = entry.value;
+        if (queue.isEmpty) continue;
+        if (entry.key == lastAuthor) continue;
+        picked = queue.removeAt(0);
+        pickedAuthor = entry.key;
+        break;
+      }
+      picked ??= () {
+        for (final entry in byAuthor.entries) {
+          final queue = entry.value;
+          if (queue.isEmpty) continue;
+          pickedAuthor = entry.key;
+          return queue.removeAt(0);
+        }
+        return null;
+      }();
+      if (picked == null) break;
+      result.add(picked);
+      lastAuthor = pickedAuthor;
+    }
+    return result;
+  }
+
+  Future<Map<String, double>> _loadNewsAuthorAffinity({
+    required String currentUserId,
+    required Set<String> candidateAuthorIds,
+  }) async {
+    if (candidateAuthorIds.isEmpty) return const <String, double>{};
+    final authorScores = <String, double>{};
+
+    Future<void> addSignal({
+      required String table,
+      required double weight,
+    }) async {
+      final rows = await _client
+          .from(table)
+          .select('post_id')
+          .eq('user_id', currentUserId)
+          .limit(400);
+      final postIds = (rows as List<dynamic>)
+          .map((e) => (e as Map<String, dynamic>)['post_id'] as String?)
+          .whereType<String>()
+          .toSet()
+          .toList(growable: false);
+      if (postIds.isEmpty) return;
+      for (final chunk in _chunkList(postIds, 120)) {
+        final postRows = await _client
+            .from(SupabaseConstants.postsTable)
+            .select('id,user_id')
+            .inFilter('id', chunk);
+        for (final row in (postRows as List<dynamic>)) {
+          final map = row as Map<String, dynamic>;
+          final authorId = (map['user_id'] ?? '').toString();
+          if (authorId.isEmpty || !candidateAuthorIds.contains(authorId)) continue;
+          authorScores[authorId] = (authorScores[authorId] ?? 0) + weight;
+        }
+      }
+    }
+
+    await addSignal(
+      table: SupabaseConstants.postLikesTable,
+      weight: 1.0,
+    );
+    await addSignal(
+      table: SupabaseConstants.repostsTable,
+      weight: 1.8,
+    );
+    await addSignal(
+      table: SupabaseConstants.postSavesTable,
+      weight: 1.5,
+    );
+    _normalize01(authorScores);
+    return authorScores;
+  }
+
+  double _newsSmartScore(PostEntity post, DateTime now) {
+    final ageHours = now.difference(post.createdAt).inMinutes / 60.0;
+    final freshness = math.exp(-ageHours / 20.0); // strong boost for recent posts
+    final engagementRaw =
+        (post.likesCount * 1.0) + (post.commentsCount * 2.0) + (post.repostsCount * 2.4);
+    final engagement = math.log(1 + engagementRaw) / 4.5;
+    final hasMedia = post.videoUrl != null && post.videoUrl!.isNotEmpty || post.displayImageUrls.isNotEmpty;
+    final mediaBoost = hasMedia ? 0.08 : 0.0;
+    return freshness * 0.64 + engagement * 0.33 + mediaBoost;
   }
 
   @override

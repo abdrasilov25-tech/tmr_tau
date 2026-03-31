@@ -24,6 +24,11 @@ class NotificationsPage extends StatelessWidget {
         centerTitle: true,
         actions: [
           BlocBuilder<NotificationsBloc, NotificationsState>(
+            buildWhen: (prev, curr) {
+              final prevHas = prev is NotificationsLoaded && prev.notifications.isNotEmpty;
+              final currHas = curr is NotificationsLoaded && curr.notifications.isNotEmpty;
+              return prevHas != currHas;
+            },
             builder: (context, state) {
               if (state is NotificationsLoaded && state.notifications.isNotEmpty) {
                 return TextButton(

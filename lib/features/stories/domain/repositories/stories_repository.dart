@@ -20,6 +20,10 @@ abstract class StoriesRepository {
     required String imageUrl,
     String? videoUrl,
     String? caption,
+    String? originalPostId,
+    String? originalPostAuthorId,
+    String? originalPostAuthorName,
+    String? originalPostPreviewUrl,
   });
   Future<void> updateStory(String storyId, {String? caption});
   Future<void> deleteStory(String storyId, String userId);

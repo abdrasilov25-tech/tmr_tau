@@ -493,6 +493,11 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         userId: widget.currentUserId!,
         text: text,
       );
+      await _createStoryNotification(
+        type: 'story_reply',
+        title: 'Ответ на сторис',
+        body: text,
+      );
       await _sendToDirect(kind: 'reply', payload: text);
       if (mounted) {
         _replyController.clear();
@@ -525,6 +530,11 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         storyId: _currentStory.id,
         userId: widget.currentUserId!,
         text: emoji,
+      );
+      await _createStoryNotification(
+        type: 'story_like',
+        title: 'Реакция на сторис',
+        body: emoji,
       );
       await _sendToDirect(kind: 'reaction', payload: emoji);
       if (!mounted) return;
@@ -693,6 +703,31 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     }
   }
 
+  Future<void> _createStoryNotification({
+    required String type,
+    required String title,
+    required String body,
+  }) async {
+    final actorId = widget.currentUserId;
+    if (actorId == null) return;
+    final ownerId = _currentStory.userId;
+    if (ownerId.isEmpty || ownerId == actorId) return;
+    final cleanedBody = body.trim().isEmpty ? title : body.trim();
+    final storyTag = '[story:${_currentStory.id}]';
+    try {
+      await Supabase.instance.client.from(SupabaseConstants.notificationsTable).insert({
+        'user_id': ownerId,
+        'actor_id': actorId,
+        'type': type,
+        'title': title,
+        'body': '$cleanedBody $storyTag',
+        'story_id': _currentStory.id,
+      });
+    } catch (_) {
+      // Notifications should not block story interactions.
+    }
+  }
+
   Future<void> _editCaption() async {
     final newCaption = await showDialog<String>(
       context: context,
@@ -728,6 +763,18 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     } catch (_) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка удаления')));
     }
+  }
+
+  void _openOriginalPost() {
+    final postId = _currentStory.originalPostId;
+    if (postId == null || postId.isEmpty) return;
+    context.push('/post/$postId');
+  }
+
+  void _openOriginalAuthorProfile() {
+    final authorId = _currentStory.originalPostAuthorId;
+    if (authorId == null || authorId.isEmpty) return;
+    context.push('/profile/$authorId');
   }
 
   @override
@@ -917,24 +964,24 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                       alignment: Alignment.center,
                       child: Wrap(
                         alignment: WrapAlignment.center,
-                        spacing: 14,
-                        runSpacing: 10,
+                        spacing: 18,
+                        runSpacing: 14,
                         children: _quickReactions.map((emoji) {
                           return InkWell(
                             onTap: _sendingReply ? null : () => _sendQuickReaction(emoji),
                             borderRadius: BorderRadius.circular(999),
                             child: Container(
-                              width: 48,
-                              height: 48,
+                              width: 68,
+                              height: 68,
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: Colors.white12,
+                                color: Colors.black.withValues(alpha: 0.38),
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white24),
+                                border: Border.all(color: Colors.white38, width: 1.2),
                               ),
                               child: Text(
                                 emoji,
-                                style: const TextStyle(fontSize: 24),
+                                style: const TextStyle(fontSize: 38),
                               ),
                             ),
                           );
@@ -979,7 +1026,10 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           Positioned(
             left: 12,
             right: 12,
-            bottom: widget.currentUserId != null && !_isOwnStory ? 70 : 24,
+            bottom: (_currentStory.originalPostId != null &&
+                    _currentStory.originalPostId!.isNotEmpty)
+                ? (widget.currentUserId != null && !_isOwnStory ? 154 : 112)
+                : (widget.currentUserId != null && !_isOwnStory ? 70 : 24),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
@@ -995,6 +1045,95 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                 ),
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        if (_currentStory.originalPostId != null &&
+            _currentStory.originalPostId!.isNotEmpty)
+          Positioned(
+            left: 12,
+            right: 12,
+            bottom: widget.currentUserId != null && !_isOwnStory ? 70 : 24,
+            child: InkWell(
+              onTap: _openOriginalPost,
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.72),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        width: 46,
+                        height: 62,
+                        child: (_currentStory.originalPostPreviewUrl ?? '').isNotEmpty
+                            ? CachedNetworkImage(
+                                imageUrl: _currentStory.originalPostPreviewUrl!,
+                                fit: BoxFit.cover,
+                              )
+                            : Container(
+                                color: Colors.white12,
+                                child: const Icon(
+                                  Icons.article_outlined,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'Оригинальная публикация',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          GestureDetector(
+                            onTap: _openOriginalAuthorProfile,
+                            child: Text(
+                              _currentStory.originalPostAuthorName ?? 'Автор',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                decoration: TextDecoration.underline,
+                                decorationColor: Colors.white70,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Нажмите, чтобы открыть пост',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 14,
+                      color: Colors.white70,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

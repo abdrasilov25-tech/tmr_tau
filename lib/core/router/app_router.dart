@@ -50,6 +50,7 @@ import '../../features/home/presentation/pages/publication_discover_search_page.
 import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
 import '../../features/stories/presentation/pages/add_story_page.dart';
+import '../../features/stories/presentation/pages/live_stream_page.dart';
 import '../../features/stories/presentation/pages/story_viewer_page.dart';
 import '../../features/stories/presentation/pages/story_viewer_args.dart';
 import '../../features/settings/presentation/screens/settings_page.dart';
@@ -202,6 +203,10 @@ class AppRouter {
           final isVideo = state.uri.queryParameters['video'] == '1';
           return AddStoryPage(isVideoMode: isVideo);
         },
+      ),
+      GoRoute(
+        path: '/live',
+        builder: (context, state) => const LiveStreamPage(),
       ),
       GoRoute(
         path: '/stories',

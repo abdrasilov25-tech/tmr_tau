@@ -13,6 +13,7 @@ class NotificationEntity extends Equatable {
     this.body,
     this.productId,
     this.postId,
+    this.storyId,
     this.subjectImageUrl,
     this.subjectVideoUrl,
     this.relatedPostKind,
@@ -32,6 +33,8 @@ class NotificationEntity extends Equatable {
   final String? productId;
   /// Пост (публикация / новость), к которому относится событие.
   final String? postId;
+  /// Сторис, к которой относится событие.
+  final String? storyId;
   /// Превью медиа поста или фото товара ( из join ).
   final String? subjectImageUrl;
   final String? subjectVideoUrl;
@@ -55,6 +58,7 @@ class NotificationEntity extends Equatable {
         body,
         productId,
         postId,
+        storyId,
         subjectImageUrl,
         subjectVideoUrl,
         relatedPostKind,

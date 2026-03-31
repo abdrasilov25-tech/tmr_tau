@@ -3,7 +3,8 @@ import 'dart:io';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:video_player/video_player.dart';
 
-/// Загружает видео по HTTP(S) через [DefaultCacheManager]: повторный просмотр идёт с диска.
+/// Воспроизводит видео: если файл закэширован — с диска (мгновенно),
+/// иначе — стриминг по сети (без ожидания полной загрузки).
 Future<VideoPlayerController> createCachedVideoController(String url) async {
   final trimmed = url.trim();
   if (trimmed.isEmpty) {
@@ -13,6 +14,9 @@ Future<VideoPlayerController> createCachedVideoController(String url) async {
   if (uri.scheme == 'file') {
     return VideoPlayerController.file(File.fromUri(uri));
   }
-  final file = await DefaultCacheManager().getSingleFile(trimmed);
-  return VideoPlayerController.file(file);
+  final cachedFile = await DefaultCacheManager().getFileFromCache(trimmed);
+  if (cachedFile != null) {
+    return VideoPlayerController.file(cachedFile.file);
+  }
+  return VideoPlayerController.networkUrl(uri);
 }

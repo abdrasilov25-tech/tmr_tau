@@ -14,6 +14,7 @@ import '../../domain/repositories/stories_repository.dart';
 
 /// Единый формат сторис 9:16 (как в Instagram).
 const double _storyAspectRatio = 9 / 16;
+enum _CreateMode { publication, story, video, live }
 
 class AddStoryPage extends StatefulWidget {
   const AddStoryPage({super.key, this.isVideoMode = false});
@@ -31,6 +32,11 @@ class _AddStoryPageState extends State<AddStoryPage> {
   bool _loading = false;
   final _captionController = TextEditingController();
   static const int _maxVideoSeconds = 120;
+  bool _autoGalleryOpened = false;
+  late _CreateMode _activeMode;
+
+  bool get _isVideoMode => _activeMode == _CreateMode.video;
+  bool get _isLiveMode => _activeMode == _CreateMode.live;
 
   bool get _hasMedia => _image != null || _video != null;
 
@@ -76,13 +82,51 @@ class _AddStoryPageState extends State<AddStoryPage> {
   }
 
   @override
+  void initState() {
+    super.initState();
+    _activeMode = widget.isVideoMode ? _CreateMode.video : _CreateMode.story;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openGalleryOnEnter();
+    });
+  }
+
+  @override
   void dispose() {
     _captionController.dispose();
     super.dispose();
   }
 
+  Future<void> _openGalleryOnEnter() async {
+    if (_autoGalleryOpened) return;
+    if (_isLiveMode) return;
+    _autoGalleryOpened = true;
+    if (_isVideoMode) {
+      await _pickVideoFromSource(ImageSource.gallery);
+      return;
+    }
+    await _pickImageFromSource(ImageSource.gallery);
+  }
+
+  void _setMode(_CreateMode mode) {
+    if (_activeMode == mode) return;
+    setState(() {
+      _activeMode = mode;
+      if (_activeMode == _CreateMode.live) {
+        _image = null;
+        _video = null;
+        _videoDurationSeconds = 0;
+      }
+    });
+    if (!_isLiveMode && !_hasMedia) {
+      _autoGalleryOpened = false;
+      Future<void>.microtask(_openGalleryOnEnter);
+    }
+  }
+
   Future<void> _pickSource() async {
-    if (widget.isVideoMode) {
+    if (_isLiveMode) return;
+    if (_isVideoMode) {
       await _pickVideo();
       return;
     }
@@ -123,6 +167,10 @@ class _AddStoryPageState extends State<AddStoryPage> {
       ),
     );
     if (source == null || !mounted) return;
+    await _pickImageFromSource(source);
+  }
+
+  Future<void> _pickImageFromSource(ImageSource source) async {
     if (source == ImageSource.gallery) {
       final ok = await _requestGalleryPermission(forVideo: false);
       if (!ok || !mounted) return;
@@ -186,6 +234,10 @@ class _AddStoryPageState extends State<AddStoryPage> {
       ),
     );
     if (source == null || !mounted) return;
+    await _pickVideoFromSource(source);
+  }
+
+  Future<void> _pickVideoFromSource(ImageSource source) async {
     if (source == ImageSource.gallery) {
       final ok = await _requestGalleryPermission(forVideo: true);
       if (!ok || !mounted) return;
@@ -247,8 +299,17 @@ class _AddStoryPageState extends State<AddStoryPage> {
   }
 
   Future<void> _publish() async {
+    if (_isLiveMode) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Прямой эфир скоро будет доступен')),
+      );
+      return;
+    }
     if (!_hasMedia) return;
     final authState = context.read<AuthBloc>().state;
+    final postRepository = context.read<PostRepository>();
+    final storiesRepository = context.read<StoriesRepository>();
     if (authState is! AuthAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Войдите, чтобы добавить историю')),
@@ -257,32 +318,55 @@ class _AddStoryPageState extends State<AddStoryPage> {
     }
     setState(() => _loading = true);
     try {
+      final pickedImage = _image;
+      final pickedVideo = _video;
+      if (pickedImage == null && pickedVideo == null) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
       const uuid = Uuid();
       String imageUrl = '';
       String? videoUrl;
-      if (_image != null) {
-        final ext = _image!.path.split('.').last;
+      if (pickedImage != null) {
+        final ext = pickedImage.path.split('.').last;
         final path = '${uuid.v4()}.$ext';
         await Supabase.instance.client.storage
             .from(SupabaseConstants.bucketStories)
-            .upload(path, _image!, fileOptions: const FileOptions(upsert: true));
+            .upload(path, pickedImage, fileOptions: const FileOptions(upsert: true));
         imageUrl = Supabase.instance.client.storage
             .from(SupabaseConstants.bucketStories)
             .getPublicUrl(path);
       }
-      if (_video != null) {
-        final ext = _video!.path.split('.').last;
+      if (pickedVideo != null) {
+        final ext = pickedVideo.path.split('.').last;
         final path = '${uuid.v4()}.$ext';
         await Supabase.instance.client.storage
             .from(SupabaseConstants.bucketStories)
-            .upload(path, _video!, fileOptions: const FileOptions(upsert: true));
+            .upload(path, pickedVideo, fileOptions: const FileOptions(upsert: true));
         videoUrl = Supabase.instance.client.storage
             .from(SupabaseConstants.bucketStories)
             .getPublicUrl(path);
       }
 
+      if (_activeMode == _CreateMode.publication) {
+        await postRepository.createPost(
+              userId: authState.user.id,
+              imageUrl: imageUrl,
+              caption: _captionController.text.trim(),
+              videoUrl: videoUrl,
+              videoDurationSeconds: _videoDurationSeconds,
+              kind: 'publication',
+            );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Публикация добавлена')),
+        );
+        context.pop(true);
+        return;
+      }
+
       bool alsoToProfile = false;
-      if (widget.isVideoMode && _video != null && mounted) {
+      if (_isVideoMode && _video != null && mounted) {
         final choice = await showModalBottomSheet<bool>(
           context: context,
           backgroundColor: Colors.transparent,
@@ -322,7 +406,6 @@ class _AddStoryPageState extends State<AddStoryPage> {
       }
 
       if (!mounted) return;
-      final storiesRepository = context.read<StoriesRepository>();
       await storiesRepository.addStory(
             userId: authState.user.id,
             imageUrl: imageUrl,
@@ -338,7 +421,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
       }
 
       if (alsoToProfile && videoUrl != null && mounted) {
-        await context.read<PostRepository>().createPost(
+        await postRepository.createPost(
               userId: authState.user.id,
               videoUrl: videoUrl,
               videoDurationSeconds: _videoDurationSeconds,
@@ -367,6 +450,170 @@ class _AddStoryPageState extends State<AddStoryPage> {
 
   @override
   Widget build(BuildContext context) {
+    final emptyState = _isLiveMode
+        ? Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.wifi_tethering_rounded,
+                size: 80,
+                color: Colors.grey.shade600,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Запуск прямого эфира',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white70,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: _publish,
+                icon: const Icon(Icons.live_tv_rounded),
+                label: const Text('Начать эфир'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ],
+          )
+        : Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                _isVideoMode
+                    ? Icons.videocam_outlined
+                    : (_activeMode == _CreateMode.publication
+                        ? Icons.photo_library_outlined
+                        : Icons.auto_awesome_rounded),
+                size: 80,
+                color: Colors.grey.shade600,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _isVideoMode
+                    ? 'Добавьте видео (до 2 мин)'
+                    : (_activeMode == _CreateMode.publication
+                        ? 'Выберите фото/видео для публикации'
+                        : 'Для выкладывания историй'),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: Colors.white70,
+                    ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: _pickSource,
+                icon: Icon(
+                  _isVideoMode ? Icons.videocam_outlined : Icons.add_photo_alternate_outlined,
+                ),
+                label: Text(_isVideoMode ? 'Выбрать видео' : 'Выбрать фото'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                ),
+              ),
+            ],
+          );
+    final mediaState = Column(
+      children: [
+        Expanded(
+          child: Center(
+            child: AspectRatio(
+              aspectRatio: _storyAspectRatio,
+              child: ClipRect(
+                child: _video != null
+                    ? _VideoPreview(file: _video!)
+                    : (_image != null
+                        ? Image.file(
+                            _image!,
+                            fit: BoxFit.cover,
+                            width: double.infinity,
+                            height: double.infinity,
+                          )
+                        : ColoredBox(
+                            color: Colors.grey.shade900,
+                            child: Center(
+                              child: Icon(
+                                Icons.broken_image_outlined,
+                                color: Colors.grey.shade500,
+                                size: 44,
+                              ),
+                            ),
+                          )),
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey.shade400),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: TextField(
+              controller: _captionController,
+              style: const TextStyle(color: Colors.black87, fontSize: 15),
+              decoration: const InputDecoration(
+                hintText: 'Добавить подпись...',
+                hintStyle: TextStyle(color: Colors.black45),
+                border: InputBorder.none,
+                contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
+              maxLines: 2,
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _loading ? null : _pickSource,
+                icon: const Icon(Icons.refresh, color: Colors.white),
+                label: Text(
+                  _isVideoMode ? 'Другое видео' : 'Другое фото',
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _loading ? null : _publish,
+                  icon: _loading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.black,
+                          ),
+                        )
+                      : const Icon(Icons.send_rounded),
+                  label: Text(_loading ? 'Публикация...' : 'Опубликовать'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -377,7 +624,9 @@ class _AddStoryPageState extends State<AddStoryPage> {
           onPressed: () => context.pop(),
         ),
         title: Text(
-          widget.isVideoMode ? 'Видео' : 'Сторис',
+          _isLiveMode
+              ? 'Прямой эфир'
+              : (_isVideoMode ? 'Видео' : (_activeMode == _CreateMode.publication ? 'Публикация' : 'Сторис')),
           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
         actions: [
@@ -402,126 +651,78 @@ class _AddStoryPageState extends State<AddStoryPage> {
       ),
       body: SafeArea(
         child: Center(
-          child: !_hasMedia
-              ? Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      widget.isVideoMode
-                          ? Icons.videocam_outlined
-                          : Icons.auto_awesome_rounded,
-                      size: 80,
-                      color: Colors.grey.shade600,
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      widget.isVideoMode
-                          ? 'Добавьте видео в историю (до 2 мин)'
-                          : 'Для выкладывания историй',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            color: Colors.white70,
-                          ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    FilledButton.icon(
-                      onPressed: _pickSource,
-                      icon: Icon(widget.isVideoMode
-                          ? Icons.videocam_outlined
-                          : Icons.add_photo_alternate_outlined),
-                      label: Text(widget.isVideoMode ? 'Выбрать видео' : 'Выбрать фото'),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                      ),
-                    ),
-                  ],
-                )
-              : Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: AspectRatio(
-                          aspectRatio: _storyAspectRatio,
-                          child: ClipRect(
-                            child: _video != null
-                                ? _VideoPreview(file: _video!)
-                                : Image.file(
-                                    _image!,
-                                    fit: BoxFit.cover,
-                                    width: double.infinity,
-                                    height: double.infinity,
-                                  ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade400),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.2),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: TextField(
-                          controller: _captionController,
-                          style: const TextStyle(color: Colors.black87, fontSize: 15),
-                          decoration: const InputDecoration(
-                            hintText: 'Добавить подпись...',
-                            hintStyle: TextStyle(color: Colors.black45),
-                            border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                          ),
-                          maxLines: 2,
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Row(
-                        children: [
-                          OutlinedButton.icon(
-                            onPressed: _loading ? null : _pickSource,
-                            icon: const Icon(Icons.refresh, color: Colors.white),
-                            label: Text(
-                              widget.isVideoMode ? 'Другое видео' : 'Другое фото',
-                              style: const TextStyle(color: Colors.white),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: _loading ? null : _publish,
-                              icon: _loading
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: Colors.black,
-                                      ),
-                                    )
-                                  : const Icon(Icons.send_rounded),
-                              label: Text(_loading ? 'Публикация...' : 'Опубликовать'),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Colors.black,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+          child: _hasMedia ? mediaState : emptyState,
+        ),
+      ),
+      bottomNavigationBar: _CreationModeBar(
+        activeMode: _activeMode,
+        onModeChanged: _setMode,
+      ),
+    );
+  }
+}
+
+class _CreationModeBar extends StatelessWidget {
+  const _CreationModeBar({
+    required this.activeMode,
+    required this.onModeChanged,
+  });
+
+  final _CreateMode activeMode;
+  final ValueChanged<_CreateMode> onModeChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    Widget modeChip({
+      required String label,
+      required bool active,
+      required VoidCallback onTap,
+    }) {
+      return GestureDetector(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: active ? Colors.white : Colors.white70,
+              fontSize: 14,
+              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        color: Colors.black,
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            modeChip(
+              label: 'Публикация',
+              active: activeMode == _CreateMode.publication,
+              onTap: () => onModeChanged(_CreateMode.publication),
+            ),
+            modeChip(
+              label: 'История',
+              active: activeMode == _CreateMode.story,
+              onTap: () => onModeChanged(_CreateMode.story),
+            ),
+            modeChip(
+              label: 'Видео',
+              active: activeMode == _CreateMode.video,
+              onTap: () => onModeChanged(_CreateMode.video),
+            ),
+            modeChip(
+              label: 'Прямой эфир',
+              active: activeMode == _CreateMode.live,
+              onTap: () => onModeChanged(_CreateMode.live),
+            ),
+          ],
         ),
       ),
     );

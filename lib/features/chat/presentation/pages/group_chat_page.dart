@@ -31,6 +31,7 @@ class GroupChatPage extends StatefulWidget {
 
 class _GroupChatPageState extends State<GroupChatPage> {
   late final SupabaseClient _client;
+  late final Stream<List<Map<String, dynamic>>> _messages$;
   String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -40,6 +41,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
   bool _officialCity = false;
   DateTime? _cityBanUntil;
   bool _cityPermanentBan = false;
+  int _lastRenderedMessagesCount = 0;
+  bool _wasNearBottom = true;
 
   @override
   void initState() {
@@ -53,6 +56,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
     _officialCity =
         widget.officialCityChat ||
         TemirtauCityGroupConfig.isOfficialCityChatTitle(widget.groupName);
+    _messages$ = _messagesStream();
+    _scrollController.addListener(_trackScrollPosition);
     _loadGroupMeta();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final auth = context.read<AuthBloc>().state;
@@ -115,9 +120,33 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
   @override
   void dispose() {
+    _scrollController.removeListener(_trackScrollPosition);
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _trackScrollPosition() {
+    if (!_scrollController.hasClients) return;
+    final pos = _scrollController.position;
+    // Keep a small threshold so we auto-scroll only when user is reading latest messages.
+    _wasNearBottom = (pos.maxScrollExtent - pos.pixels) <= 120;
+  }
+
+  void _scheduleAutoScrollIfNeeded(int messagesCount) {
+    final hasNewMessages = messagesCount > _lastRenderedMessagesCount;
+    _lastRenderedMessagesCount = messagesCount;
+    if (!hasNewMessages) return;
+    if (!_wasNearBottom) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      _scrollController.animateTo(
+        pos.maxScrollExtent,
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   Future<void> _maybeInsertFirstVisitCityRules() async {
@@ -359,7 +388,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
             ),
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: _messagesStream(),
+              stream: _messages$,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -369,6 +398,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 }
                 final messages = snapshot.data ?? const [];
                 if (messages.isEmpty) {
+                  _lastRenderedMessagesCount = 0;
                   return Center(
                     child: Text(
                       _officialCity
@@ -377,12 +407,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                     ),
                   );
                 }
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (!_scrollController.hasClients) return;
-                  _scrollController.jumpTo(
-                    _scrollController.position.maxScrollExtent,
-                  );
-                });
+                _scheduleAutoScrollIfNeeded(messages.length);
                 return ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),

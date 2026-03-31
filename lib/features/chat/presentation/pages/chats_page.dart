@@ -515,6 +515,44 @@ class _ChatsPageState extends State<ChatsPage> {
     context.read<ChatUnreadBadgeController>().refresh();
   }
 
+  /// Обновление после возврата из чата без показа глобального лоадера.
+  void _refreshChatsAfterPopSilent() {
+    if (!mounted) return;
+    _syncChatBadge();
+    unawaited(_reloadChatsSilentlyReplaceFuture());
+  }
+
+  void _optimisticallyMarkThreadReadInList(_ChatThread thread) {
+    unawaited(
+      _pageFuture.then((data) {
+        if (!mounted) return;
+        final idx = data.threads.indexWhere(
+          (t) => t.storageKey == thread.storageKey,
+        );
+        if (idx < 0) return;
+        final current = data.threads[idx];
+        if (current.unreadCount == 0) return;
+        final updatedThreads = List<_ChatThread>.from(data.threads);
+        updatedThreads[idx] = current.copyWith(unreadCount: 0);
+        final updated = _ChatsPageData(
+          threads: updatedThreads,
+          visibleStoryGroups: data.visibleStoryGroups,
+          newStoriesByUserId: data.newStoriesByUserId,
+          storyNotesByUserId: data.storyNotesByUserId,
+          storyLocationsByUserId: data.storyLocationsByUserId,
+          followingPeerIds: data.followingPeerIds,
+        );
+        _cachedThreadsForStories = updatedThreads;
+        setState(() {
+          _pageFuture = Future.value(updated);
+          _storeWarmCache(updated);
+        });
+      }).catchError((_) {
+        // Keep navigation instant even if current pageFuture fails.
+      }),
+    );
+  }
+
   void _storeWarmCache(_ChatsPageData data) {
     _warmCache = _ChatsWarmCache(
       createdAt: DateTime.now(),
@@ -1992,29 +2030,21 @@ class _ChatsPageState extends State<ChatsPage> {
 
   Future<void> _openChat(_ChatThread t) async {
     if (t.kind == _ChatThreadKind.channel) {
+      _optimisticallyMarkThreadReadInList(t);
       await context.push(
         '/channel/${t.peerId}?title=${Uri.encodeComponent(t.peerName)}',
       );
-      if (mounted) {
-        setState(() {
-          _pageFuture = _loadPageData();
-        });
-        _syncChatBadge();
-      }
+      _refreshChatsAfterPopSilent();
       return;
     }
 
     if (t.kind == _ChatThreadKind.group) {
+      _optimisticallyMarkThreadReadInList(t);
       final city = t.isTemirtauCity ? '&city=1' : '';
       await context.push(
         '/chat-group/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}$city',
       );
-      if (mounted) {
-        setState(() {
-          _pageFuture = _loadPageData();
-        });
-        _syncChatBadge();
-      }
+      _refreshChatsAfterPopSilent();
       return;
     }
 
@@ -2071,23 +2101,20 @@ class _ChatsPageState extends State<ChatsPage> {
         await _chatStorage.setAccepted(t.peerId, true);
         final at = lastIncoming.add(const Duration(milliseconds: 1));
         await _chatStorage.setLastReadAt(t.peerId, at);
+        _optimisticallyMarkThreadReadInList(t);
       }
       if (!mounted) return;
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}&markRead=${accept == true ? '1' : '0'}',
       );
     } else {
+      _optimisticallyMarkThreadReadInList(t);
       if (!mounted) return;
       await context.push(
         '/chat/${t.peerId}?name=${Uri.encodeComponent(t.peerName)}',
       );
     }
-    if (mounted) {
-      setState(() {
-        _pageFuture = _loadPageData();
-      });
-      _syncChatBadge();
-    }
+    _refreshChatsAfterPopSilent();
   }
 
   Future<void> _markThreadRead(_ChatThread t) async {

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../data/services/payment_service.dart';
 import '../../domain/entities/product_entity.dart';
+import '../../domain/entities/qarmet_product.dart';
 import '../bloc/payment_cubit.dart';
 
 class ProductPromotionSheet extends StatelessWidget {
@@ -49,9 +51,14 @@ class ProductPromotionSheet extends StatelessWidget {
             onPromotionActivated?.call();
           } else if (state.status == PaymentUiStatus.error ||
               state.status == PaymentUiStatus.cancelled) {
+            final message = state.message ?? 'Операция не выполнена';
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(state.message ?? 'Операция не выполнена')),
+              SnackBar(content: Text(message)),
             );
+            if (_isInsufficientQarmetMessage(message)) {
+              Navigator.of(context).pop();
+              context.push('/qarmet-wallet');
+            }
           }
         },
         builder: (context, state) {
@@ -127,10 +134,10 @@ class ProductPromotionSheet extends StatelessWidget {
                                     : Icons.shopping_cart_checkout,
                               ),
                               title: Text(
-                                '${pack.productId}: ${pack.baseQarmet}+${pack.bonusQarmet} Qarmet',
+                                '${_packTitle(pack)} · ${pack.totalQarmet} Qarmet',
                               ),
                               subtitle: Text(
-                                '${pack.priceKzt} KZT, ~${pack.pricePerQarmet.toStringAsFixed(2)} KZT/Qarmet',
+                                '${pack.priceKzt} тг, ~${pack.pricePerQarmet.toStringAsFixed(2)} тг/Qarmet',
                               ),
                               onTap: loading
                                   ? null
@@ -182,6 +189,21 @@ class ProductPromotionSheet extends StatelessWidget {
                                       .spendHighlightPromotion(product.id),
                           ),
                         ),
+                        Card(
+                          color: Colors.indigo.shade50,
+                          child: ListTile(
+                            leading: const Icon(Icons.all_inclusive_rounded),
+                            title: const Text('Пакет "Все и сразу" на +24 часа'),
+                            subtitle: const Text(
+                              'Топ + Срочно + Выделение за 2 Qarmet',
+                            ),
+                            onTap: loading
+                                ? null
+                                : () => context
+                                      .read<PaymentCubit>()
+                                      .spendAllInOnePromotion(product.id),
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: loading
@@ -206,5 +228,26 @@ class ProductPromotionSheet extends StatelessWidget {
         },
       ),
     );
+  }
+}
+
+bool _isInsufficientQarmetMessage(String message) {
+  final text = message.toLowerCase();
+  return text.contains('недостаточно qarmet') ||
+      (text.contains('нужно:') && text.contains('доступно:'));
+}
+
+String _packTitle(QarmetProduct pack) {
+  switch (pack.productId) {
+    case PaymentService.promotionStartProductId:
+      return 'Start пакет';
+    case PaymentService.promotionPremiumProductId:
+      return 'Premium пакет';
+    case PaymentService.promotionBusinessProductId:
+      return 'Business пакет';
+    case PaymentService.officialPageProductId:
+      return 'Official Page';
+    default:
+      return pack.title;
   }
 }

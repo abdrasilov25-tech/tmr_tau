@@ -36,6 +36,7 @@ class PostDetailPage extends StatefulWidget {
 class _PostDetailPageState extends State<PostDetailPage> {
   late PostEntity _post;
   List<PostCommentEntity> _comments = [];
+  List<PostCommentEntity> _commentsOrdered = [];
   bool _commentsLoading = true;
   final _commentController = TextEditingController();
   final _commentFocusNode = FocusNode();
@@ -78,8 +79,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
             }
           }
         }
+        _comments = list;
+        _rebuildCommentsTree();
         setState(() {
-          _comments = list;
           _commentsLoading = false;
           if (replyTarget != null) _replyingToComment = replyTarget;
         });
@@ -89,8 +91,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
   }
 
-  /// Комментарии в порядке дерева: корневой, затем его ответы, затем следующий корневой...
-  List<PostCommentEntity> get _commentsInTreeOrder {
+  /// Пересчитывает кэшированный порядок дерева комментариев.
+  /// Вызывать при каждом изменении [_comments].
+  void _rebuildCommentsTree() {
     final roots = _comments.where((c) => c.parentId == null).toList()
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
     final result = <PostCommentEntity>[];
@@ -100,7 +103,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
         ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
       result.addAll(replies);
     }
-    return result;
+    _commentsOrdered = result;
   }
 
   Future<void> _sendComment() async {
@@ -189,8 +192,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
           }
         }
       }
+      _comments = _comments.where((c) => !toRemove.contains(c.id)).toList();
+      _rebuildCommentsTree();
       setState(() {
-        _comments = _comments.where((c) => !toRemove.contains(c.id)).toList();
         _post = _post.copyWith(commentsCount: _post.commentsCount - toRemove.length);
       });
     } catch (e) {
@@ -429,7 +433,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       ),
                     )
                   else
-                    ..._commentsInTreeOrder.map((c) => _CommentTile(
+                    ..._commentsOrdered.map((c) => _CommentTile(
                           comment: c,
                           currentUserId: currentUserId,
                           isReply: c.parentId != null,

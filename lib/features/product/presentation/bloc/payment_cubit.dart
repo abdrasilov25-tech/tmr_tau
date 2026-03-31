@@ -47,10 +47,25 @@ class PaymentCubit extends Cubit<PaymentUiState> {
   final PaymentService _service;
 
   Future<void> initStore() async {
-    emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.initStore();
-      await refreshWallet();
+      final cached = _service.getCachedWalletSnapshot() ??
+          await _service.getPersistentWalletSnapshot();
+      if (cached != null) {
+        emit(
+          state.copyWith(
+            status: PaymentUiStatus.idle,
+            message: null,
+            balance: cached.balance,
+            catalog: cached.catalog,
+            isOfficialPageActive: cached.isOfficialPageActive,
+            promotionHistory: cached.promotionHistory,
+          ),
+        );
+      } else {
+        emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
+      }
+      await refreshWallet(silent: cached != null);
     } catch (e) {
       emit(
         state.copyWith(status: PaymentUiStatus.error, message: e.toString()),
@@ -58,19 +73,22 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     }
   }
 
-  Future<void> refreshWallet() async {
+  Future<void> refreshWallet({bool silent = false, bool forceRefresh = true}) async {
     try {
-      await _service.ensureMonthlySubscriptionCredit();
-      final balance = await _service.getQarmetBalance();
-      final official = await _service.isOfficialPageActive();
-      final history = await _service.getMyPromotionHistory();
+      if (!silent) {
+        emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
+      }
+      final snapshot = await _service.loadWalletSnapshot(
+        forceRefresh: forceRefresh,
+      );
       emit(
         state.copyWith(
           status: PaymentUiStatus.idle,
-          balance: balance,
-          catalog: _service.catalog,
-          isOfficialPageActive: official,
-          promotionHistory: history,
+          message: null,
+          balance: snapshot.balance,
+          catalog: snapshot.catalog,
+          isOfficialPageActive: snapshot.isOfficialPageActive,
+          promotionHistory: snapshot.promotionHistory,
         ),
       );
     } catch (e) {
@@ -82,25 +100,34 @@ class PaymentCubit extends Cubit<PaymentUiState> {
 
   Future<void> buyQarmetPackage(String productId) async {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
-    final result = await _service.buyQarmetPackage(productId);
-    switch (result.status) {
-      case PaymentResultStatus.success:
-        await refreshWallet();
-        emit(state.copyWith(status: PaymentUiStatus.success));
-      case PaymentResultStatus.cancelled:
-        emit(
-          state.copyWith(
-            status: PaymentUiStatus.cancelled,
-            message: result.message,
-          ),
-        );
-      case PaymentResultStatus.error:
-        emit(
-          state.copyWith(
-            status: PaymentUiStatus.error,
-            message: result.message,
-          ),
-        );
+    try {
+      final result = await _service.buyQarmetPackage(productId);
+      switch (result.status) {
+        case PaymentResultStatus.success:
+          await refreshWallet();
+          emit(state.copyWith(status: PaymentUiStatus.success));
+        case PaymentResultStatus.cancelled:
+          emit(
+            state.copyWith(
+              status: PaymentUiStatus.cancelled,
+              message: result.message,
+            ),
+          );
+        case PaymentResultStatus.error:
+          emit(
+            state.copyWith(
+              status: PaymentUiStatus.error,
+              message: result.message,
+            ),
+          );
+      }
+    } catch (e) {
+      emit(
+        state.copyWith(
+          status: PaymentUiStatus.error,
+          message: 'Не удалось выполнить покупку: $e',
+        ),
+      );
     }
   }
 
@@ -153,6 +180,19 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForHighlightPromotion(productId);
+      await refreshWallet();
+      emit(state.copyWith(status: PaymentUiStatus.success));
+    } catch (e) {
+      emit(
+        state.copyWith(status: PaymentUiStatus.error, message: e.toString()),
+      );
+    }
+  }
+
+  Future<void> spendAllInOnePromotion(String productId) async {
+    emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
+    try {
+      await _service.spendForAllInOnePromotion(productId);
       await refreshWallet();
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {

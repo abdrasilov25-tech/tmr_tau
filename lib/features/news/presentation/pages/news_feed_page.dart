@@ -11,6 +11,8 @@ import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
+import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../bloc/news_bloc.dart';
 
@@ -171,6 +173,66 @@ class NewsFeedPage extends StatelessWidget {
                                   );
                                 }
                               },
+                              onShare: () async {
+                                if (userId == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Войдите, чтобы поделиться публикацией'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                await showModalBottomSheet<void>(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  showDragHandle: true,
+                                  builder: (_) => PostShareSheet(
+                                    currentUserId: userId,
+                                    post: state.posts[index],
+                                    onAddToStory: () async {},
+                                  ),
+                                );
+                              },
+                              onSave: () async {
+                                if (userId == null) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Войдите, чтобы сохранять публикации'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                  return;
+                                }
+                                try {
+                                  await context.read<PostRepository>().toggleSave(
+                                        state.posts[index].id,
+                                        userId,
+                                      );
+                                  if (!context.mounted) return;
+                                  context.read<NewsBloc>().add(
+                                        NewsRefresh(currentUserId: userId),
+                                      );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        state.posts[index].isSavedByMe
+                                            ? 'Удалено из сохраненного'
+                                            : 'Сохранено',
+                                      ),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                } catch (_) {
+                                  if (!context.mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Не удалось сохранить'),
+                                      behavior: SnackBarBehavior.floating,
+                                    ),
+                                  );
+                                }
+                              },
                             );
                           },
                         ),
@@ -262,11 +324,15 @@ class _NewsPostCard extends StatelessWidget {
     required this.post,
     this.currentUserId,
     required this.onLike,
+    required this.onShare,
+    required this.onSave,
   });
 
   final PostEntity post;
   final String? currentUserId;
   final VoidCallback onLike;
+  final Future<void> Function() onShare;
+  final Future<void> Function() onSave;
 
   @override
   Widget build(BuildContext context) {
@@ -360,6 +426,7 @@ class _NewsPostCard extends StatelessWidget {
                     height: post.displayImageUrls.length > 1 ? 300 : 280,
                     borderRadius: 8,
                     viewportFraction: post.displayImageUrls.length > 1 ? 0.92 : 1,
+                    enableTapToOpenFullscreen: false,
                   ),
                 ),
               ],
@@ -414,6 +481,21 @@ class _NewsPostCard extends StatelessWidget {
                   Text(
                     '${post.repostsCount}',
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Поделиться',
+                    icon: Icon(Icons.send_outlined, size: 22, color: Colors.grey.shade700),
+                    onPressed: onShare,
+                  ),
+                  IconButton(
+                    tooltip: 'Сохранить',
+                    icon: Icon(
+                      post.isSavedByMe ? Icons.bookmark : Icons.bookmark_border,
+                      size: 22,
+                      color: post.isSavedByMe ? Colors.black87 : Colors.grey.shade700,
+                    ),
+                    onPressed: onSave,
                   ),
                 ],
               ),

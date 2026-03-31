@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-import '../../../../core/widgets/add_choice_sheet.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/feed_product_card_skeleton.dart';
 import '../../../../core/widgets/cached_avatar.dart';
@@ -26,6 +25,7 @@ class FeedPage extends StatefulWidget {
 }
 
 class _FeedPageState extends State<FeedPage> {
+  static const int _sponsoredEvery = 6;
   @override
   void initState() {
     super.initState();
@@ -126,7 +126,9 @@ class _FeedPageState extends State<FeedPage> {
                   return SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
-                        if (index == state.products.length) {
+                        final totalCards =
+                            state.products.length + _sponsoredSlots(state.products.length);
+                        if (index == totalCards) {
                           if (state.hasMore && !state.isLoadingMore) {
                             context.read<FeedBloc>().add(
                                   FeedLoadMore(
@@ -143,7 +145,13 @@ class _FeedPageState extends State<FeedPage> {
                                 )
                               : const SizedBox.shrink();
                         }
-                        final product = state.products[index];
+                        if (_isSponsoredIndex(index)) {
+                          return _SponsoredCard(
+                            onTap: () => context.go('/qarmet-wallet'),
+                          );
+                        }
+                        final productIndex = _productIndexByFeedIndex(index);
+                        final product = state.products[productIndex];
                         return _ProductCard(
                           product: product,
                           currentUserId: currentUserId,
@@ -194,7 +202,8 @@ class _FeedPageState extends State<FeedPage> {
                               : null,
                         );
                       },
-                      childCount: state.products.length + 1,
+                      childCount:
+                          state.products.length + _sponsoredSlots(state.products.length) + 1,
                     ),
                   );
                 }
@@ -205,6 +214,20 @@ class _FeedPageState extends State<FeedPage> {
         ),
       ),
     );
+  }
+
+  static int _sponsoredSlots(int productCount) {
+    if (productCount < _sponsoredEvery) return 0;
+    return productCount ~/ _sponsoredEvery;
+  }
+
+  static bool _isSponsoredIndex(int index) {
+    return (index + 1) % (_sponsoredEvery + 1) == 0;
+  }
+
+  static int _productIndexByFeedIndex(int feedIndex) {
+    final sponsoredBefore = (feedIndex + 1) ~/ (_sponsoredEvery + 1);
+    return feedIndex - sponsoredBefore;
   }
 }
 
@@ -349,25 +372,8 @@ class _StoriesStripState extends State<_StoriesStrip> {
                   if (mounted) _load();
                   return;
                 }
-                showModalBottomSheet<void>(
-                  context: context,
-                  backgroundColor: Colors.transparent,
-                  builder: (sheetContext) => AddChoiceSheet(
-                    onProuvnut: () {
-                      Navigator.pop(sheetContext);
-                      context.push('/add-publication');
-                    },
-                    onStory: () async {
-                      Navigator.pop(sheetContext);
-                      await context.push('/add-story');
-                      if (context.mounted) _load();
-                    },
-                    onVideo: () async {
-                      Navigator.pop(sheetContext);
-                      await context.push('/add-publication?video=1');
-                    },
-                  ),
-                );
+                await context.push('/add-story');
+                if (context.mounted) _load();
               },
             ),
           if (_loading)
@@ -693,6 +699,21 @@ class _ProductCard extends StatelessWidget {
                           fontSize: 14,
                         ),
                       ),
+                    const Spacer(),
+                    Icon(
+                      Icons.visibility_outlined,
+                      size: 20,
+                      color: Colors.white.withValues(alpha: 0.8),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${product.viewCount}',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ],
                 ),
                 Text(
@@ -718,6 +739,37 @@ class _ProductCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _SponsoredCard extends StatelessWidget {
+  const _SponsoredCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      color: const Color(0xFF111827),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.blue.shade700, width: 1.2),
+      ),
+      child: ListTile(
+        leading: const Icon(Icons.campaign_outlined, color: Colors.white),
+        title: const Text(
+          'Sponsored',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        subtitle: const Text(
+          'Поднимите свой товар в топ и получите больше просмотров',
+          style: TextStyle(color: Colors.white70),
+        ),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white70),
+        onTap: onTap,
       ),
     );
   }

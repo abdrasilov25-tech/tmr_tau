@@ -17,6 +17,7 @@ import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../comments/domain/entities/product_comment_entity.dart';
 import '../../../comments/domain/repositories/comments_repository.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
+import '../../../orders/domain/repositories/orders_repository.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
 
@@ -251,6 +252,64 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     }
   }
 
+  Future<void> _createSafeOrder() async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы оформить безопасную сделку')),
+      );
+      return;
+    }
+    final buyerId = authState.user.id;
+    if (buyerId == _product.sellerId) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Купить безопасно'),
+        content: Text(
+          'Сделка пройдет через защиту платформы.\n'
+          'Комиссия сервиса: 4%.\n'
+          'Сумма: ${_product.price.toStringAsFixed(0)} ₸.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Создать сделку'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    try {
+      await context.read<OrdersRepository>().createSafeOrder(
+            buyerId: buyerId,
+            sellerId: _product.sellerId,
+            productId: _product.id,
+            productTitle: _product.title,
+            amountKzt: _product.price,
+            commissionPercent: 4,
+          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Безопасная сделка создана. Следите за статусом в заказах'),
+        ),
+      );
+      context.push('/orders');
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось создать сделку: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
@@ -456,6 +515,17 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     peerId: _product.sellerId,
                     peerName: _product.sellerName ?? 'Продавец',
                   ),
+                  if (!isOwner) ...[
+                    const SizedBox(height: 12),
+                    FilledButton.icon(
+                      onPressed: _createSafeOrder,
+                      icon: const Icon(Icons.shield_outlined),
+                      label: const Text('Купить безопасно'),
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: _favoriteToggling || widget.productRepository == null

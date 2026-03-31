@@ -34,6 +34,23 @@ alter table public.users add column if not exists official_page_promo_perks bool
 alter table public.users add column if not exists profile_premium_badge boolean not null default false;
 alter table public.users add column if not exists profile_frame_level int not null default 0;
 alter table public.users add column if not exists profile_badge_level int not null default 0;
+alter table public.users add column if not exists seller_plan text not null default 'free';
+alter table public.users add column if not exists seller_verified_store boolean not null default false;
+alter table public.users add column if not exists seller_extended_stats boolean not null default false;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'users_seller_plan_allowed_values'
+      and conrelid = 'public.users'::regclass
+  ) then
+    alter table public.users
+      add constraint users_seller_plan_allowed_values
+      check (seller_plan in ('free', 'standard', 'pro'));
+  end if;
+end $$;
 -- Backfill missing rows in public.users from auth.users (safe on repeated runs).
 insert into public.users (id, name)
 select au.id, coalesce(nullif(au.email, ''), 'Пользователь')
@@ -197,10 +214,18 @@ create table if not exists public.stories (
   image_url text not null default '',
   video_url text default '',
   caption text default '',
+  original_post_id uuid references public.posts(id) on delete set null,
+  original_post_author_id uuid references public.users(id) on delete set null,
+  original_post_author_name text default '',
+  original_post_preview_url text default '',
   created_at timestamptz default now(),
   expires_at timestamptz not null default (now() + interval '24 hours')
 );
 alter table public.stories add column if not exists caption text default '';
+alter table public.stories add column if not exists original_post_id uuid references public.posts(id) on delete set null;
+alter table public.stories add column if not exists original_post_author_id uuid references public.users(id) on delete set null;
+alter table public.stories add column if not exists original_post_author_name text default '';
+alter table public.stories add column if not exists original_post_preview_url text default '';
 
 -- Ответы на сторис (как в Instagram)
 create table if not exists public.story_replies (
@@ -356,6 +381,7 @@ create table if not exists public.notifications (
   body text,
   product_id uuid references public.products(id) on delete set null,
   post_id uuid references public.posts(id) on delete set null,
+  story_id uuid references public.stories(id) on delete set null,
   comment_id uuid,
   read_at timestamptz,
   created_at timestamptz default now()
@@ -363,6 +389,8 @@ create table if not exists public.notifications (
 -- Уже созданная таблица без post_id / comment_id
 alter table public.notifications
   add column if not exists post_id uuid references public.posts(id) on delete set null;
+alter table public.notifications
+  add column if not exists story_id uuid references public.stories(id) on delete set null;
 alter table public.notifications add column if not exists comment_id uuid;
 
 -- ============== COMMENT LIKES ==============
@@ -392,10 +420,54 @@ create table if not exists public.favorites (
 create table if not exists public.orders (
   id uuid primary key default gen_random_uuid(),
   buyer_id uuid not null references public.users(id) on delete cascade,
+  seller_id uuid references public.users(id) on delete set null,
   product_id uuid not null references public.products(id) on delete cascade,
-  status text default 'pending',
+  product_title text default '',
+  safe_purchase boolean not null default false,
+  amount_kzt numeric(12,2) default 0,
+  commission_percent int not null default 4,
+  commission_kzt numeric(12,2) not null default 0,
+  seller_amount_kzt numeric(12,2) not null default 0,
+  status text default 'pending_seller',
+  seller_accepted_at timestamptz,
+  buyer_confirmed_at timestamptz,
+  completed_at timestamptz,
+  cancelled_at timestamptz,
+  updated_at timestamptz default now(),
   created_at timestamptz default now()
 );
+
+alter table public.orders add column if not exists seller_id uuid references public.users(id) on delete set null;
+alter table public.orders add column if not exists product_title text default '';
+alter table public.orders add column if not exists safe_purchase boolean not null default false;
+alter table public.orders add column if not exists amount_kzt numeric(12,2) default 0;
+alter table public.orders add column if not exists commission_percent int not null default 4;
+alter table public.orders add column if not exists commission_kzt numeric(12,2) not null default 0;
+alter table public.orders add column if not exists seller_amount_kzt numeric(12,2) not null default 0;
+alter table public.orders add column if not exists seller_accepted_at timestamptz;
+alter table public.orders add column if not exists buyer_confirmed_at timestamptz;
+alter table public.orders add column if not exists completed_at timestamptz;
+alter table public.orders add column if not exists cancelled_at timestamptz;
+alter table public.orders add column if not exists updated_at timestamptz default now();
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'orders_status_allowed_values'
+      and conrelid = 'public.orders'::regclass
+  ) then
+    alter table public.orders
+      add constraint orders_status_allowed_values
+      check (status in ('pending_seller', 'in_escrow', 'completed', 'cancelled'));
+  end if;
+end $$;
+
+create index if not exists idx_orders_buyer_created_at
+  on public.orders (buyer_id, created_at desc);
+create index if not exists idx_orders_seller_created_at
+  on public.orders (seller_id, created_at desc);
 
 -- ============== RLS ==============
 alter table public.users enable row level security;
@@ -585,7 +657,23 @@ grant execute on function public.notification_feed_unread_counts(uuid) to authen
 drop policy if exists "Favorites all" on public.favorites;
 drop policy if exists "Orders all" on public.orders;
 create policy "Favorites all" on public.favorites for all using (auth.uid() = user_id);
-create policy "Orders all" on public.orders for all using (auth.uid() = buyer_id);
+drop policy if exists "Orders select participants" on public.orders;
+drop policy if exists "Orders insert buyer" on public.orders;
+drop policy if exists "Orders update participants" on public.orders;
+drop policy if exists "Orders delete buyer" on public.orders;
+create policy "Orders select participants"
+  on public.orders for select
+  using (auth.uid() = buyer_id or auth.uid() = seller_id);
+create policy "Orders insert buyer"
+  on public.orders for insert
+  with check (auth.uid() = buyer_id);
+create policy "Orders update participants"
+  on public.orders for update
+  using (auth.uid() = buyer_id or auth.uid() = seller_id)
+  with check (auth.uid() = buyer_id or auth.uid() = seller_id);
+create policy "Orders delete buyer"
+  on public.orders for delete
+  using (auth.uid() = buyer_id);
 
 -- ============== TRIGGERS: counts ==============
 create or replace function public.update_product_likes_count()

@@ -32,8 +32,10 @@ class SearchPagingController extends ChangeNotifier {
   final String? currentUserId;
   final SettingsRepository? settingsRepository;
   final int pageSize;
+  static const Duration _cacheTtl = Duration(seconds: 60);
 
   Set<String>? _cachedExcludeSellerIds;
+  final Map<String, _SearchCacheSnapshot> _cacheByQuery = {};
 
   final List<ProductEntity> _products = [];
   final List<SearchResultItem> _items = [];
@@ -56,12 +58,59 @@ class SearchPagingController extends ChangeNotifier {
 
   int _requestVersion = 0;
 
+  String _filtersKey(SearchFilters f) {
+    String n(String? s) => (s ?? '').trim().toLowerCase();
+    String d(double? v) => v == null ? '' : v.toStringAsFixed(4);
+    return [
+      n(f.categoryId),
+      d(f.minPrice),
+      d(f.maxPrice),
+      n(f.city),
+      n(f.kzRegionId),
+      n(f.kzLocalityName),
+      d(f.radiusKm),
+      d(f.centerLatitude),
+      d(f.centerLongitude),
+      f.condition.name,
+      f.sort.name,
+    ].join('|');
+  }
+
+  String _queryKey({
+    required String query,
+    required SearchFilters filters,
+  }) {
+    return '${query.trim().toLowerCase()}::${_filtersKey(filters)}::${currentUserId ?? ''}::$pageSize';
+  }
+
+  bool _tryRestoreFromCache(String key) {
+    final cached = _cacheByQuery[key];
+    if (cached == null) return false;
+    if (DateTime.now().difference(cached.cachedAt) > _cacheTtl) {
+      _cacheByQuery.remove(key);
+      return false;
+    }
+    _products
+      ..clear()
+      ..addAll(cached.products);
+    _productOffset = cached.nextOffset;
+    _hasMoreProducts = cached.hasMoreProducts;
+    _isLoading = false;
+    _items
+      ..clear()
+      ..addAll(_products.map(SearchProductResultItem.new))
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    notifyListeners();
+    return true;
+  }
+
   /// Пустая выдача без запроса (смена аккаунта / сброс отложенной загрузки).
   void resetListing() {
     _requestVersion++;
     _query = '';
     _filters = const SearchFilters();
     _cachedExcludeSellerIds = null;
+    _cacheByQuery.clear();
     _products.clear();
     _items.clear();
     _productOffset = 0;
@@ -71,12 +120,24 @@ class SearchPagingController extends ChangeNotifier {
   }
 
   Future<void> loadInitial(String query, {SearchFilters? filters}) async {
+    final nextQuery = query.trim();
+    final nextFilters = filters ?? _filters;
+    final nextKey = _queryKey(query: nextQuery, filters: nextFilters);
+    final currentKey = _queryKey(query: _query, filters: _filters);
+    final sameRequest = nextKey == currentKey;
+    if (sameRequest && _items.isNotEmpty && !_isLoading) {
+      return;
+    }
+
     _requestVersion++;
     final localVersion = _requestVersion;
-    _query = query.trim();
-    if (filters != null) {
-      _filters = filters;
+    _query = nextQuery;
+    _filters = nextFilters;
+
+    if (_tryRestoreFromCache(nextKey)) {
+      return;
     }
+
     _cachedExcludeSellerIds = null;
     _products.clear();
     _items.clear();
@@ -142,6 +203,14 @@ class SearchPagingController extends ChangeNotifier {
         ..clear()
         ..addAll(_products.map(SearchProductResultItem.new))
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+      _cacheByQuery[_queryKey(query: _query, filters: _filters)] =
+          _SearchCacheSnapshot(
+        products: List<ProductEntity>.from(_products),
+        nextOffset: _productOffset,
+        hasMoreProducts: _hasMoreProducts,
+        cachedAt: DateTime.now(),
+      );
     } finally {
       if (requestVersion == _requestVersion) {
         _isLoading = false;
@@ -169,4 +238,18 @@ class SearchPagingController extends ChangeNotifier {
     }
     return _cachedExcludeSellerIds!;
   }
+}
+
+class _SearchCacheSnapshot {
+  const _SearchCacheSnapshot({
+    required this.products,
+    required this.nextOffset,
+    required this.hasMoreProducts,
+    required this.cachedAt,
+  });
+
+  final List<ProductEntity> products;
+  final int nextOffset;
+  final bool hasMoreProducts;
+  final DateTime cachedAt;
 }

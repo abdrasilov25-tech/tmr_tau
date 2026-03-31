@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
+import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../domain/entities/map_product.dart';
 import '../bloc/map_bloc.dart';
@@ -22,6 +24,8 @@ class _MapPageState extends State<MapPage> {
   GoogleMapController? _mapController;
   double _radiusKm = 10;
   bool _mapsConfigured = true;
+  bool _accessLoading = true;
+  bool _hasOfficialPageAccess = false;
 
   static const _radii = [5.0, 10.0, 25.0, 50.0];
 
@@ -29,7 +33,7 @@ class _MapPageState extends State<MapPage> {
   void initState() {
     super.initState();
     _checkMapsConfig();
-    context.read<MapBloc>().add(const MapLocationRequested());
+    _checkOfficialPageAccess();
   }
 
   @override
@@ -84,6 +88,42 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
+  Future<void> _checkOfficialPageAccess() async {
+    setState(() => _accessLoading = true);
+    try {
+      final authUser = Supabase.instance.client.auth.currentUser;
+      if (authUser == null) {
+        if (!mounted) return;
+        setState(() {
+          _hasOfficialPageAccess = false;
+          _accessLoading = false;
+        });
+        return;
+      }
+
+      final row = await Supabase.instance.client
+          .from('users')
+          .select('official_page_active')
+          .eq('id', authUser.id)
+          .maybeSingle();
+      if (!mounted) return;
+      final hasAccess = row?['official_page_active'] == true;
+      setState(() {
+        _hasOfficialPageAccess = hasAccess;
+        _accessLoading = false;
+      });
+      if (hasAccess) {
+        context.read<MapBloc>().add(const MapLocationRequested());
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _hasOfficialPageAccess = false;
+        _accessLoading = false;
+      });
+    }
+  }
+
   Future<void> _goToMyLocation(LatLng? position) async {
     if (position == null) {
       context.read<MapBloc>().add(const MapLocationRequested());
@@ -104,6 +144,66 @@ class _MapPageState extends State<MapPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_accessLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (!_hasOfficialPageAccess) {
+      return Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Card(
+              margin: const EdgeInsets.all(24),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.workspace_premium_outlined,
+                      size: 52,
+                      color: Color(0xFF2563EB),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Карта доступна по подписке Official Page',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Чтобы пользоваться картой и поиском рядом, '
+                      'подключите подписку в Qarmet Wallet.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: () => context.push('/qarmet-wallet'),
+                        icon: const Icon(Icons.account_balance_wallet_outlined),
+                        label: const Text('Подключить Official Page'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: _checkOfficialPageAccess,
+                      child: const Text('Я уже оплатил, проверить снова'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       body: BlocConsumer<MapBloc, MapState>(
         listener: (context, state) {

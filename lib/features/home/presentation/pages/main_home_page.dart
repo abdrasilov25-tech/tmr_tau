@@ -623,8 +623,10 @@ class _MainHomePageState extends State<MainHomePage> {
     if (last != null && now.difference(last) < const Duration(milliseconds: 350)) {
       return;
     }
+    // Синхронно блокируем повторный вызов до завершения запроса.
+    _isLoadingMore = true;
     _lastLoadMoreAt = now;
-    setState(() => _isLoadingMore = true);
+    setState(() {});
     try {
       await _fetchPageForTab(_feedTab, reset: false);
       if (!mounted) return;
@@ -783,11 +785,12 @@ class _MainHomePageState extends State<MainHomePage> {
       _posts[i] = next;
     });
 
-    // TODO: при необходимости можно заменить на запрос с обновлением из БД.
     try {
       await context.read<PostRepository>().toggleLike(post.id, userId);
+      if (!mounted) return;
       await _refreshPost(post.id);
     } catch (_) {
+      if (!mounted) return;
       await _refreshPost(post.id);
     }
   }
@@ -814,8 +817,10 @@ class _MainHomePageState extends State<MainHomePage> {
 
     try {
       await context.read<PostRepository>().toggleRepost(post.id, userId);
+      if (!mounted) return;
       await _refreshPost(post.id);
     } catch (_) {
+      if (!mounted) return;
       await _refreshPost(post.id);
     }
   }
@@ -837,8 +842,10 @@ class _MainHomePageState extends State<MainHomePage> {
     });
     try {
       await context.read<PostRepository>().toggleSave(post.id, userId);
+      if (!mounted) return;
       await _refreshPost(post.id);
     } catch (_) {
+      if (!mounted) return;
       await _refreshPost(post.id);
     }
   }
@@ -934,77 +941,6 @@ class _MainHomePageState extends State<MainHomePage> {
     );
   }
 
-  void _showQuickCreateMenu() {
-    final state = context.read<AuthBloc>().state;
-    if (state is! AuthAuthenticated) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы создавать публикации')),
-      );
-      return;
-    }
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            const Text(
-              'Создать',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.person_outline_rounded),
-              title: const Text('Прувнуть в ленту'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                final created =
-                    await context.push<PostEntity>('/add-publication');
-                if (created == null || !mounted) return;
-                final isPublication =
-                    created.kind.trim().toLowerCase() != 'news';
-                if (!isPublication) return;
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.history_rounded),
-              title: const Text('Сторис'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                await _openAddStoryAndRefresh();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam_outlined),
-              title: const Text('Видео'),
-              onTap: () async {
-                Navigator.pop(sheetContext);
-                await context.push<PostEntity>(
-                  '/add-publication?video=1',
-                );
-                if (!mounted) return;
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.article_outlined),
-              title: const Text('Новость'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                context.push('/add-news');
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
@@ -1021,7 +957,7 @@ class _MainHomePageState extends State<MainHomePage> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.add_circle_outline_rounded),
-          onPressed: _showQuickCreateMenu,
+          onPressed: _openAddStoryAndRefresh,
         ),
         title: const Text('tmr_tau', style: TextStyle(fontWeight: FontWeight.w800)),
         centerTitle: true,
@@ -1645,6 +1581,18 @@ class _VideoMediaState extends State<_VideoMedia> {
     unawaited(_boot());
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_ready || _controller == null) return;
+    // Приостанавливаем видео когда вкладка скрыта (IndexedStack, Navigator).
+    if (TickerMode.of(context)) {
+      _controller!.play();
+    } else {
+      _controller!.pause();
+    }
+  }
+
   Future<void> _boot() async {
     try {
       final c = await createCachedVideoController(widget.videoUrl);
@@ -1656,7 +1604,8 @@ class _VideoMediaState extends State<_VideoMedia> {
       }
       _controller = c;
       setState(() => _ready = true);
-      c.play();
+      // Играем только если вкладка активна.
+      if (TickerMode.of(context)) c.play();
     } catch (_) {
       if (mounted) setState(() => _ready = false);
     }

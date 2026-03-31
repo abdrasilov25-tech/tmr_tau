@@ -12,6 +12,7 @@ import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/utils/kazakhstan_phone.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/category_entity.dart';
+import '../../domain/entities/seller_listing_policy.dart';
 import '../../domain/repositories/categories_repository.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../constants/product_photos.dart';
@@ -45,6 +46,8 @@ class _AddProductPageState extends State<AddProductPage> {
   CategoryEntity? _selectedMain;
   CategoryEntity? _selectedSubcategory;
   bool _categoriesLoading = true;
+  SellerListingPolicy? _sellerPolicy;
+  bool _sellerPolicyLoading = true;
   /// Как в OLX: только «новый» / «б/у», без «любое».
   String _condition = 'used';
   late final ProductListingPromoFlagsController _promoFlags;
@@ -60,6 +63,30 @@ class _AddProductPageState extends State<AddProductPage> {
       },
     );
     _loadCategories();
+    Future<void>.microtask(_loadSellerPolicy);
+  }
+
+  Future<void> _loadSellerPolicy() async {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is! AuthAuthenticated) {
+      if (mounted) {
+        setState(() => _sellerPolicyLoading = false);
+      }
+      return;
+    }
+    try {
+      final policy = await context
+          .read<ProductRepository>()
+          .getSellerListingPolicy(authState.user.id);
+      if (!mounted) return;
+      setState(() {
+        _sellerPolicy = policy;
+        _sellerPolicyLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _sellerPolicyLoading = false);
+    }
   }
 
   Future<void> _pickMorePhotos() async {
@@ -301,6 +328,23 @@ class _AddProductPageState extends State<AddProductPage> {
     setState(() => _loading = true);
     final productRepository = context.read<ProductRepository>();
     try {
+      final policy = await productRepository.getSellerListingPolicy(
+        authState.user.id,
+      );
+      if (!policy.canCreateProduct) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Лимит объявлений: ${policy.activeProducts}/${policy.maxActiveProducts}. '
+              'Подключите Стандарт или Про.',
+            ),
+          ),
+        );
+        context.push('/qarmet-wallet');
+        return;
+      }
+
       final urls = <String>[];
       for (final file in _images) {
         const uuid = Uuid();
@@ -339,6 +383,9 @@ class _AddProductPageState extends State<AddProductPage> {
         contactPhone: phoneFull,
         sellerId: authState.user.id,
       );
+      if (mounted) {
+        setState(() => _sellerPolicy = policy);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -384,6 +431,11 @@ class _AddProductPageState extends State<AddProductPage> {
               'Фотографии *',
               style: Theme.of(context).textTheme.titleMedium,
             ),
+            const SizedBox(height: 10),
+            if (_sellerPolicyLoading)
+              const LinearProgressIndicator(minHeight: 3)
+            else if (_sellerPolicy != null)
+              _SellerPlanInfoCard(policy: _sellerPolicy!),
             const SizedBox(height: 4),
             Text(
               'До $kMaxProductPhotos шт. Первое фото — обложка в ленте. Нажмите на фото — просмотр и зум.',
@@ -656,6 +708,48 @@ class _AddProductPageState extends State<AddProductPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SellerPlanInfoCard extends StatelessWidget {
+  const _SellerPlanInfoCard({required this.policy});
+
+  final SellerListingPolicy policy;
+
+  @override
+  Widget build(BuildContext context) {
+    final canCreate = policy.canCreateProduct;
+    final subtitle = policy.isUnlimited
+        ? 'Активных товаров: ${policy.activeProducts}. Лимит: без ограничений.'
+        : 'Активных товаров: ${policy.activeProducts}/${policy.maxActiveProducts}. '
+              'Осталось: ${policy.remainingSlots}.';
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: canCreate ? Colors.green.shade50 : Colors.red.shade50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: canCreate ? Colors.green.shade200 : Colors.red.shade200,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            canCreate ? Icons.storefront_rounded : Icons.lock_outline_rounded,
+            size: 18,
+            color: canCreate ? Colors.green.shade700 : Colors.red.shade700,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'План продавца: ${policy.planLabel}. $subtitle',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -51,6 +51,13 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     'product_like',
     'product_repost',
     'product_favorite',
+    'story_like',
+    'story_reply',
+    'post_mention_story',
+    'order_safe_created',
+    'order_safe_accepted',
+    'order_safe_completed',
+    'order_safe_cancelled',
   };
 
   @override
@@ -199,6 +206,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
                     body: n.body,
                     productId: n.productId,
                     postId: n.postId,
+                    storyId: n.storyId,
                     subjectImageUrl: n.subjectImageUrl,
                     subjectVideoUrl: n.subjectVideoUrl,
                     relatedPostKind: n.relatedPostKind,
@@ -245,6 +253,8 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   }
 
   static String? _subjectKey(NotificationEntity n) {
+    final sid = n.storyId ?? _extractStoryId(n.body);
+    if (sid != null && sid.isNotEmpty) return 'story:$sid';
     final pid = n.postId ?? _extractPostId(n.body);
     if (pid != null && pid.isNotEmpty) return 'post:$pid';
     final pr = n.productId;
@@ -256,9 +266,19 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     await _markGroupRead(row.allIds);
     if (!context.mounted) return;
     final item = row.primary;
+    if (item.type.startsWith('order_safe_')) {
+      await context.push('/orders');
+      return;
+    }
     final postId = item.postId ?? _extractPostId(item.body);
     if (postId != null && postId.isNotEmpty) {
       await context.push('/post/$postId');
+      return;
+    }
+    if ((item.type == 'story_like' || item.type == 'story_reply') &&
+        item.actorId != null &&
+        item.actorId!.isNotEmpty) {
+      await context.push('/profile/${item.actorId}');
       return;
     }
     final productId = item.productId;
@@ -454,6 +474,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
           child: _NotificationTile(
             row: row,
             relativeTime: _relativeTimeRu(item.createdAt, now),
+            exactDateTime: _fullDateTimeRu(item.createdAt),
             mergedNames: _mergedNamesRu(row.members),
             actionText: _actionSuffix(row.primary),
             displayBody: _displayBody(item.body),
@@ -504,6 +525,20 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
         return 'прокомментировали ${_postKindAccusative(n.relatedPostKind)}';
       case 'product_comment':
         return 'прокомментировали объявление';
+      case 'story_like':
+        return 'отреагировали на вашу историю';
+      case 'story_reply':
+        return 'ответили на вашу историю';
+      case 'post_mention_story':
+        return 'упомянули вас в истории';
+      case 'order_safe_created':
+        return 'оформили безопасную сделку';
+      case 'order_safe_accepted':
+        return 'подтвердили безопасную сделку';
+      case 'order_safe_completed':
+        return 'подтвердили получение по сделке';
+      case 'order_safe_cancelled':
+        return 'отменили безопасную сделку';
       default:
         return n.title ?? '';
     }
@@ -551,10 +586,21 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     return '${d.day}.${d.month.toString().padLeft(2, '0')}';
   }
 
+  static String _fullDateTimeRu(DateTime createdAt) {
+    final d = createdAt.toLocal();
+    final dd = d.day.toString().padLeft(2, '0');
+    final mm = d.month.toString().padLeft(2, '0');
+    final yyyy = d.year.toString();
+    final hh = d.hour.toString().padLeft(2, '0');
+    final min = d.minute.toString().padLeft(2, '0');
+    return '$dd.$mm.$yyyy, $hh:$min';
+  }
+
   static String _displayBody(String? body) {
     if (body == null || body.isEmpty) return '';
     return body
         .replaceAll(RegExp(r'\s*\[post:[a-fA-F0-9\-]{36}\]\s*'), ' ')
+        .replaceAll(RegExp(r'\s*\[story:[a-fA-F0-9\-]{36}\]\s*'), ' ')
         .trim();
   }
 
@@ -565,12 +611,21 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
         return Icons.favorite_rounded;
       case 'post_comment':
       case 'product_comment':
+      case 'story_reply':
         return Icons.chat_bubble_rounded;
       case 'post_repost':
       case 'product_repost':
+      case 'post_mention_story':
         return Icons.repeat_rounded;
       case 'product_favorite':
         return Icons.bookmark_rounded;
+      case 'story_like':
+        return Icons.emoji_emotions_rounded;
+      case 'order_safe_created':
+      case 'order_safe_accepted':
+      case 'order_safe_completed':
+      case 'order_safe_cancelled':
+        return Icons.shield_rounded;
       default:
         return Icons.notifications_rounded;
     }
@@ -583,12 +638,21 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
         return const Color(0xFFE91E63);
       case 'post_comment':
       case 'product_comment':
+      case 'story_reply':
         return const Color(0xFF1565C0);
       case 'post_repost':
       case 'product_repost':
+      case 'post_mention_story':
         return const Color(0xFF6A1B9A);
       case 'product_favorite':
         return const Color(0xFFFB8C00);
+      case 'story_like':
+        return const Color(0xFFE65100);
+      case 'order_safe_created':
+      case 'order_safe_accepted':
+      case 'order_safe_completed':
+      case 'order_safe_cancelled':
+        return const Color(0xFF00897B);
       default:
         return const Color(0xFF455A64);
     }
@@ -597,6 +661,12 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   static String? _extractPostId(String? body) {
     if (body == null || body.isEmpty) return null;
     final match = RegExp(r'\[post:([a-fA-F0-9\-]{36})\]').firstMatch(body);
+    return match?.group(1);
+  }
+
+  static String? _extractStoryId(String? body) {
+    if (body == null || body.isEmpty) return null;
+    final match = RegExp(r'\[story:([a-fA-F0-9\-]{36})\]').firstMatch(body);
     return match?.group(1);
   }
 }
@@ -785,6 +855,7 @@ class _NotificationTile extends StatefulWidget {
   const _NotificationTile({
     required this.row,
     required this.relativeTime,
+    required this.exactDateTime,
     required this.mergedNames,
     required this.actionText,
     required this.displayBody,
@@ -799,6 +870,7 @@ class _NotificationTile extends StatefulWidget {
 
   final _ActivityRow row;
   final String relativeTime;
+  final String exactDateTime;
   final String mergedNames;
   final String actionText;
   final String displayBody;
@@ -979,7 +1051,7 @@ class _NotificationTileState extends State<_NotificationTile> {
                           ],
                           const SizedBox(height: 6),
                           Text(
-                            widget.relativeTime,
+                            '${widget.relativeTime} • ${widget.exactDateTime}',
                             style: theme.textTheme.labelMedium?.copyWith(
                               color: ThemedContentSurface.profileTextSecondary,
                               fontWeight: FontWeight.w500,

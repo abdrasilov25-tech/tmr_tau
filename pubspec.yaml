@@ -63,6 +63,7 @@ dependencies:
   connectivity_plus: ^7.0.0
   video_trimmer: ^5.0.0
   permission_handler: ^12.0.1
+  font_awesome_flutter: ^11.0.0
 
 dev_dependencies:
   flutter_test:
@@ -101,6 +102,10 @@ flutter:
     - .env
     - assets/icons.png
     - assets/coverage/tmr_tau_coverage.geojson
+    - assets/share_icons/instagram.png
+    - assets/share_icons/whatsapp.png
+    - assets/share_icons/threads.png
+    - assets/qarmet_coin_nominal.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

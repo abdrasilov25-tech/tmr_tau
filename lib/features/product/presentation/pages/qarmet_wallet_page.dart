@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../data/services/payment_service.dart';
 import '../../domain/entities/qarmet_promotion_history_item.dart';
+import '../../domain/entities/qarmet_product.dart';
 import '../bloc/payment_cubit.dart';
 
 class QarmetWalletPage extends StatefulWidget {
@@ -35,19 +36,18 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Qarmet кошелек'),
-          actions: [
-            Builder(
-              builder: (ctx) {
-                return IconButton(
-                  tooltip: 'Обновить',
-                  onPressed: () => ctx.read<PaymentCubit>().refreshWallet(),
-                  icon: const Icon(Icons.refresh_rounded),
-                );
-              },
-            ),
-          ],
         ),
         body: BlocConsumer<PaymentCubit, PaymentUiState>(
+          buildWhen: (prev, next) {
+            final dataChanged = prev.balance != next.balance ||
+                prev.catalog != next.catalog ||
+                prev.isOfficialPageActive != next.isOfficialPageActive ||
+                prev.promotionHistory != next.promotionHistory;
+            final loadingChanged =
+                (prev.status == PaymentUiStatus.loading) !=
+                    (next.status == PaymentUiStatus.loading);
+            return dataChanged || loadingChanged;
+          },
           listener: (context, state) {
             if (state.status == PaymentUiStatus.error ||
                 state.status == PaymentUiStatus.cancelled) {
@@ -65,52 +65,66 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
           builder: (context, state) {
             final loading = state.status == PaymentUiStatus.loading;
             final filtered = _filterHistory(state.promotionHistory);
+            final bestPricePerQarmet = state.catalog.isEmpty
+                ? null
+                : state.catalog
+                    .map((e) => e.pricePerQarmet)
+                    .reduce((a, b) => a < b ? a : b);
             return RefreshIndicator(
               onRefresh: () => context.read<PaymentCubit>().refreshWallet(),
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [
-                  _BalanceCard(state: state),
+                  _BalanceCard(state: state, loading: loading),
                   const SizedBox(height: 14),
+                  const _QarmetCoinNominalCard(),
+                  const SizedBox(height: 10),
+                  const _QarmetPriceExplain(),
+                  const SizedBox(height: 10),
+                  const _SellerPlansCard(),
+                  const SizedBox(height: 10),
                   Text(
-                    'Пополнить Qarmet',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    'Купить Qarmet',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 8),
-                  ...state.catalog.map(
-                    (pack) => Card(
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: Colors.grey.shade300),
+                  const SizedBox(height: 10),
+                  if (state.catalog.isEmpty)
+                    const _CatalogLoadingPlaceholder()
+                  else
+                    ...state.catalog.map(
+                      (pack) => _QarmetPackageCard(
+                        pack: pack,
+                        loading: loading,
+                        bestPricePerQarmet: bestPricePerQarmet,
+                        onBuy: () => context
+                            .read<PaymentCubit>()
+                            .buyQarmetPackage(pack.productId),
                       ),
-                      child: ListTile(
-                        leading: Icon(
-                          pack.isSubscription
-                              ? Icons.autorenew_rounded
-                              : Icons.shopping_bag_outlined,
+                    ),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.amber.shade200),
+                    ),
+                    child: const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.info_outline_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Продвижение товара (В топ / Срочно / Выделение) стоит 1 Qarmet за активацию.',
+                          ),
                         ),
-                        title: Text(
-                          '${pack.productId}: ${pack.baseQarmet}+${pack.bonusQarmet} Qarmet',
-                        ),
-                        subtitle: Text(
-                          '${pack.priceKzt} KZT · ${pack.pricePerQarmet.toStringAsFixed(2)} KZT/Qarmet',
-                        ),
-                        trailing: const Icon(Icons.chevron_right),
-                        onTap: loading
-                            ? null
-                            : () => context
-                                  .read<PaymentCubit>()
-                                  .buyQarmetPackage(pack.productId),
-                      ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 14),
-                  Text(
-                    'Продвижение товаров: 1 Qarmet',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
                   _HistoryFilterBar(
                     value: _historyFilter,
                     onChanged: (v) => setState(() => _historyFilter = v),
@@ -351,9 +365,10 @@ class _PromotionHistoryCard extends StatelessWidget {
 }
 
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.state});
+  const _BalanceCard({required this.state, required this.loading});
 
   final PaymentUiState state;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -394,7 +409,305 @@ class _BalanceCard extends StatelessWidget {
                 : 'Подписка official_page неактивна',
             style: const TextStyle(color: Colors.white, fontSize: 13),
           ),
+          if (loading) ...[
+            const SizedBox(height: 10),
+            const LinearProgressIndicator(
+              minHeight: 3,
+              backgroundColor: Colors.white24,
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            ),
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _QarmetPriceExplain extends StatelessWidget {
+  const _QarmetPriceExplain();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.blue.shade200),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.local_offer_outlined,
+            color: Colors.blue.shade700,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Цена Qarmet: 149 тг за 1 Qarmet.\n'
+              'Выбирайте пакет ниже и нажмите «Купить».',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QarmetCoinNominalCard extends StatelessWidget {
+  const _QarmetCoinNominalCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.asset(
+              'assets/qarmet_coin_nominal.png',
+              width: 88,
+              height: 88,
+              fit: BoxFit.cover,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  width: 88,
+                  height: 88,
+                  color: const Color(0xFF0F172A),
+                  alignment: Alignment.center,
+                  child: const Text(
+                    '1\nQARMET',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Номинал валюты',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                const Text('1 QARMET'),
+                const SizedBox(height: 2),
+                Text(
+                  'Официальный номинал внутри приложения',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerPlansCard extends StatelessWidget {
+  const _SellerPlansCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.purple.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.purple.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Подписка продавца',
+            style: Theme.of(
+              context,
+            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          const Text('Базовый: 3 активных товара'),
+          const Text('Стандарт: до 20 товаров + Qarmet каждый месяц'),
+          const Text('Про: безлимит + приоритет + расширенная статистика'),
+          const SizedBox(height: 8),
+          Text(
+            'План назначается по профилю продавца. Если лимит достигнут, при публикации откроется этот экран.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CatalogLoadingPlaceholder extends StatelessWidget {
+  const _CatalogLoadingPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
+      child: const Padding(
+        padding: EdgeInsets.all(16),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 10),
+            Expanded(child: Text('Загружаем пакеты Qarmet...')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QarmetPackageCard extends StatelessWidget {
+  const _QarmetPackageCard({
+    required this.pack,
+    required this.loading,
+    required this.bestPricePerQarmet,
+    required this.onBuy,
+  });
+
+  final QarmetProduct pack;
+  final bool loading;
+  final double? bestPricePerQarmet;
+  final VoidCallback onBuy;
+
+  String get _packTitle {
+    switch (pack.productId) {
+      case PaymentService.promotionStartProductId:
+        return 'Start пакет';
+      case PaymentService.promotionPremiumProductId:
+        return 'Premium пакет';
+      case PaymentService.promotionBusinessProductId:
+        return 'Business пакет';
+      case PaymentService.officialPageProductId:
+        return 'Official Page';
+      default:
+        return pack.title;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isBest = bestPricePerQarmet != null &&
+        (pack.pricePerQarmet - bestPricePerQarmet!).abs() < 0.0001;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 10),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: isBest ? const Color(0xFF2563EB) : Colors.grey.shade300,
+          width: isBest ? 1.4 : 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  pack.isSubscription
+                      ? Icons.workspace_premium_outlined
+                      : Icons.bolt_rounded,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _packTitle,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                if (isBest)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE0E7FF),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Text(
+                      'Лучшая цена',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1D4ED8),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '${pack.totalQarmet} Qarmet (${pack.baseQarmet} + бонус ${pack.bonusQarmet})',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '${pack.priceKzt} KZT • ${pack.pricePerQarmet.toStringAsFixed(2)} KZT/Qarmet',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (pack.isSubscription) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Ежемесячно: +20 + 5 Qarmet и преимущества профиля.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: loading ? null : onBuy,
+                child: Text(
+                  pack.isSubscription
+                      ? 'Подключить подписку'
+                      : 'Купить за ${pack.priceKzt} KZT',
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -52,6 +52,8 @@ import 'features/settings/domain/repositories/settings_repository.dart';
 import 'features/map/data/datasources/map_remote_datasource.dart';
 import 'features/map/data/repositories/map_repository_impl.dart';
 import 'features/map/domain/repositories/map_repository.dart';
+import 'features/orders/data/repositories/orders_repository_impl.dart';
+import 'features/orders/domain/repositories/orders_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -94,6 +96,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final PostRepository _postRepository;
   late final SettingsRepository _settingsRepository;
   late final MapRepository _mapRepository;
+  late final OrdersRepository _ordersRepository;
   late final AppRouter _appRouter;
   late final SearchTabActivationController _searchTabActivation;
   late final AccountManager _accountManager;
@@ -136,6 +139,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     );
     _postRepository = PostRepositoryImpl(_client);
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
+    _ordersRepository = OrdersRepositoryImpl(_client);
     _searchTabActivation = SearchTabActivationController();
     _accountManager = AccountManager(
       widget.accountRepository,
@@ -234,6 +238,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
           value: _settingsRepository,
         ),
         RepositoryProvider<MapRepository>.value(value: _mapRepository),
+        RepositoryProvider<OrdersRepository>.value(value: _ordersRepository),
         ChangeNotifierProvider<SearchTabActivationController>.value(
           value: _searchTabActivation,
         ),
@@ -271,8 +276,11 @@ class _TmrTauAppState extends State<TmrTauApp> {
               );
               await context.read<AccountManager>().addOrUpdateAccount(account);
               if (context.mounted) {
-                await context.read<ChatUnreadBadgeController>().refresh();
-                await context.read<NotificationTabBadgeController>().refresh();
+                final chatBadge = context.read<ChatUnreadBadgeController>();
+                final notificationBadge =
+                    context.read<NotificationTabBadgeController>();
+                await chatBadge.refresh();
+                await notificationBadge.refresh();
               }
             }
           },

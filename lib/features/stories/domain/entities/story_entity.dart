@@ -11,6 +11,10 @@ class StoryEntity extends Equatable {
     this.caption,
     this.userName,
     this.userAvatarUrl,
+    this.originalPostId,
+    this.originalPostAuthorId,
+    this.originalPostAuthorName,
+    this.originalPostPreviewUrl,
   });
 
   final String id;
@@ -22,10 +26,26 @@ class StoryEntity extends Equatable {
   final DateTime expiresAt;
   final String? userName;
   final String? userAvatarUrl;
+  final String? originalPostId;
+  final String? originalPostAuthorId;
+  final String? originalPostAuthorName;
+  final String? originalPostPreviewUrl;
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
 
   @override
   List<Object?> get props =>
-      [id, userId, imageUrl, videoUrl, caption, createdAt, expiresAt];
+      [
+        id,
+        userId,
+        imageUrl,
+        videoUrl,
+        caption,
+        createdAt,
+        expiresAt,
+        originalPostId,
+        originalPostAuthorId,
+        originalPostAuthorName,
+        originalPostPreviewUrl,
+      ];
 }

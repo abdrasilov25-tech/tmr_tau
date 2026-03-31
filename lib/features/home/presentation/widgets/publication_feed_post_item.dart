@@ -192,7 +192,7 @@ class _PostHeader extends StatelessWidget {
                       color: Theme.of(context)
                           .colorScheme
                           .onSurface
-                          .withOpacity(0.45),
+                          .withValues(alpha: 0.45),
                     ),
                   ),
               ],
@@ -711,7 +711,7 @@ class _CommentHint extends StatelessWidget {
           'Смотреть все комментарии ($count)',
           style: TextStyle(
             color:
-                Theme.of(context).colorScheme.onSurface.withOpacity(0.5),
+                Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5),
             fontSize: 13,
           ),
         ),

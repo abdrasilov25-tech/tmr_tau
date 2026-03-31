@@ -205,8 +205,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         message = 'Postgrest error: ${e.message}';
       }
       // Для отладки можно смотреть полный текст ошибки в консоли.
-      // ignore: avoid_print
-      print('Avatar upload error: $e\n$st');
+      debugPrint('Avatar upload error: $e\n$st');
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -1083,12 +1082,101 @@ class _MyProfilePageState extends State<MyProfilePage> {
       context: context,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+            // ── Кошелёк Qarmet — первый и особенный ──────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+              child: GestureDetector(
+                onTap: () {
+                  Navigator.pop(context);
+                  context.push('/qarmet-wallet');
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 16,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color(0xFF0F2027),
+                        Color(0xFF203A43),
+                        Color(0xFF2C5364),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF203A43).withValues(alpha: 0.45),
+                        blurRadius: 18,
+                        offset: const Offset(0, 7),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.account_balance_wallet_rounded,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Кошелёк Qarmet',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              'Баланс · пополнение · продвижение',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.65),
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.white.withValues(alpha: 0.7),
+                        size: 22,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const Divider(height: 1, indent: 16, endIndent: 16),
+            // ── Остальные пункты ─────────────────────────────────────────
             ListTile(
               leading: const Icon(Icons.palette_outlined),
               title: const Text('Темки'),
@@ -1129,14 +1217,6 @@ class _MyProfilePageState extends State<MyProfilePage> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.account_balance_wallet_outlined),
-              title: const Text('Кошелек Qarmet'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/qarmet-wallet');
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.settings_outlined),
               title: const Text('Настройки'),
               onTap: () {
@@ -1146,16 +1226,17 @@ class _MyProfilePageState extends State<MyProfilePage> {
             ),
             const Divider(height: 1),
             ListTile(
-              leading: const Icon(Icons.logout),
-              title: const Text('Выйти'),
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text(
+                'Выйти',
+                style: TextStyle(color: Colors.red),
+              ),
               onTap: () {
                 final navigator = Navigator.of(context);
                 final rootContext = navigator.context;
                 final authState = rootContext.read<AuthBloc>().state;
                 if (authState is AuthAuthenticated) {
                   final userId = authState.user.id;
-                  // Удаляем токен-аккаунт и сохранённый аккаунт текущего пользователя,
-                  // чтобы он не появлялся в «Быстром входе» после выхода.
                   try {
                     rootContext.read<AccountManager>().removeAccount(userId);
                   } catch (_) {}
@@ -1170,6 +1251,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
               },
             ),
           ],
+        ),
+      ),
         ),
       ),
     );
@@ -1413,6 +1496,37 @@ class _ProfileContent extends StatelessWidget {
                                   ),
                                 ],
                               ),
+                              if (ownStoryGroup != null) ...[
+                                const SizedBox(height: 8),
+                                GestureDetector(
+                                  onTap: () => onOpenOwnStory?.call(),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      gradient: const LinearGradient(
+                                        colors: [
+                                          Color(0xFFFEDA75),
+                                          Color(0xFFFA7E1E),
+                                          Color(0xFFD62976),
+                                          Color(0xFF4F5BD5),
+                                        ],
+                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: const Text(
+                                      'Ваша сторис · смотреть',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                               const SizedBox(height: 16),
                               Material(
                                 color: Colors.transparent,

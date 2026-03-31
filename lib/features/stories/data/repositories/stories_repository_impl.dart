@@ -164,12 +164,20 @@ class StoriesRepositoryImpl implements StoriesRepository {
     required String imageUrl,
     String? videoUrl,
     String? caption,
+    String? originalPostId,
+    String? originalPostAuthorId,
+    String? originalPostAuthorName,
+    String? originalPostPreviewUrl,
   }) async {
     await _client.from(SupabaseConstants.storiesTable).insert({
       'user_id': userId,
       'image_url': imageUrl,
       'video_url': videoUrl,
       'caption': caption,
+      'original_post_id': originalPostId,
+      'original_post_author_id': originalPostAuthorId,
+      'original_post_author_name': originalPostAuthorName,
+      'original_post_preview_url': originalPostPreviewUrl,
       'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
     });
   }

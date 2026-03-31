@@ -48,7 +48,6 @@ class _LoginPageState extends State<LoginPage>
   final _emailFocus = FocusNode();
   final _passwordFocus = FocusNode();
   bool _obscurePassword = true;
-  bool _lampOn = false;
   bool _googleInProgress = false;
   bool _appleInProgress = false;
   bool _authHandled = false;
@@ -147,12 +146,7 @@ class _LoginPageState extends State<LoginPage>
               );
             },
           ),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 260),
-            color: _lampOn
-                ? Colors.transparent
-                : Colors.black.withValues(alpha: 0.40),
-          ),
+          ColoredBox(color: Colors.black.withValues(alpha: 0.40)),
           // Глубина: размытые светящиеся пятна
           _buildGlowSpots(),
           // Волнистые световые линии (неоновые волны)
@@ -265,17 +259,13 @@ class _LoginPageState extends State<LoginPage>
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 44),
-                _buildLampShowcase(),
-                const SizedBox(height: 12),
                 ClipRRect(
                   borderRadius: BorderRadius.circular(24),
                   child: BackdropFilter(
                     filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: _lampOn
-                            ? Colors.white.withValues(alpha: 0.22)
-                            : ThemedContentSurface.loginPanel,
+                        color: ThemedContentSurface.loginPanel,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: Colors.black.withValues(alpha: 0.06),
@@ -298,20 +288,18 @@ class _LoginPageState extends State<LoginPage>
                   style: GoogleFonts.poppins(
                     fontSize: 30,
                     fontWeight: FontWeight.bold,
-                    color: _lampOn ? Colors.white : titleColor,
+                    color: titleColor,
                     letterSpacing: 1.2,
                   ),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Войдите для продолжение',
+                  'Войдите, чтобы продолжить',
                   style: GoogleFonts.poppins(
                     fontSize: 14,
                     fontWeight: FontWeight.w400,
-                    color: _lampOn
-                        ? Colors.white.withValues(alpha: 0.85)
-                        : subtitleColor,
+                    color: subtitleColor,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -426,20 +414,29 @@ class _LoginPageState extends State<LoginPage>
                         )
                       : const Text('Продолжить с Google'),
                 ),
-                const SizedBox(height: 12),
-                TextButton(
-                  onPressed: () => context.push('/register'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: Colors.green,
-                  ),
-                  child: Text(
-                    'Регистрация',
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: Colors.green,
-                      fontWeight: FontWeight.w600,
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Нет аккаунта? ',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: subtitleColor,
+                      ),
                     ),
-                  ),
+                    GestureDetector(
+                      onTap: () => context.push('/register'),
+                      child: Text(
+                        'Зарегистрироваться',
+                        style: GoogleFonts.poppins(
+                          fontSize: 13,
+                          color: const Color(0xFF2196F3),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 if (_quickAccounts.isNotEmpty) ...[
@@ -553,104 +550,6 @@ class _LoginPageState extends State<LoginPage>
       );
       _emailController.text = account.email;
     }
-  }
-
-  Widget _buildLampShowcase() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(22),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 260),
-          height: 148,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Center(
-                  child: GestureDetector(
-                    onTap: () => setState(() => _lampOn = !_lampOn),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 260),
-                      width: 88,
-                      height: 106,
-                      decoration: BoxDecoration(
-                        boxShadow: _lampOn
-                            ? [
-                                BoxShadow(
-                                  color: const Color(0xFFFFF4BE).withValues(alpha: 0.65),
-                                  blurRadius: 36,
-                                  spreadRadius: 10,
-                                ),
-                              ]
-                            : const [],
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 78,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: const BorderRadius.vertical(
-                                top: Radius.circular(48),
-                                bottom: Radius.circular(18),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            width: 10,
-                            height: 42,
-                            color: Colors.white,
-                          ),
-                          Container(
-                            width: 44,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 260),
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: _lampOn
-                        ? const Color(0x30FFF2BF)
-                        : Colors.white.withValues(alpha: 0.07),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.18),
-                    ),
-                  ),
-                  child: Text(
-                    'Welcome',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Widget _buildThemeButton() {

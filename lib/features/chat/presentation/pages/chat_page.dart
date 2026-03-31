@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -94,48 +96,93 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Stream<List<Map<String, dynamic>>> _messagesStream(String? me) {
-    if (me == null) {
-      return const Stream.empty();
-    }
+    if (me == null) return const Stream.empty();
     final peer = widget.peerId;
     final hiddenIds = context.read<ChatListStorage>().getHiddenMessageIds(peer);
-    // Стримим только сообщения, где текущий пользователь участвует как отправитель или получатель.
-    // Это уменьшает объём данных по сравнению со стримом по всей таблице.
-    final baseStream = _client
+
+    // Два стрима с серверной фильтрацией по sender_id —
+    // клиент получает только сообщения отправленные me или peer, а не всю таблицу.
+    // Финальный фильтр по receiver_id выполняется на клиенте внутри merge.
+    final sentStream = _client
         .from(SupabaseConstants.messagesTable)
-        .stream(primaryKey: ['id']);
+        .stream(primaryKey: ['id'])
+        .eq('sender_id', me);
 
-    return baseStream.map(
-      (list) {
-        final dialogMessages = list
-            // Оставляем только конкретный диалог me <-> peer
-            .where(
-              (m) =>
-                  (m['sender_id'] == me && m['receiver_id'] == peer) ||
-                  (m['sender_id'] == peer && m['receiver_id'] == me),
-            )
-            .toList()
-          ..sort(
-            (a, b) => (a['created_at'] as String)
-                .compareTo(b['created_at'] as String),
-          );
-        if (hiddenIds.isNotEmpty) {
-          dialogMessages.removeWhere(
-            (m) => hiddenIds.contains((m['id'] ?? '').toString()),
-          );
-        }
+    final receivedStream = _client
+        .from(SupabaseConstants.messagesTable)
+        .stream(primaryKey: ['id'])
+        .eq('sender_id', peer);
 
-        // Ограничиваем количество сообщений в памяти (например, последние 200)
-        const maxMessages = 200;
-        if (dialogMessages.length <= maxMessages) {
-          return dialogMessages;
+    return _mergeDialogStreams(sentStream, receivedStream, me, peer, hiddenIds);
+  }
+
+  Stream<List<Map<String, dynamic>>> _mergeDialogStreams(
+    Stream<List<Map<String, dynamic>>> stream1,
+    Stream<List<Map<String, dynamic>>> stream2,
+    String me,
+    String peer,
+    Set<String> hiddenIds,
+  ) {
+    List<Map<String, dynamic>> latest1 = const [];
+    List<Map<String, dynamic>> latest2 = const [];
+    late final StreamController<List<Map<String, dynamic>>> controller;
+    StreamSubscription<List<Map<String, dynamic>>>? sub1, sub2;
+
+    void emit() {
+      final combined = <String, Map<String, dynamic>>{};
+      // stream1 = сообщения от me — фильтруем только те, что адресованы peer
+      for (final msg in latest1) {
+        if ((msg['receiver_id'] ?? '') == peer) {
+          combined[(msg['id'] ?? '').toString()] = msg;
         }
-        return dialogMessages.sublist(
-          dialogMessages.length - maxMessages,
-          dialogMessages.length,
+      }
+      // stream2 = сообщения от peer — фильтруем только те, что адресованы me
+      for (final msg in latest2) {
+        if ((msg['receiver_id'] ?? '') == me) {
+          combined[(msg['id'] ?? '').toString()] = msg;
+        }
+      }
+      var result = combined.values.toList()
+        ..sort(
+          (a, b) => (a['created_at'] as String)
+              .compareTo(b['created_at'] as String),
+        );
+      if (hiddenIds.isNotEmpty) {
+        result.removeWhere(
+          (m) => hiddenIds.contains((m['id'] ?? '').toString()),
+        );
+      }
+      const maxMessages = 200;
+      if (result.length > maxMessages) {
+        result = result.sublist(result.length - maxMessages);
+      }
+      controller.add(result);
+    }
+
+    controller = StreamController<List<Map<String, dynamic>>>(
+      onListen: () {
+        sub1 = stream1.listen(
+          (data) {
+            latest1 = data;
+            emit();
+          },
+          onError: controller.addError,
+        );
+        sub2 = stream2.listen(
+          (data) {
+            latest2 = data;
+            emit();
+          },
+          onError: controller.addError,
         );
       },
+      onCancel: () {
+        sub1?.cancel();
+        sub2?.cancel();
+      },
     );
+
+    return controller.stream;
   }
 
   Future<void> _sendMessage() async {
@@ -353,31 +400,36 @@ class _ChatPageState extends State<ChatPage> {
     final messageId = (message['id'] ?? '').toString();
     final oldText = (message['text'] ?? '').toString();
     final controller = TextEditingController(text: oldText);
-    final nextText = await showDialog<String>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Изменить сообщение'),
-        content: TextField(
-          controller: controller,
-          minLines: 1,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            hintText: 'Введите новый текст',
-            border: OutlineInputBorder(),
+    final String? nextText;
+    try {
+      nextText = await showDialog<String>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Изменить сообщение'),
+          content: TextField(
+            controller: controller,
+            minLines: 1,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              hintText: 'Введите новый текст',
+              border: OutlineInputBorder(),
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, controller.text.trim()),
+              child: const Text('Сохранить'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(c, controller.text.trim()),
-            child: const Text('Сохранить'),
-          ),
-        ],
-      ),
-    );
+      );
+    } finally {
+      controller.dispose();
+    }
     if (nextText == null || nextText.isEmpty || nextText == oldText.trim()) {
       return;
     }

@@ -41,6 +41,7 @@ class SearchPage extends StatefulWidget {
 
 class _SearchPageState extends State<SearchPage> {
   final _queryController = TextEditingController();
+  final ValueNotifier<String> _queryText = ValueNotifier<String>('');
   final _scrollController = ScrollController();
   late final SearchPagingController _pagingController;
   late final SearchTabActivationController _searchActivation;
@@ -112,6 +113,7 @@ class _SearchPageState extends State<SearchPage> {
     _searchActivation.removeListener(_onSearchActivationChanged);
     _deletedProductSub?.cancel();
     _debounce?.cancel();
+    _queryText.dispose();
     _queryController.dispose();
     _scrollController
       ..removeListener(_onScroll)
@@ -134,18 +136,24 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Future<void> _onSearchChanged(String query) async {
-    await _pagingController.loadInitial(query);
-    if (query.trim().isNotEmpty) {
-      await _searchStorage?.addHistory(query.trim());
+    final normalized = query.trim();
+    await _pagingController.loadInitial(normalized);
+    if (normalized.isNotEmpty) {
+      await _searchStorage?.addHistory(normalized);
       _reloadLocalSearchPrefs();
     }
   }
 
   void _cancelSearch() {
+    _debounce?.cancel();
+    if (_queryController.text.isEmpty) {
+      FocusScope.of(context).unfocus();
+      return;
+    }
     _queryController.clear();
+    _queryText.value = '';
     FocusScope.of(context).unfocus();
-    _pagingController.loadInitial('');
-    setState(() {});
+    unawaited(_pagingController.loadInitial(''));
   }
 
   Future<void> _bootstrapSearchUx() async {
@@ -248,6 +256,7 @@ class _SearchPageState extends State<SearchPage> {
 
   Future<void> _applySavedFilter(SavedSearchFilter item) async {
     _queryController.text = item.query;
+    _queryText.value = item.query;
     await _pagingController.loadInitial(item.query, filters: item.filters);
     if (!mounted) return;
     setState(() {});
@@ -381,7 +390,7 @@ class _SearchPageState extends State<SearchPage> {
             textInputAction: TextInputAction.search,
             onSubmitted: _onSearchChanged,
             onChanged: (value) {
-              setState(() {});
+              _queryText.value = value;
               _debounce?.cancel();
               _debounce = Timer(const Duration(milliseconds: 400), () {
                 if (!mounted) return;
@@ -391,8 +400,16 @@ class _SearchPageState extends State<SearchPage> {
           ),
         ),
         actions: [
-          if (_queryController.text.trim().isNotEmpty)
-            TextButton(onPressed: _cancelSearch, child: const Text('Отмена')),
+          ValueListenableBuilder<String>(
+            valueListenable: _queryText,
+            builder: (context, query, _) {
+              if (query.trim().isEmpty) return const SizedBox.shrink();
+              return TextButton(
+                onPressed: _cancelSearch,
+                child: const Text('Отмена'),
+              );
+            },
+          ),
         ],
       ),
       body: AnimatedBuilder(
@@ -419,9 +436,13 @@ class _SearchPageState extends State<SearchPage> {
                 onViewModeChanged: _persistViewMode,
               ),
               Expanded(
-                child: _buildSearchResultsPane(
-                  suggestions: _autoSuggestions(),
-                  filters: filters,
+                child: ValueListenableBuilder<String>(
+                  valueListenable: _queryText,
+                  builder: (context, queryText, _) => _buildSearchResultsPane(
+                    queryText: queryText,
+                    suggestions: _autoSuggestions(),
+                    filters: filters,
+                  ),
                 ),
               ),
             ],
@@ -461,6 +482,7 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   Widget _buildSearchResultsPane({
+    required String queryText,
     required List<String> suggestions,
     required SearchFilters filters,
   }) {
@@ -470,7 +492,7 @@ class _SearchPageState extends State<SearchPage> {
 
     if (_pagingController.items.isEmpty) {
       return _SearchEmptyState(
-        query: _queryController.text.trim(),
+        query: queryText.trim(),
         hasFilters: filters.hasActiveFilters,
         categories: _categories,
         onResetFilters: () => _pagingController.loadInitial(
@@ -527,13 +549,13 @@ class _SearchPageState extends State<SearchPage> {
               if (mounted) setState(() {});
             },
           ),
-        if (_queryController.text.trim().isNotEmpty && suggestions.isNotEmpty)
+        if (queryText.trim().isNotEmpty && suggestions.isNotEmpty)
           _SuggestionsBar(
             suggestions: suggestions,
             onTap: (value) {
               _queryController.text = value;
+              _queryText.value = value;
               _onSearchChanged(value);
-              setState(() {});
             },
           ),
         if (_savedFilters.isNotEmpty)
@@ -916,6 +938,25 @@ class _ProductSearchListCompact extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.visibility_outlined,
+                          size: 16,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${product.viewCount}',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -1045,6 +1086,26 @@ class _ProductSearchGalleryCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.visibility_outlined,
+                    size: 16,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${product.viewCount}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -1124,6 +1185,24 @@ class _ProductSearchGridTile extends StatelessWidget {
                       ),
                     ),
                   ],
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.visibility_outlined,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${product.viewCount}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
