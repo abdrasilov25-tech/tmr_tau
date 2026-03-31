@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/media/cached_video_controller.dart';
+import '../../../../core/media/global_video_audio_state.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/story_entity.dart';
 import '../../domain/entities/story_group_entity.dart';
@@ -1234,10 +1235,13 @@ class _StoryVideoContent extends StatefulWidget {
 
 class _StoryVideoContentState extends State<_StoryVideoContent> {
   VideoPlayerController? _controller;
+  final GlobalVideoAudioState _audioState = GlobalVideoAudioState.instance;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_audioState.ensureLoaded());
+    _audioState.isMuted.addListener(_syncVolumeWithGlobalState);
     unawaited(_boot());
   }
 
@@ -1254,6 +1258,7 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
         return;
       }
       c.setLooping(true);
+      c.setVolume(_audioState.isMuted.value ? 0 : 1);
       _controller = c;
       setState(() {});
       if (!widget.paused) c.play();
@@ -1264,8 +1269,16 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
 
   @override
   void dispose() {
+    _audioState.isMuted.removeListener(_syncVolumeWithGlobalState);
     unawaited(_controller?.dispose());
     super.dispose();
+  }
+
+  void _syncVolumeWithGlobalState() {
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+    c.setVolume(_audioState.isMuted.value ? 0 : 1);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -1340,6 +1353,29 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
                       ),
                     ),
                   ),
+                Positioned(
+                  right: 12,
+                  bottom: 12,
+                  child: GestureDetector(
+                    onTap: () {
+                      unawaited(_audioState.toggle());
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.black45,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Icon(
+                        _audioState.isMuted.value
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),

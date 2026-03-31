@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/media/cached_video_controller.dart';
+import '../../../../core/media/global_video_audio_state.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/post_comment_entity.dart';
@@ -13,6 +14,7 @@ import '../../domain/entities/post_entity.dart';
 import '../../domain/exceptions/post_comment_exceptions.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../widgets/post_photo_gallery.dart';
+import '../widgets/post_share_sheet.dart';
 
 class PostDetailPage extends StatefulWidget {
   const PostDetailPage({
@@ -36,8 +38,16 @@ class _PostDetailPageState extends State<PostDetailPage> {
   List<PostCommentEntity> _comments = [];
   bool _commentsLoading = true;
   final _commentController = TextEditingController();
+  final _commentFocusNode = FocusNode();
+  final _scrollController = ScrollController();
   bool _sending = false;
   PostCommentEntity? _replyingToComment;
+
+  String? get _currentUserId {
+    final auth = context.read<AuthBloc>().state;
+    if (auth is! AuthAuthenticated) return null;
+    return auth.user.id;
+  }
 
   @override
   void initState() {
@@ -49,6 +59,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
   @override
   void dispose() {
     _commentController.dispose();
+    _commentFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -217,6 +229,81 @@ class _PostDetailPageState extends State<PostDetailPage> {
     }
   }
 
+  Future<void> _toggleLike() async {
+    final uid = _currentUserId;
+    if (uid == null) return;
+    final prev = _post;
+    setState(() {
+      _post = _post.copyWith(
+        isLikedByMe: !_post.isLikedByMe,
+        likesCount: _post.isLikedByMe
+            ? (_post.likesCount - 1).clamp(0, 9999999)
+            : _post.likesCount + 1,
+      );
+    });
+    try {
+      await widget.postRepository.toggleLike(_post.id, uid);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _post = prev);
+    }
+  }
+
+  Future<void> _toggleRepost() async {
+    final uid = _currentUserId;
+    if (uid == null) return;
+    final prev = _post;
+    setState(() {
+      _post = _post.copyWith(
+        isRepostedByMe: !_post.isRepostedByMe,
+        repostsCount: _post.isRepostedByMe
+            ? (_post.repostsCount - 1).clamp(0, 9999999)
+            : _post.repostsCount + 1,
+      );
+    });
+    try {
+      await widget.postRepository.toggleRepost(_post.id, uid);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _post = prev);
+    }
+  }
+
+  Future<void> _sharePost() async {
+    final uid = _currentUserId;
+    if (uid == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы поделиться публикацией')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => PostShareSheet(
+        currentUserId: uid,
+        post: _post,
+        onAddToStory: () => context.push('/add-story'),
+      ),
+    );
+  }
+
+  Future<void> _focusCommentComposer() async {
+    if (!_scrollController.hasClients) {
+      _commentFocusNode.requestFocus();
+      return;
+    }
+    await _scrollController.animateTo(
+      _scrollController.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+    if (!mounted) return;
+    _commentFocusNode.requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
@@ -256,6 +343,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
         children: [
           Expanded(
             child: SingleChildScrollView(
+              controller: _scrollController,
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -311,8 +399,17 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       height: _post.displayImageUrls.length > 1 ? 340 : 320,
                       borderRadius: 12,
                       viewportFraction: _post.displayImageUrls.length > 1 ? 0.94 : 1,
+                      enableTapToOpenFullscreen: false,
                     ),
                   ],
+                  const SizedBox(height: 10),
+                  _PostEngagementRow(
+                    post: _post,
+                    onLike: _toggleLike,
+                    onComment: _focusCommentComposer,
+                    onRepost: _toggleRepost,
+                    onShare: _sharePost,
+                  ),
                   const SizedBox(height: 24),
                   Text(
                     'Комментарии (${_comments.length})',
@@ -390,6 +487,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                       Expanded(
                         child: TextField(
                           controller: _commentController,
+                          focusNode: _commentFocusNode,
                           decoration: InputDecoration(
                             hintText: _replyingToComment != null
                                 ? 'Написать ответ...'
@@ -430,6 +528,101 @@ class _PostDetailPageState extends State<PostDetailPage> {
     if (diff.inHours < 24) return '${diff.inHours} ч';
     if (diff.inDays < 7) return '${diff.inDays} дн';
     return '${dateTime.day}.${dateTime.month}.${dateTime.year}';
+  }
+}
+
+class _PostEngagementRow extends StatelessWidget {
+  const _PostEngagementRow({
+    required this.post,
+    required this.onLike,
+    required this.onComment,
+    required this.onRepost,
+    required this.onShare,
+  });
+
+  final PostEntity post;
+  final VoidCallback onLike;
+  final VoidCallback onComment;
+  final VoidCallback onRepost;
+  final VoidCallback onShare;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _ActionChip(
+          icon: post.isLikedByMe ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+          label: '${post.likesCount}',
+          color: post.isLikedByMe ? Colors.red : Colors.black87,
+          onTap: onLike,
+        ),
+        const SizedBox(width: 8),
+        _ActionChip(
+          icon: Icons.chat_bubble_outline_rounded,
+          label: '${post.commentsCount}',
+          color: Colors.black87,
+          onTap: onComment,
+        ),
+        const SizedBox(width: 8),
+        _ActionChip(
+          icon: post.isRepostedByMe ? Icons.repeat_rounded : Icons.repeat_outlined,
+          label: '${post.repostsCount}',
+          color: post.isRepostedByMe ? Colors.green : Colors.black87,
+          onTap: onRepost,
+        ),
+        const Spacer(),
+        _ActionChip(
+          icon: Icons.send_rounded,
+          label: 'Поделиться',
+          color: Colors.black87,
+          onTap: onShare,
+        ),
+      ],
+    );
+  }
+}
+
+class _ActionChip extends StatelessWidget {
+  const _ActionChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -547,10 +740,13 @@ class _PostVideoPlayer extends StatefulWidget {
 class _PostVideoPlayerState extends State<_PostVideoPlayer> {
   VideoPlayerController? _controller;
   bool _ready = false;
+  final GlobalVideoAudioState _audioState = GlobalVideoAudioState.instance;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_audioState.ensureLoaded());
+    _audioState.isMuted.addListener(_syncVolumeWithGlobalState);
     unawaited(_boot());
   }
 
@@ -564,6 +760,7 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
       }
       _controller = c;
       setState(() => _ready = true);
+      c.setVolume(_audioState.isMuted.value ? 0 : 1);
       c.play();
     } catch (_) {
       if (mounted) setState(() => _ready = false);
@@ -572,8 +769,16 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
 
   @override
   void dispose() {
+    _audioState.isMuted.removeListener(_syncVolumeWithGlobalState);
     unawaited(_controller?.dispose());
     super.dispose();
+  }
+
+  void _syncVolumeWithGlobalState() {
+    final c = _controller;
+    if (c == null || !_ready || !c.value.isInitialized) return;
+    c.setVolume(_audioState.isMuted.value ? 0 : 1);
+    if (mounted) setState(() {});
   }
 
   @override
@@ -612,6 +817,29 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
               ),
               child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 38),
             ),
+          Positioned(
+            right: 12,
+            bottom: 12,
+            child: GestureDetector(
+              onTap: () {
+                unawaited(_audioState.toggle());
+              },
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.black38,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Icon(
+                  _audioState.isMuted.value
+                      ? Icons.volume_off_rounded
+                      : Icons.volume_up_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

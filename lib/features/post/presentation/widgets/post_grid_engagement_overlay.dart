@@ -76,6 +76,22 @@ class PostGridEngagementOverlay extends StatelessWidget {
                   shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
                 ),
               ),
+              const SizedBox(width: 8),
+              const Icon(
+                Icons.repeat_rounded,
+                size: 12,
+                color: Colors.white,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                formatCompactCount(post.repostsCount),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+                ),
+              ),
               if (showViewCount) ...[
                 const Spacer(),
                 Icon(

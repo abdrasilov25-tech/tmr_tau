@@ -26,6 +26,7 @@ import '../../../notifications/presentation/widgets/notification_activity_peek_b
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
+import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../widgets/user_avatar_tap.dart';
 
 /// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
@@ -849,52 +850,15 @@ class _MainHomePageState extends State<MainHomePage> {
       );
       return;
     }
-
-    final pickedUser = await showModalBottomSheet<_UserRow>(
+    await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.black,
-      constraints: const BoxConstraints(maxWidth: 520),
-      builder: (ctx) => _ShareToUserSheet(
+      showDragHandle: true,
+      builder: (_) => PostShareSheet(
         currentUserId: _currentUserId!,
+        post: post,
+        onAddToStory: () => context.push('/add-story'),
       ),
-    );
-
-    if (pickedUser == null) return;
-    // Открываем чат.
-    if (!mounted) return;
-
-    // Реальная отправка сообщения в чат (так же, как это делает `ChatPage`).
-    // TODO: Чтобы это было «правильным» шеринговым типом, лучше хранить post_id отдельным полем.
-    final senderId = _currentUserId!;
-    final receiverId = pickedUser.userId;
-    debugPrint('[MainHomePage] share post=${post.id} to user=$receiverId');
-    String enc(String value) => Uri.encodeComponent(value);
-    final primaryImage = post.displayImageUrls.isNotEmpty
-        ? post.displayImageUrls.first
-        : '';
-    final shareText =
-        '__post__|${enc(post.id)}|${enc(primaryImage)}|${enc(post.caption.trim())}|'
-        '${enc(post.userName ?? 'Пользователь')}|${enc(post.videoUrl ?? '')}|'
-        '${post.likesCount}|${post.commentsCount}|${post.repostsCount}';
-    try {
-      await supa.Supabase.instance.client
-          .from(SupabaseConstants.messagesTable)
-          .insert({
-        'sender_id': senderId,
-        'receiver_id': receiverId,
-        'text': shareText,
-      });
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Не удалось отправить сообщение')),
-      );
-      return;
-    }
-    if (!mounted) return;
-    context.push(
-      '/chat/${pickedUser.userId}?name=${Uri.encodeComponent(pickedUser.name)}',
     );
   }
 
@@ -1625,6 +1589,7 @@ class _PostMedia extends StatelessWidget {
         height: fillHeight,
         borderRadius: 0,
         viewportFraction: imageUrls.length > 1 ? 0.9 : 1,
+        enableTapToOpenFullscreen: false,
       );
     }
 
@@ -2095,181 +2060,4 @@ class _PreviewPlaceholder extends StatelessWidget {
   }
 }
 
-class _UserRow {
-  const _UserRow({required this.userId, required this.name, this.avatarUrl});
-
-  final String userId;
-  final String name;
-  final String? avatarUrl;
-}
-
-class _ShareToUserSheet extends StatefulWidget {
-  const _ShareToUserSheet({required this.currentUserId});
-
-  final String currentUserId;
-
-  @override
-  State<_ShareToUserSheet> createState() => _ShareToUserSheetState();
-}
-
-class _ShareToUserSheetState extends State<_ShareToUserSheet> {
-  final _searchController = TextEditingController();
-  bool _loading = false;
-  String? _error;
-
-  List<_UserRow> _users = [];
-
-  Timer? _debounce;
-
-  @override
-  void initState() {
-    super.initState();
-    _load(''); // initial
-  }
-
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _load(String q) async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final client = supa.Supabase.instance.client;
-      final trimmed = q.trim();
-      final res = trimmed.isNotEmpty
-          ? await client
-              .from('users')
-              .select('id,name,avatar')
-              .neq('id', widget.currentUserId)
-              .ilike('name', '%$trimmed%')
-              .limit(20)
-          : await client
-              .from('users')
-              .select('id,name,avatar')
-              .neq('id', widget.currentUserId)
-              .limit(20);
-
-      final list = res as List<dynamic>;
-      final mapped = list.map((e) {
-        final m = e as Map<String, dynamic>;
-        return _UserRow(
-          userId: m['id'] as String,
-          name: (m['name'] as String?) ?? 'Пользователь',
-          avatarUrl: m['avatar'] as String?,
-        );
-      }).toList(growable: false);
-
-      if (!mounted) return;
-      setState(() {
-        _users = mapped;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 12,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  'Поделиться с другом',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 16),
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.of(context).pop(),
-              )
-            ],
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _searchController,
-            onChanged: (v) {
-              _debounce?.cancel();
-              _debounce = Timer(const Duration(milliseconds: 350), () => _load(v));
-            },
-            decoration: InputDecoration(
-              hintText: 'Поиск по имени...',
-              hintStyle: const TextStyle(color: Colors.white54),
-              filled: true,
-              fillColor: const Color(0xFF111827),
-              border: const OutlineInputBorder(),
-              prefixIcon: const Icon(Icons.search_rounded, color: Colors.white70),
-            ),
-            style: const TextStyle(color: Colors.white),
-          ),
-          const SizedBox(height: 12),
-          if (_loading)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: CircularProgressIndicator(),
-            )
-          else if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                'Ошибка: $_error',
-                style: const TextStyle(color: Colors.redAccent),
-              ),
-            )
-          else if (_users.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text(
-                'Никто не найден',
-                style: TextStyle(color: Colors.white70),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.separated(
-                itemCount: _users.length,
-                separatorBuilder: (_, _) => const Divider(color: Colors.white12, height: 1),
-                itemBuilder: (context, index) {
-                  final u = _users[index];
-                  return ListTile(
-                    leading: CachedAvatar(
-                      imageUrl: u.avatarUrl?.isNotEmpty == true ? u.avatarUrl : null,
-                      radius: 20,
-                      fallbackText: u.name,
-                    ),
-                    title: Text(
-                      u.name,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                    ),
-                    trailing: const Icon(Icons.chevron_right_rounded, color: Colors.white60),
-                    onTap: () => Navigator.of(context).pop(u),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
 

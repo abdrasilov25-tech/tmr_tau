@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:tmr_tau/core/media/cached_video_controller.dart';
+import 'package:tmr_tau/core/media/global_video_audio_state.dart';
 import 'package:video_player/video_player.dart';
 
 /// Управляемый видеоплеер для ленты публикаций.
@@ -54,10 +55,13 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   bool _initialized = false;
   bool _error = false;
   bool _showPlayIcon = false;
+  final GlobalVideoAudioState _audioState = GlobalVideoAudioState.instance;
 
   @override
   void initState() {
     super.initState();
+    unawaited(_audioState.ensureLoaded());
+    _audioState.isMuted.addListener(_syncVolumeWithGlobalState);
     unawaited(_initController());
   }
 
@@ -66,7 +70,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
       final controller = await createCachedVideoController(widget.videoUrl);
       await controller.initialize();
       controller.setLooping(widget.looping);
-      controller.setVolume(0);
+      controller.setVolume(_audioState.isMuted.value ? 0 : 1);
       if (!mounted) {
         await controller.dispose();
         return;
@@ -108,16 +112,20 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
 
   @override
   void dispose() {
+    _audioState.isMuted.removeListener(_syncVolumeWithGlobalState);
     _controller?.dispose();
     super.dispose();
   }
 
-  void _toggleMute() {
+  void _syncVolumeWithGlobalState() {
     final c = _controller;
-    if (!_initialized || c == null) return;
-    final isMuted = c.value.volume == 0;
-    c.setVolume(isMuted ? 1.0 : 0);
-    setState(() {});
+    if (c == null || !_initialized) return;
+    c.setVolume(_audioState.isMuted.value ? 0 : 1);
+    if (mounted) setState(() {});
+  }
+
+  void _toggleMute() {
+    unawaited(_audioState.toggle());
   }
 
   void _togglePlay() {
@@ -219,7 +227,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Icon(
-                    c.value.volume == 0
+                    _audioState.isMuted.value
                         ? Icons.volume_off_rounded
                         : Icons.volume_up_rounded,
                     color: Colors.white,

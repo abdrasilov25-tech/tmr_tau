@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
@@ -32,6 +33,47 @@ class _AddStoryPageState extends State<AddStoryPage> {
   static const int _maxVideoSeconds = 120;
 
   bool get _hasMedia => _image != null || _video != null;
+
+  Future<bool> _requestGalleryPermission({required bool forVideo}) async {
+    final statuses = forVideo
+        ? await [Permission.videos, Permission.photos].request()
+        : await [Permission.photos].request();
+    final ok = statuses.values.any((s) => s.isGranted || s.isLimited);
+    if (ok) return true;
+    if (!mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Разрешите доступ к галерее в настройках приложения')),
+    );
+    if (statuses.values.any((s) => s.isPermanentlyDenied)) {
+      await openAppSettings();
+    }
+    return false;
+  }
+
+  Future<bool> _requestCameraPermission({required bool includeMicrophone}) async {
+    final cameraStatus = await Permission.camera.request();
+    if (!cameraStatus.isGranted) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Разрешите доступ к камере в настройках приложения')),
+      );
+      if (cameraStatus.isPermanentlyDenied) {
+        await openAppSettings();
+      }
+      return false;
+    }
+    if (!includeMicrophone) return true;
+    final micStatus = await Permission.microphone.request();
+    if (micStatus.isGranted) return true;
+    if (!mounted) return false;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Для записи видео нужен доступ к микрофону')),
+    );
+    if (micStatus.isPermanentlyDenied) {
+      await openAppSettings();
+    }
+    return false;
+  }
 
   @override
   void dispose() {
@@ -81,6 +123,13 @@ class _AddStoryPageState extends State<AddStoryPage> {
       ),
     );
     if (source == null || !mounted) return;
+    if (source == ImageSource.gallery) {
+      final ok = await _requestGalleryPermission(forVideo: false);
+      if (!ok || !mounted) return;
+    } else {
+      final ok = await _requestCameraPermission(includeMicrophone: false);
+      if (!ok || !mounted) return;
+    }
     final picker = ImagePicker();
     final x = await picker.pickImage(source: source);
     if (x != null && mounted) {
@@ -137,6 +186,13 @@ class _AddStoryPageState extends State<AddStoryPage> {
       ),
     );
     if (source == null || !mounted) return;
+    if (source == ImageSource.gallery) {
+      final ok = await _requestGalleryPermission(forVideo: true);
+      if (!ok || !mounted) return;
+    } else {
+      final ok = await _requestCameraPermission(includeMicrophone: true);
+      if (!ok || !mounted) return;
+    }
     final picker = ImagePicker();
     final x = await picker.pickVideo(source: source);
     if (x == null || !mounted) return;

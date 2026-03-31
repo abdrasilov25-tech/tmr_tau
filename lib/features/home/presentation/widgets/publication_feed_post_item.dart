@@ -100,9 +100,9 @@ class PublicationFeedPostItem extends StatelessWidget {
           // ── Медиа (фото галерея или видео превью) ───────────
           _PostMedia(
             post: post,
-            onTap: () => post.videoUrl != null
-                ? _openVideoFeed(context)
-                : _openDetail(context),
+            onTap: post.videoUrl != null
+                ? () => _openVideoFeed(context)
+                : null,
             onDoubleTap: onLike,
           ),
 
@@ -316,12 +316,12 @@ class _OptionsMenu extends StatelessWidget {
 class _PostMedia extends StatefulWidget {
   const _PostMedia({
     required this.post,
-    required this.onTap,
+    this.onTap,
     this.onDoubleTap,
   });
 
   final PostEntity post;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
   final VoidCallback? onDoubleTap;
 
   @override
@@ -450,11 +450,11 @@ class _PostMediaState extends State<_PostMedia> {
 class _VideoThumbnail extends StatelessWidget {
   const _VideoThumbnail({
     required this.imageUrl,
-    required this.onTap,
+    this.onTap,
   });
 
   final String imageUrl;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {

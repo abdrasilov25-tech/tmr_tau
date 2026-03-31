@@ -13,12 +13,14 @@ class PostNetworkPhotoGallery extends StatefulWidget {
     this.height = 280,
     this.borderRadius = 8,
     this.viewportFraction = 1.0,
+    this.enableTapToOpenFullscreen = true,
   });
 
   final List<String> urls;
   final double height;
   final double borderRadius;
   final double viewportFraction;
+  final bool enableTapToOpenFullscreen;
 
   @override
   State<PostNetworkPhotoGallery> createState() => _PostNetworkPhotoGalleryState();
@@ -74,7 +76,9 @@ class _PostNetworkPhotoGalleryState extends State<PostNetworkPhotoGallery> {
               itemBuilder: (context, index) {
                 return _NetworkGallerySlide(
                   url: urls[index],
-                  onTap: () => _openZoom(index),
+                  onTap: widget.enableTapToOpenFullscreen
+                      ? () => _openZoom(index)
+                      : null,
                 );
               },
             ),
@@ -115,11 +119,11 @@ class _PostNetworkPhotoGalleryState extends State<PostNetworkPhotoGallery> {
 class _NetworkGallerySlide extends StatefulWidget {
   const _NetworkGallerySlide({
     required this.url,
-    required this.onTap,
+    this.onTap,
   });
 
   final String url;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   State<_NetworkGallerySlide> createState() => _NetworkGallerySlideState();
