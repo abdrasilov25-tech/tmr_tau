@@ -173,6 +173,15 @@ class _LoginPageState extends State<LoginPage>
   Widget _buildScrollContent() {
     return BlocConsumer<AuthBloc, AuthState>(
       listener: (context, state) {
+        if (state is AuthOAuthDismissed) {
+          if (_googleInProgress || _appleInProgress) {
+            setState(() {
+              _googleInProgress = false;
+              _appleInProgress = false;
+            });
+          }
+          return;
+        }
         if (state is! AuthLoading) {
           if (_googleInProgress || _appleInProgress) {
             setState(() {

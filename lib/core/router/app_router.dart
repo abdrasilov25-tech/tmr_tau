@@ -81,6 +81,26 @@ import '../../features/map/presentation/bloc/map_bloc.dart';
 import '../../features/map/presentation/pages/map_page.dart';
 import '../navigation/search_tab_activation_controller.dart';
 
+/// Deep link `tmrtau://auth/callback?...` в Dart — это [host]=auth и [path]=/callback,
+/// а не путь `/auth/callback`. Приводим к маршруту GoRouter.
+String? _normalizeTmrtauOAuthLocation(GoRouterState state) {
+  final uri = state.uri;
+  if (uri.scheme != 'tmrtau') return null;
+
+  if (uri.host == 'auth' &&
+      (uri.path == '/callback' || uri.path == 'callback')) {
+    final q = uri.query;
+    return q.isEmpty ? '/auth/callback' : '/auth/callback?$q';
+  }
+
+  if (uri.host.isEmpty && uri.path == '/auth/callback') {
+    final q = uri.query;
+    return q.isEmpty ? '/auth/callback' : '/auth/callback?$q';
+  }
+
+  return null;
+}
+
 Widget _shellNavCountBadge({required String label, required Widget icon}) {
   final show = label.isNotEmpty;
   return Badge(
@@ -125,6 +145,13 @@ class AppRouter {
   late final GoRouter router = GoRouter(
     initialLocation: '/',
     debugLogDiagnostics: false,
+    redirect: (context, state) {
+      final oauthPath = _normalizeTmrtauOAuthLocation(state);
+      if (oauthPath != null) {
+        return oauthPath;
+      }
+      return null;
+    },
     routes: [
       GoRoute(path: '/', builder: (context, state) => const SplashPage()),
       GoRoute(

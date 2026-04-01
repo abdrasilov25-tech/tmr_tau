@@ -23,6 +23,15 @@ final class AuthAuthenticated extends AuthState {
 
 final class AuthUnauthenticated extends AuthState {}
 
+/// Разовое событие после отмены OAuth: у [AuthUnauthenticated] повторный emit не
+/// уведомляет слушателей (Equatable), а локальные спиннеры на логине нужно сбросить.
+final class AuthOAuthDismissed extends AuthState {
+  const AuthOAuthDismissed(this.nonce);
+  final int nonce;
+  @override
+  List<Object?> get props => [nonce];
+}
+
 final class AuthPasswordResetSent extends AuthState {
   const AuthPasswordResetSent();
 }

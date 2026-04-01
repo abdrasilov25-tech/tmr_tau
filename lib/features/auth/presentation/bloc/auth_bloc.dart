@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
@@ -25,6 +26,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
 
   final AuthRepository _authRepository;
   final MultiAccountStorage _multiAccountStorage;
+
+  static int _oauthDismissNonce = 0;
 
   void _onCheckRequested(AuthCheckRequested event, Emitter<AuthState> emit) async {
     final stub = _authRepository.userFromCurrentSession();
@@ -72,6 +75,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   Future<void> _onSignInWithGoogleRequested(AuthSignInWithGoogleRequested event, Emitter<AuthState> emit) async {
+    // Не используем AuthLoading: иначе на экране входа крутятся и «Войти», и кнопка Google.
     try {
       await _authRepository.signInWithGoogle();
       final user = _authRepository.currentUser;
@@ -86,10 +90,24 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           ),
         );
         if (!isClosed) emit(AuthAuthenticated(user));
+        return;
+      }
+      if (!isClosed) {
+        emit(
+          const AuthError(
+            'Не удалось войти через Google: сессия не получена. Добавьте в Supabase '
+            '(Authentication → URL Configuration) тот же redirect, что в приложении '
+            '(по умолчанию tmrtau://auth/callback), и проверьте ключи GOOGLE_WEB_CLIENT_ID / '
+            'GOOGLE_IOS_CLIENT_ID в .env.',
+          ),
+        );
       }
     } catch (e) {
       if (_isOAuthCancelled(e)) {
-        if (!isClosed) emit(AuthUnauthenticated());
+        if (!isClosed) {
+          emit(AuthOAuthDismissed(++_oauthDismissNonce));
+          emit(_stateAfterOAuthCancel());
+        }
         return;
       }
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
@@ -114,14 +132,35 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           ),
         );
         if (!isClosed) emit(AuthAuthenticated(user));
+        return;
+      }
+      if (!isClosed) {
+        emit(
+          const AuthError(
+            'Не удалось войти через Apple: сессия не получена. Убедитесь, что Bundle ID '
+            'приложения совпадает с App ID в Apple Developer и что поставщик Apple в Supabase настроен.',
+          ),
+        );
       }
     } catch (e) {
       if (_isOAuthCancelled(e)) {
-        if (!isClosed) emit(AuthUnauthenticated());
+        if (!isClosed) {
+          emit(AuthOAuthDismissed(++_oauthDismissNonce));
+          emit(_stateAfterOAuthCancel());
+        }
         return;
       }
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
     }
+  }
+
+  /// После отмены OAuth сессия часто остаётся прежней (например с экрана привязки аккаунта).
+  AuthState _stateAfterOAuthCancel() {
+    final user = _authRepository.userFromCurrentSession();
+    if (user != null) {
+      return AuthAuthenticated(user, fromSessionOnly: true);
+    }
+    return AuthUnauthenticated();
   }
 
   Future<void> _onSignInWithSmsOtpRequested(
@@ -185,7 +224,25 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   }
 
   static String _authErrorMessage(Object e) {
-    final s = e.toString().toLowerCase();
+    final raw = e.toString();
+    final s = raw.toLowerCase();
+    if (s.contains('redirect_uri_mismatch')) {
+      final callback = OAuthEnvConfig.supabaseAuthV1CallbackUrl;
+      final tail = callback != null
+          ? 'Добавьте в Authorized redirect URIs: $callback'
+          : 'Добавьте в Authorized redirect URIs URL вида '
+              'https://<project-ref>.supabase.co/auth/v1/callback';
+      return 'Google: неверный redirect_uri ($tail). Web Client ID в Google Cloud '
+          'должен совпадать с Client ID в Supabase → Authentication → Google.';
+    }
+    if (s.contains('signup not allowed') ||
+        s.contains('sign up not allowed') ||
+        s.contains('signup_disabled') ||
+        s.contains('registration not') ||
+        raw.contains('регистрация')) {
+      return 'Вход отклонён сервером: проверьте, что в Supabase включён провайдер '
+          '(Google / Apple) и разрешена регистрация новых пользователей.';
+    }
     if (s.contains('email not confirmed') || s.contains('confirm your email')) {
       return 'Подтвердите email: проверьте почту и перейдите по ссылке из письма.';
     }

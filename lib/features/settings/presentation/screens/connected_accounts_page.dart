@@ -13,6 +13,8 @@ class ConnectedAccountsPage extends StatefulWidget {
 class _ConnectedAccountsPageState extends State<ConnectedAccountsPage> {
   final _phoneController = TextEditingController();
   final _tokenController = TextEditingController();
+  /// OAuth больше не переводит Bloc в AuthLoading — иначе ломается UX; крутилка только здесь.
+  bool _oauthBusy = false;
 
   @override
   void dispose() {
@@ -32,19 +34,36 @@ class _ConnectedAccountsPageState extends State<ConnectedAccountsPage> {
       ),
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
+          if (state is AuthOAuthDismissed) {
+            if (_oauthBusy && mounted) {
+              setState(() => _oauthBusy = false);
+            }
+            return;
+          }
           if (state is AuthError) {
+            if (_oauthBusy && mounted) {
+              setState(() => _oauthBusy = false);
+            }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(state.message)),
             );
           }
           if (state is AuthAuthenticated) {
-            // After successfully adding/connecting an account, just return.
+            if (_oauthBusy && mounted) {
+              setState(() => _oauthBusy = false);
+            }
+            // Отмена OAuth при уже залогиненном пользователе шлёт AuthAuthenticated(..., fromSessionOnly: true).
+            if (state.fromSessionOnly) return;
             final nav = Navigator.of(context);
             if (nav.canPop()) nav.pop();
+          }
+          if (state is AuthUnauthenticated && _oauthBusy && mounted) {
+            setState(() => _oauthBusy = false);
           }
         },
         builder: (context, state) {
           final authLoading = state is AuthLoading;
+          final oauthRowBusy = _oauthBusy;
           final smsState = state is AuthSmsOtpSent ? state : null;
 
           return ListView(
@@ -54,36 +73,42 @@ class _ConnectedAccountsPageState extends State<ConnectedAccountsPage> {
                 child: ListTile(
                   leading: const Icon(Icons.g_mobiledata_outlined),
                   title: const Text('Google'),
-                  trailing: authLoading
+                  trailing: oauthRowBusy
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.chevron_right_rounded),
-                  onTap: authLoading
+                  onTap: authLoading || oauthRowBusy
                       ? null
-                      : () => context
-                          .read<AuthBloc>()
-                          .add(const AuthSignInWithGoogleRequested()),
+                      : () {
+                          setState(() => _oauthBusy = true);
+                          context
+                              .read<AuthBloc>()
+                              .add(const AuthSignInWithGoogleRequested());
+                        },
                 ),
               ),
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.apple_outlined),
                   title: const Text('Apple'),
-                  trailing: authLoading
+                  trailing: oauthRowBusy
                       ? const SizedBox(
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.chevron_right_rounded),
-                  onTap: authLoading
+                  onTap: authLoading || oauthRowBusy
                       ? null
-                      : () => context
-                          .read<AuthBloc>()
-                          .add(const AuthSignInWithAppleRequested()),
+                      : () {
+                          setState(() => _oauthBusy = true);
+                          context
+                              .read<AuthBloc>()
+                              .add(const AuthSignInWithAppleRequested());
+                        },
                 ),
               ),
               const SizedBox(height: 10),

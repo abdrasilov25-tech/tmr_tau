@@ -53,6 +53,14 @@
 				<string>tmrtau</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.214192616041-o55e942jj0kjs9g33om332loaeomsg0q</string>
+			</array>
+		</dict>
 	</array>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Нам нужен доступ к фото, чтобы выбрать аватар и кастомную тему из галереи.</string>

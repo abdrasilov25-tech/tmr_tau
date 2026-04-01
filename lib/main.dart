@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter/foundation.dart';
 import 'app.dart';
 import 'core/accounts/account_repository.dart';
 import 'core/storage/chat_list_storage.dart';
@@ -17,7 +18,11 @@ Future<bool> _initializeSupabase(String url, String anonKey) async {
     await Supabase.initialize(
       url: url,
       anonKey: anonKey,
-      debug: false,
+      debug: kDebugMode,
+      authOptions: FlutterAuthClientOptions(
+        authFlowType: AuthFlowType.pkce,
+        detectSessionInUri: true,
+      ),
     );
     return true;
   } catch (e, st) {

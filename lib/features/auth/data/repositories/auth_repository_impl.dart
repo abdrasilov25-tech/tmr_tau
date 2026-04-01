@@ -1,9 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:math';
 
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_remote_datasource.dart';
+import '../../../../core/auth/oauth_foreground_signal.dart';
 import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/constants/supabase_constants.dart';
 
@@ -112,29 +118,42 @@ class AuthRepositoryImpl implements AuthRepository {
       'prompt': 'select_account',
     };
     final webClientId = OAuthEnvConfig.googleWebClientId;
-    if (webClientId.isNotEmpty) {
+    // На iOS лишний/несовпадающий client_id в query ломает OAuth; для мобильных
+    // достаточно настроек провайдера в Supabase Dashboard.
+    final attachWebClientId =
+        kIsWeb ||
+        (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
+    if (attachWebClientId && webClientId.isNotEmpty) {
       queryParams['client_id'] = webClientId;
     }
     final launched = await _client.auth.signInWithOAuth(
       OAuthProvider.google,
       redirectTo: OAuthEnvConfig.redirectTo,
       queryParams: queryParams,
+      // iOS: иначе часто открывается SFSafariViewController — приложение остаётся
+      // в [resumed], не приходит paused → не срабатывает быстрый сброс при отмене.
+      authScreenLaunchMode: (!kIsWeb &&
+              (defaultTargetPlatform == TargetPlatform.iOS ||
+                  defaultTargetPlatform == TargetPlatform.macOS))
+          ? LaunchMode.externalApplication
+          : LaunchMode.platformDefault,
     );
-    if (!launched) return;
+    if (!launched) {
+      throw const AuthException('Не удалось открыть окно входа Google.');
+    }
     final authUser = await _waitForOAuthUser();
-    final uid = authUser?.id;
-    if (uid == null) return;
+    final uid = authUser.id;
     _cachedUser = await _dataSource.fetchUserProfile(uid);
     if (_cachedUser == null) {
       try {
-        await _ensureUserRow(uid, authUser?.email ?? '', _getName(authUser) ?? '');
+        await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
         _cachedUser = await _dataSource.fetchUserProfile(uid);
       } catch (_) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
       _cachedUser ??= AppUser(
         id: uid,
-        email: authUser?.email ?? '',
+        email: authUser.email ?? '',
         name: _getName(authUser),
         followersCount: 0,
       );
@@ -143,25 +162,38 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<void> signInWithApple() async {
+    if (!kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.iOS ||
+            defaultTargetPlatform == TargetPlatform.macOS)) {
+      await _signInWithAppleNative();
+      return;
+    }
+
     final launched = await _client.auth.signInWithOAuth(
       OAuthProvider.apple,
       redirectTo: OAuthEnvConfig.redirectTo,
+      authScreenLaunchMode: (!kIsWeb &&
+              (defaultTargetPlatform == TargetPlatform.iOS ||
+                  defaultTargetPlatform == TargetPlatform.macOS))
+          ? LaunchMode.externalApplication
+          : LaunchMode.platformDefault,
     );
-    if (!launched) return;
+    if (!launched) {
+      throw const AuthException('Не удалось открыть окно входа Apple.');
+    }
     final authUser = await _waitForOAuthUser();
-    final uid = authUser?.id;
-    if (uid == null) return;
+    final uid = authUser.id;
     _cachedUser = await _dataSource.fetchUserProfile(uid);
     if (_cachedUser == null) {
       try {
-        await _ensureUserRow(uid, authUser?.email ?? '', _getName(authUser) ?? '');
+        await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
         _cachedUser = await _dataSource.fetchUserProfile(uid);
       } catch (_) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
       _cachedUser ??= AppUser(
         id: uid,
-        email: authUser?.email ?? '',
+        email: authUser.email ?? '',
         name: _getName(authUser),
         followersCount: 0,
       );
@@ -236,22 +268,146 @@ class AuthRepositoryImpl implements AuthRepository {
     await _dataSource.signOut();
   }
 
-  Future<User?> _waitForOAuthUser({Duration timeout = const Duration(seconds: 20)}) async {
+  /// Ожидание сессии после [signInWithOAuth]. При возврате в приложение без сессии
+  /// (закрыли Safari) — быстро завершаем, не дожидаясь [timeout].
+  Future<User> _waitForOAuthUser({
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
     final existing = _client.auth.currentUser;
     if (existing != null) return existing;
 
-    final completer = Completer<User?>();
-    late final StreamSubscription<AuthState> sub;
-    sub = _client.auth.onAuthStateChange.listen((event) {
+    final completer = Completer<User>();
+    var resumeEpoch = 0;
+
+    Future<void> afterForegroundReturn(int epoch) async {
+      // Сразу проверяем сессию, затем короткий опрос (успешный deep link обычно < 1–2 с).
+      for (var i = 0; i < 20; i++) {
+        if (completer.isCompleted || epoch != resumeEpoch) return;
+        if (i > 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 100));
+        }
+        final u = _client.auth.currentUser ?? _client.auth.currentSession?.user;
+        if (u != null) {
+          if (!completer.isCompleted) completer.complete(u);
+          return;
+        }
+      }
+      if (!completer.isCompleted && epoch == resumeEpoch) {
+        completer.completeError(
+          const AuthException('Sign-in canceled'),
+        );
+      }
+    }
+
+    late final StreamSubscription<AuthState> authSub;
+    authSub = _client.auth.onAuthStateChange.listen((event) {
       final user = event.session?.user ?? _client.auth.currentUser;
       if (user != null && !completer.isCompleted) {
         completer.complete(user);
       }
     });
+
+    late final StreamSubscription<void> resumeSub;
+    resumeSub = OAuthForegroundSignal.instance.stream.listen((_) {
+      resumeEpoch++;
+      final epoch = resumeEpoch;
+      unawaited(afterForegroundReturn(epoch));
+    });
+
     try {
-      return await completer.future.timeout(timeout, onTimeout: () => _client.auth.currentUser);
+      return await completer.future.timeout(
+        timeout,
+        onTimeout: () => throw AuthException(_oauthWaitTimeoutMessage(timeout)),
+      );
     } finally {
-      await sub.cancel();
+      await authSub.cancel();
+      await resumeSub.cancel();
+    }
+  }
+
+  String _oauthWaitTimeoutMessage(Duration timeout) {
+    final googleHint = OAuthEnvConfig.supabaseAuthV1CallbackUrl;
+    final buf = StringBuffer(
+      'Вход не завершён за ${timeout.inSeconds} с. '
+      'В Supabase добавьте ${OAuthEnvConfig.redirectTo} и проверьте схему tmrtau в iOS. ',
+    );
+    if (googleHint != null) {
+      buf.write('Для Google redirect_uri (Web client): $googleHint');
+    }
+    return buf.toString();
+  }
+
+  String _generateRawNonce([int length = 32]) {
+    const chars =
+        '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-._';
+    final rand = Random.secure();
+    return List.generate(length, (_) => chars[rand.nextInt(chars.length)]).join();
+  }
+
+  Future<void> _signInWithAppleNative() async {
+    if (!await SignInWithApple.isAvailable()) {
+      throw const AuthException('Sign in with Apple недоступен на этом устройстве.');
+    }
+
+    final rawNonce = _generateRawNonce();
+    final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
+
+    final credential = await SignInWithApple.getAppleIDCredential(
+      scopes: [
+        AppleIDAuthorizationScopes.email,
+        AppleIDAuthorizationScopes.fullName,
+      ],
+      nonce: hashedNonce,
+    );
+
+    final idToken = credential.identityToken;
+    if (idToken == null || idToken.isEmpty) {
+      throw const AuthException(
+        'Apple не вернул токен. Проверьте capability Sign in with Apple в Xcode.',
+      );
+    }
+
+    await _client.auth.signInWithIdToken(
+      provider: OAuthProvider.apple,
+      idToken: idToken,
+      accessToken: credential.authorizationCode,
+      nonce: rawNonce,
+    );
+
+    final authUser = _client.auth.currentUser;
+    final uid = authUser?.id;
+    if (uid == null) {
+      throw const AuthException('Сессия Apple не создана.');
+    }
+
+    final gn = credential.givenName ?? '';
+    final fn = credential.familyName ?? '';
+    final combinedName = [gn, fn].where((s) => s.isNotEmpty).join(' ').trim();
+    if (combinedName.isNotEmpty && (authUser?.userMetadata?['name'] == null)) {
+      try {
+        await _client.auth.updateUser(
+          UserAttributes(data: {'name': combinedName, 'full_name': combinedName}),
+        );
+      } catch (_) {}
+    }
+
+    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    if (_cachedUser == null) {
+      try {
+        await _ensureUserRow(
+          uid,
+          authUser?.email ?? '',
+          combinedName.isNotEmpty ? combinedName : (_getName(authUser) ?? ''),
+        );
+        _cachedUser = await _dataSource.fetchUserProfile(uid);
+      } catch (_) {}
+      _cachedUser ??= AppUser(
+        id: uid,
+        email: authUser?.email ?? '',
+        name: _getName(_client.auth.currentUser) ??
+            (combinedName.isNotEmpty ? combinedName : null),
+        followersCount: 0,
+      );
     }
   }
 }

@@ -16,6 +16,7 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/domain/theme_repository.dart';
 import 'core/theme/data/theme_repository_impl.dart';
 import 'core/theme/theme_index_notifier.dart';
+import 'core/auth/oauth_foreground_signal.dart';
 import 'core/router/app_router.dart';
 import 'core/navigation/search_tab_activation_controller.dart';
 import 'core/services/geo_service.dart';
@@ -84,7 +85,7 @@ class TmrTauApp extends StatefulWidget {
   State<TmrTauApp> createState() => _TmrTauAppState();
 }
 
-class _TmrTauAppState extends State<TmrTauApp> {
+class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   late final supa.SupabaseClient _client;
   late final AuthRepository _authRepository;
   late final ProductRepository _productRepository;
@@ -114,6 +115,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (!widget.supabaseInitialized) {
       return;
     }
@@ -165,8 +167,24 @@ class _TmrTauAppState extends State<TmrTauApp> {
     );
   }
 
+  /// Предыдущее состояние жизненного цикла (для OAuth: iOS часто не шлёт [paused]
+  /// при in-app Safari, но шлёт [inactive] при уходе во внешний браузер / шите).
+  AppLifecycleState? _previousAppLifecycle;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final prev = _previousAppLifecycle;
+    _previousAppLifecycle = state;
+    if (state == AppLifecycleState.resumed &&
+        prev != null &&
+        prev != AppLifecycleState.resumed) {
+      OAuthForegroundSignal.instance.notifyForegroundAfterBackground();
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _chatUnreadBadgeController?.dispose();
     _notificationTabBadgeController?.dispose();
     _notificationActivityPeekBus?.dispose();
