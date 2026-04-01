@@ -69,6 +69,8 @@ node_modules/
 
 # Firebase iOS local config (avoid committing project keys)
 ios/Runner/GoogleService-Info.plist
+# Firebase Android local config (avoid committing project keys)
+android/app/google-services.json
 
 # Supabase CLI cache
 supabase/.temp/
