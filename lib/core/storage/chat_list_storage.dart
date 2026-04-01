@@ -32,6 +32,8 @@ class ChatListStorage {
 
   String _cityChatRulesKey(String groupId) =>
       '${_base}city_rules_seen_${groupId.trim()}';
+  String _groupThreadReadKey(String groupId, String threadId) =>
+      '${_base}group_thread_read_${groupId.trim()}_${threadId.trim()}';
 
   /// Id для префиксов read/accepted/…: у тредов `direct:uuid` это часть после `:`.
   String _prefsPeerIdFromThreadKey(String storageKeyOrPeerId) {
@@ -94,6 +96,23 @@ class ChatListStorage {
   Future<void> setSeenCityChatRules(String groupId) async {
     if (_activeAccountId.isEmpty) return;
     await _prefs.setBool(_cityChatRulesKey(groupId), true);
+  }
+
+  DateTime? getLastReadAtForGroupThread(String groupId, String threadId) {
+    final millis = _prefs.getInt(_groupThreadReadKey(groupId, threadId));
+    return millis != null ? DateTime.fromMillisecondsSinceEpoch(millis) : null;
+  }
+
+  Future<void> setLastReadAtForGroupThread(
+    String groupId,
+    String threadId,
+    DateTime at,
+  ) async {
+    if (_activeAccountId.isEmpty) return;
+    await _prefs.setInt(
+      _groupThreadReadKey(groupId, threadId),
+      at.millisecondsSinceEpoch,
+    );
   }
 
   bool isDeclined(String peerId) {

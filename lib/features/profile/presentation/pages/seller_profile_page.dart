@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/formatting/compact_count_format.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/app_error_view.dart';
@@ -26,10 +27,17 @@ import '../../domain/repositories/profile_repository.dart';
 import '../bloc/profile_bloc.dart';
 import '../../../settings/data/repositories/settings_repository_impl.dart';
 
-class SellerProfilePage extends StatelessWidget {
+class SellerProfilePage extends StatefulWidget {
   const SellerProfilePage({super.key, required this.sellerId});
 
   final String sellerId;
+
+  @override
+  State<SellerProfilePage> createState() => _SellerProfilePageState();
+}
+
+class _SellerProfilePageState extends State<SellerProfilePage> {
+  bool _actionsSheetOpen = false;
 
   String _profileUrl(String userId) => 'https://tmr-tau.app/profile/$userId';
 
@@ -38,7 +46,7 @@ class SellerProfilePage extends StatelessWidget {
         .from('blocked_users')
         .select('blocked_user_id')
         .eq('blocker_id', currentUserId)
-        .eq('blocked_user_id', sellerId)
+        .eq('blocked_user_id', widget.sellerId)
         .maybeSingle();
     return row != null;
   }
@@ -48,13 +56,13 @@ class SellerProfilePage extends StatelessWidget {
         .from(SupabaseConstants.followersTable)
         .select('follower_id')
         .eq('follower_id', currentUserId)
-        .eq('following_id', sellerId)
+        .eq('following_id', widget.sellerId)
         .maybeSingle();
     if (meFollowsPeer == null) return false;
     final peerFollowsMe = await Supabase.instance.client
         .from(SupabaseConstants.followersTable)
         .select('follower_id')
-        .eq('follower_id', sellerId)
+        .eq('follower_id', widget.sellerId)
         .eq('following_id', currentUserId)
         .maybeSingle();
     return peerFollowsMe != null;
@@ -67,7 +75,7 @@ class SellerProfilePage extends StatelessWidget {
         .from(SupabaseConstants.hiddenStoriesTable)
         .select('hidden_user_id')
         .eq('owner_id', current)
-        .eq('hidden_user_id', sellerId)
+        .eq('hidden_user_id', widget.sellerId)
         .maybeSingle();
     return row != null;
   }
@@ -78,13 +86,13 @@ class SellerProfilePage extends StatelessWidget {
     if (hide) {
       await Supabase.instance.client
           .from(SupabaseConstants.hiddenStoriesTable)
-          .upsert({'owner_id': current, 'hidden_user_id': sellerId});
+          .upsert({'owner_id': current, 'hidden_user_id': widget.sellerId});
     } else {
       await Supabase.instance.client
           .from(SupabaseConstants.hiddenStoriesTable)
           .delete()
           .eq('owner_id', current)
-          .eq('hidden_user_id', sellerId);
+          .eq('hidden_user_id', widget.sellerId);
     }
   }
 
@@ -94,17 +102,23 @@ class SellerProfilePage extends StatelessWidget {
   ) async {
     final repo = SettingsRepositoryImpl(Supabase.instance.client);
     if (currentlyBlocked) {
-      await repo.unblockUser(blockerId: currentUserId, blockedUserId: sellerId);
+      await repo.unblockUser(
+        blockerId: currentUserId,
+        blockedUserId: widget.sellerId,
+      );
       return;
     }
-    await repo.blockUser(blockerId: currentUserId, blockedUserId: sellerId);
+    await repo.blockUser(
+      blockerId: currentUserId,
+      blockedUserId: widget.sellerId,
+    );
   }
 
   Future<void> _removeFollower(String currentUserId) async {
     await Supabase.instance.client
         .from(SupabaseConstants.followersTable)
         .delete()
-        .eq('follower_id', sellerId)
+        .eq('follower_id', widget.sellerId)
         .eq('following_id', currentUserId);
   }
 
@@ -183,7 +197,7 @@ class SellerProfilePage extends StatelessWidget {
     try {
       switch (selected) {
         case 'block':
-          await _toggleBlockUser(currentUserId, blocked);
+        await _toggleBlockUser(currentUserId, blocked);
           messenger.showSnackBar(
             SnackBar(
               content: Text(
@@ -213,14 +227,14 @@ class SellerProfilePage extends StatelessWidget {
           );
           break;
         case 'copy_url':
-          final url = _profileUrl(sellerId);
+          final url = _profileUrl(widget.sellerId);
           await Clipboard.setData(ClipboardData(text: url));
           messenger.showSnackBar(
             const SnackBar(content: Text('Ссылка скопирована')),
           );
           break;
         case 'share':
-          final url = _profileUrl(sellerId);
+          final url = _profileUrl(widget.sellerId);
           await SharePlus.instance.share(ShareParams(text: url));
           break;
       }
@@ -240,18 +254,31 @@ class SellerProfilePage extends StatelessWidget {
     return BlocProvider(
       create: (c) =>
           ProfileBloc(c.read<ProfileRepository>())
-            ..add(ProfileLoadRequested(sellerId, currentUserId: currentUserId)),
+            ..add(
+              ProfileLoadRequested(widget.sellerId, currentUserId: currentUserId),
+            ),
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Профиль'),
           actions: [
-            if (currentUserId != null && currentUserId != sellerId)
+            if (currentUserId != null && currentUserId != widget.sellerId)
               IconButton(
                 icon: const Icon(Icons.more_horiz),
-                onPressed: () => _showProfileActionsSheet(
-                  context,
-                  currentUserId: currentUserId,
-                ),
+                onPressed: _actionsSheetOpen
+                    ? null
+                    : () async {
+                        setState(() => _actionsSheetOpen = true);
+                        try {
+                          await _showProfileActionsSheet(
+                            context,
+                            currentUserId: currentUserId,
+                          );
+                        } finally {
+                          if (mounted) {
+                            setState(() => _actionsSheetOpen = false);
+                          }
+                        }
+                      },
               ),
           ],
         ),
@@ -262,7 +289,7 @@ class SellerProfilePage extends StatelessWidget {
               return AppErrorView(
                 message: state.message,
                 onRetry: () => context.read<ProfileBloc>().add(
-                  ProfileLoadRequested(sellerId),
+                  ProfileLoadRequested(widget.sellerId),
                 ),
               );
             }
@@ -296,6 +323,43 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
   /// Подписчик подписан на вас, а вы на него ещё нет (как подпись в Instagram).
   bool _peerFollowsMe = false;
   List<SellerProfileEntity> _commonFollowers = const [];
+
+  String? _normalizeInstagramUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    final handle = value.replaceFirst('@', '');
+    if (handle.isEmpty) return null;
+    return 'https://instagram.com/$handle';
+  }
+
+  String? _normalizeTelegramUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    final handle = value.replaceFirst('@', '');
+    if (handle.isEmpty) return null;
+    return 'https://t.me/$handle';
+  }
+
+  String? _normalizeWebsiteUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    return 'https://$value';
+  }
+
+  Future<void> _openExternal(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 
   @override
   void initState() {
@@ -604,6 +668,36 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                               ),
                           textAlign: TextAlign.center,
                         ),
+                      ),
+                    ],
+                    if (_normalizeInstagramUrl(profile.instagramUrl) != null ||
+                        _normalizeTelegramUrl(profile.telegramUsername) != null ||
+                        _normalizeWebsiteUrl(profile.websiteUrl) != null) ...[
+                      const SizedBox(height: 10),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (_normalizeInstagramUrl(profile.instagramUrl) case final instagram?)
+                            _SellerProfileSocialChip(
+                              icon: Icons.camera_alt_outlined,
+                              label: 'Instagram',
+                              onTap: () => _openExternal(instagram),
+                            ),
+                          if (_normalizeTelegramUrl(profile.telegramUsername) case final telegram?)
+                            _SellerProfileSocialChip(
+                              icon: Icons.send_outlined,
+                              label: 'Telegram',
+                              onTap: () => _openExternal(telegram),
+                            ),
+                          if (_normalizeWebsiteUrl(profile.websiteUrl) case final website?)
+                            _SellerProfileSocialChip(
+                              icon: Icons.language_outlined,
+                              label: 'Website',
+                              onTap: () => _openExternal(website),
+                            ),
+                        ],
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -1103,6 +1197,56 @@ class _SellerTikTokStat extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _SellerProfileSocialChip extends StatelessWidget {
+  const _SellerProfileSocialChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: const Color(0xFF111827)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF111827),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

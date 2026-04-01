@@ -55,6 +55,8 @@ import 'features/map/data/repositories/map_repository_impl.dart';
 import 'features/map/domain/repositories/map_repository.dart';
 import 'features/orders/data/repositories/orders_repository_impl.dart';
 import 'features/orders/domain/repositories/orders_repository.dart';
+import 'features/live_battle/data/repositories/live_battle_repository_impl.dart';
+import 'features/live_battle/domain/repositories/live_battle_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -98,6 +100,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final SettingsRepository _settingsRepository;
   late final MapRepository _mapRepository;
   late final OrdersRepository _ordersRepository;
+  late final LiveBattleRepository _liveBattleRepository;
   late final AppRouter _appRouter;
   late final GeoService _geoService;
   late final SearchTabActivationController _searchTabActivation;
@@ -142,6 +145,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _postRepository = PostRepositoryImpl(_client);
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
     _ordersRepository = OrdersRepositoryImpl(_client);
+    _liveBattleRepository = LiveBattleRepositoryImpl(_client);
     _geoService = const GeoService();
     _searchTabActivation = SearchTabActivationController();
     _accountManager = AccountManager(
@@ -242,6 +246,9 @@ class _TmrTauAppState extends State<TmrTauApp> {
         ),
         RepositoryProvider<MapRepository>.value(value: _mapRepository),
         RepositoryProvider<OrdersRepository>.value(value: _ordersRepository),
+        RepositoryProvider<LiveBattleRepository>.value(
+          value: _liveBattleRepository,
+        ),
         RepositoryProvider<GeoService>.value(value: _geoService),
         ChangeNotifierProvider<SearchTabActivationController>.value(
           value: _searchTabActivation,

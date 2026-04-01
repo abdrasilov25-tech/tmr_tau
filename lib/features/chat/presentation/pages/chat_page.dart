@@ -1,12 +1,19 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:video_player/video_player.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/theme/themed_content_surface.dart';
@@ -55,6 +62,14 @@ class _ChatPageState extends State<ChatPage> {
   final Set<String> _selectedMessageIds = <String>{};
   List<Map<String, dynamic>> _latestDialogMessages = const [];
 
+  // ── Голосовые сообщения ────────────────────────────────────
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  bool _isRecordingVoice = false;
+  int _voiceRecordSeconds = 0;
+  Timer? _voiceTimer;
+  // Переключение кнопки send/mic/camera в зависимости от ввода
+  final ValueNotifier<bool> _textHasContent = ValueNotifier<bool>(false);
+
   @override
   void initState() {
     super.initState();
@@ -90,6 +105,9 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _textHasContent.dispose();
+    _voiceTimer?.cancel();
+    _audioRecorder.dispose();
     _controller.dispose();
     _messagesScrollController.dispose();
     super.dispose();
@@ -730,6 +748,10 @@ class _ChatPageState extends State<ChatPage> {
                           final messageId = (m['id'] ?? '').toString();
                           final senderId = m['sender_id'] as String?;
                           final text = m['text'] as String? ?? '';
+                          final msgType = (m['message_type'] as String?) ?? 'text';
+                          final audioUrl = m['audio_url'] as String?;
+                          final videoUrl = m['video_url'] as String?;
+                          final durationSec = (m['duration_seconds'] as int?) ?? 0;
                           final structured = _parseStoryDirectMessage(text);
                           final postStructured = _parsePostDirectMessage(text);
                           final isMe = senderId == me;
@@ -752,29 +774,52 @@ class _ChatPageState extends State<ChatPage> {
                                   : null,
                               child: Container(
                                 margin: const EdgeInsets.symmetric(vertical: 4),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 8,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isSelected
-                                      ? Theme.of(context)
-                                          .colorScheme
-                                          .secondaryContainer
-                                      : isMe
-                                          ? Theme.of(context).colorScheme.primary
-                                          : Colors.grey.shade200,
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: isSelected
-                                      ? Border.all(
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
-                                          width: 1.2,
-                                        )
-                                      : null,
-                                ),
-                                child: postStructured != null
+                                padding: msgType == 'video_circle'
+                                    ? EdgeInsets.zero
+                                    : const EdgeInsets.symmetric(
+                                        horizontal: 12, vertical: 8),
+                                decoration: msgType == 'video_circle'
+                                    ? null
+                                    : BoxDecoration(
+                                        color: isSelected
+                                            ? Theme.of(context)
+                                                .colorScheme
+                                                .secondaryContainer
+                                            : msgType == 'audio'
+                                                ? (isMe
+                                                    ? Theme.of(context)
+                                                        .colorScheme
+                                                        .primary
+                                                    : Colors.grey.shade200)
+                                                : isMe
+                                                    ? Theme.of(context)
+                                                        .colorScheme
+                                                        .primary
+                                                    : Colors.grey.shade200,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: isSelected
+                                            ? Border.all(
+                                                color: Theme.of(context)
+                                                    .colorScheme
+                                                    .primary,
+                                                width: 1.2,
+                                              )
+                                            : null,
+                                      ),
+                                child: msgType == 'audio' && audioUrl != null
+                                  ? _VoiceMessageBubble(
+                                      key: ValueKey('audio_$messageId'),
+                                      audioUrl: audioUrl,
+                                      durationSeconds: durationSec,
+                                      isMe: isMe,
+                                    )
+                                  : msgType == 'video_circle' && videoUrl != null
+                                  ? _RoundVideoBubble(
+                                      key: ValueKey('video_$messageId'),
+                                      videoUrl: videoUrl,
+                                      isMe: isMe,
+                                    )
+                                  : postStructured != null
                                   ? _PostLinkedChatBubble(
                                       message: postStructured,
                                       isMe: isMe,
@@ -856,6 +901,7 @@ class _ChatPageState extends State<ChatPage> {
                       child: Padding(
                       padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Expanded(
                             child: TextField(
@@ -863,6 +909,8 @@ class _ChatPageState extends State<ChatPage> {
                               minLines: 1,
                               maxLines: 5,
                               textInputAction: TextInputAction.send,
+                              onChanged: (v) =>
+                                  _textHasContent.value = v.trim().isNotEmpty,
                               onSubmitted: (_) => _sendMessage(),
                               decoration: const InputDecoration(
                                 hintText: 'Сообщение',
@@ -872,16 +920,43 @@ class _ChatPageState extends State<ChatPage> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          IconButton.filled(
-                            onPressed: _sending ? null : _sendMessage,
-                            icon: _sending
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child:
-                                        CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.send),
+                          ValueListenableBuilder<bool>(
+                            valueListenable: _textHasContent,
+                            builder: (_, hasContent, unused) {
+                              if (hasContent || _sending) {
+                                return IconButton.filled(
+                                  onPressed: _sending ? null : _sendMessage,
+                                  icon: _sending
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                              strokeWidth: 2),
+                                        )
+                                      : const Icon(Icons.send),
+                                );
+                              }
+                              // Голосовое + круглое видео
+                              return Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Круглое видео
+                                  IconButton(
+                                    onPressed: _pickAndSendRoundVideo,
+                                    tooltip: 'Видеосообщение',
+                                    icon: const Icon(Icons.videocam_rounded),
+                                  ),
+                                  // Голосовое (удержать)
+                                  _VoiceMicButton(
+                                    isRecording: _isRecordingVoice,
+                                    seconds: _voiceRecordSeconds,
+                                    onHoldStart: _startVoiceRecording,
+                                    onHoldEnd: _stopVoiceRecording,
+                                    onHoldCancel: _cancelVoiceRecording,
+                                  ),
+                                ],
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -959,6 +1034,163 @@ class _ChatPageState extends State<ChatPage> {
         );
       },
     );
+  }
+
+  // ── Голосовые сообщения ────────────────────────────────────
+
+  Future<void> _startVoiceRecording() async {
+    final status = await Permission.microphone.request();
+    if (!status.isGranted || !mounted) return;
+    final dir = await getTemporaryDirectory();
+    final path =
+        '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    try {
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.aacLc,
+          bitRate: 128000,
+          sampleRate: 44100,
+        ),
+        path: path,
+      );
+    } on MissingPluginException {
+      _showVoicePluginMissing();
+      return;
+    } catch (_) {
+      return;
+    }
+    _voiceRecordSeconds = 0;
+    _voiceTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _voiceRecordSeconds++);
+    });
+    if (mounted) setState(() => _isRecordingVoice = true);
+  }
+
+  Future<void> _stopVoiceRecording() async {
+    if (!_isRecordingVoice) return;
+    _voiceTimer?.cancel();
+    String? path;
+    try {
+      path = await _audioRecorder.stop();
+    } on MissingPluginException {
+      _showVoicePluginMissing();
+      return;
+    }
+    final secs = _voiceRecordSeconds;
+    if (mounted) setState(() => _isRecordingVoice = false);
+    if (path == null || secs < 1 || !mounted) return;
+    await _uploadAndSendVoice(File(path), secs);
+  }
+
+  Future<void> _cancelVoiceRecording() async {
+    if (!_isRecordingVoice) return;
+    _voiceTimer?.cancel();
+    try {
+      await _audioRecorder.stop();
+    } on MissingPluginException {
+      _showVoicePluginMissing();
+      return;
+    }
+    if (mounted) setState(() => _isRecordingVoice = false);
+  }
+
+  void _showVoicePluginMissing() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Голосовые временно недоступны на этой сборке приложения'),
+      ),
+    );
+  }
+
+  Future<void> _uploadAndSendVoice(File file, int durationSeconds) async {
+    final uid = _me();
+    if (uid == null || !mounted) return;
+    setState(() => _sending = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final uploadPath = '$uid/${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _client.storage.from('chat_media').uploadBinary(
+        uploadPath,
+        bytes,
+        fileOptions:
+            const FileOptions(contentType: 'audio/m4a', upsert: false),
+      );
+      final url =
+          _client.storage.from('chat_media').getPublicUrl(uploadPath);
+      await _client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': '',
+        'message_type': 'audio',
+        'audio_url': url,
+        'duration_seconds': durationSeconds,
+      });
+      _forceScrollToLatest = true;
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось отправить голосовое: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  // ── Круглые видео ──────────────────────────────────────────
+
+  Future<void> _pickAndSendRoundVideo() async {
+    final camStatus = await Permission.camera.request();
+    final micStatus = await Permission.microphone.request();
+    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) return;
+
+    final picker = ImagePicker();
+    final xFile = await picker.pickVideo(
+      source: ImageSource.camera,
+      maxDuration: const Duration(seconds: 60),
+    );
+    if (xFile == null || !mounted) return;
+
+    final file = File(xFile.path);
+    int durationSec = 0;
+    try {
+      final ctrl = VideoPlayerController.file(file);
+      await ctrl.initialize();
+      durationSec = ctrl.value.duration.inSeconds;
+      await ctrl.dispose();
+    } catch (_) {}
+
+    setState(() => _sending = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final uploadPath =
+          '${_me()}/${DateTime.now().millisecondsSinceEpoch}.mp4';
+      await _client.storage.from('chat_media').uploadBinary(
+        uploadPath,
+        bytes,
+        fileOptions:
+            const FileOptions(contentType: 'video/mp4', upsert: false),
+      );
+      final url =
+          _client.storage.from('chat_media').getPublicUrl(uploadPath);
+      await _client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': _me(),
+        'receiver_id': widget.peerId,
+        'text': '',
+        'message_type': 'video_circle',
+        'video_url': url,
+        'duration_seconds': durationSec,
+      });
+      _forceScrollToLatest = true;
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось отправить видео: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
   }
 
   void _showThemePicker() {
@@ -1335,4 +1567,350 @@ String _formatCount(int value) {
     return '${(value / 1000).toStringAsFixed(1)}K';
   }
   return '$value';
+}
+
+// ─────────────────────────────────────────────────────────────
+// Кнопка микрофона (удерживать для записи)
+// ─────────────────────────────────────────────────────────────
+
+class _VoiceMicButton extends StatelessWidget {
+  const _VoiceMicButton({
+    required this.isRecording,
+    required this.seconds,
+    required this.onHoldStart,
+    required this.onHoldEnd,
+    required this.onHoldCancel,
+  });
+
+  final bool isRecording;
+  final int seconds;
+  final VoidCallback onHoldStart;
+  final VoidCallback onHoldEnd;
+  final VoidCallback onHoldCancel;
+
+  String get _timerLabel {
+    final m = seconds ~/ 60;
+    final s = (seconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return GestureDetector(
+      onLongPressStart: (_) => onHoldStart(),
+      onLongPressEnd: (_) => onHoldEnd(),
+      onLongPressCancel: onHoldCancel,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        width: isRecording ? 90 : 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: isRecording ? Colors.red : primary,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: isRecording
+            ? Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.mic, color: Colors.white, size: 18),
+                  const SizedBox(width: 4),
+                  Text(
+                    _timerLabel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              )
+            : const Icon(Icons.mic_none_rounded, color: Colors.white, size: 22),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Бабл голосового сообщения
+// ─────────────────────────────────────────────────────────────
+
+class _VoiceMessageBubble extends StatefulWidget {
+  const _VoiceMessageBubble({
+    super.key,
+    required this.audioUrl,
+    required this.durationSeconds,
+    required this.isMe,
+  });
+
+  final String audioUrl;
+  final int durationSeconds;
+  final bool isMe;
+
+  @override
+  State<_VoiceMessageBubble> createState() => _VoiceMessageBubbleState();
+}
+
+class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
+  final AudioPlayer _player = AudioPlayer();
+  bool _playing = false;
+  Duration _position = Duration.zero;
+  Duration _total = Duration.zero;
+
+  @override
+  void initState() {
+    super.initState();
+    _total = Duration(seconds: widget.durationSeconds);
+    _player.onPlayerStateChanged.listen((s) {
+      if (!mounted) return;
+      setState(() => _playing = s == PlayerState.playing);
+    });
+    _player.onPositionChanged.listen((p) {
+      if (!mounted) return;
+      setState(() => _position = p);
+    });
+    _player.onDurationChanged.listen((d) {
+      if (!mounted) return;
+      setState(() => _total = d);
+    });
+    _player.onPlayerComplete.listen((_) {
+      if (!mounted) return;
+      setState(() => _position = Duration.zero);
+    });
+  }
+
+  @override
+  void dispose() {
+    _player.dispose();
+    super.dispose();
+  }
+
+  Future<void> _togglePlayback() async {
+    if (_playing) {
+      await _player.pause();
+    } else {
+      await _player.play(UrlSource(widget.audioUrl));
+    }
+  }
+
+  String _fmt(Duration d) {
+    final m = d.inMinutes.toString().padLeft(1, '0');
+    final s = (d.inSeconds % 60).toString().padLeft(2, '0');
+    return '$m:$s';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = widget.isMe ? Colors.white : Colors.black87;
+    final sliderColor =
+        widget.isMe ? Colors.white : Theme.of(context).colorScheme.primary;
+    final totalSec = _total.inSeconds > 0 ? _total.inSeconds : 1;
+    final progress = (_position.inSeconds / totalSec).clamp(0.0, 1.0);
+
+    return SizedBox(
+      width: 220,
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: _togglePlayback,
+            child: Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: widget.isMe
+                    ? Colors.white24
+                    : Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                color: widget.isMe
+                    ? Colors.white
+                    : Theme.of(context).colorScheme.primary,
+                size: 22,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Прогресс-бар (waveform-эффект)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(3),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 4,
+                    backgroundColor: widget.isMe
+                        ? Colors.white30
+                        : Colors.grey.shade300,
+                    valueColor: AlwaysStoppedAnimation<Color>(sliderColor),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _playing ? _fmt(_position) : _fmt(_total),
+                  style: TextStyle(
+                    color: textColor.withValues(alpha: 0.7),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Бабл круглого видео (WhatsApp-стиль)
+// ─────────────────────────────────────────────────────────────
+
+class _RoundVideoBubble extends StatefulWidget {
+  const _RoundVideoBubble({
+    super.key,
+    required this.videoUrl,
+    required this.isMe,
+  });
+
+  final String videoUrl;
+  final bool isMe;
+
+  @override
+  State<_RoundVideoBubble> createState() => _RoundVideoBubbleState();
+}
+
+class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
+  VideoPlayerController? _ctrl;
+  bool _initialized = false;
+  bool _playing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    final uri = Uri.tryParse(widget.videoUrl);
+    if (uri == null) return;
+    final ctrl = VideoPlayerController.networkUrl(uri);
+    _ctrl = ctrl;
+    try {
+      await ctrl.initialize();
+      ctrl.setLooping(false);
+      ctrl.addListener(_onVideoUpdate);
+      if (mounted) setState(() => _initialized = true);
+    } catch (_) {}
+  }
+
+  void _onVideoUpdate() {
+    if (!mounted) return;
+    final isPlaying = _ctrl?.value.isPlaying ?? false;
+    if (isPlaying != _playing) {
+      setState(() => _playing = isPlaying);
+    }
+  }
+
+  @override
+  void dispose() {
+    _ctrl?.removeListener(_onVideoUpdate);
+    _ctrl?.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    final ctrl = _ctrl;
+    if (ctrl == null || !ctrl.value.isInitialized) return;
+    if (ctrl.value.isPlaying) {
+      ctrl.pause();
+    } else {
+      if (ctrl.value.position >= ctrl.value.duration) {
+        ctrl.seekTo(Duration.zero);
+      }
+      ctrl.play();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const size = 180.0;
+    return GestureDetector(
+      onTap: _togglePlay,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            ClipOval(
+              child: _initialized && _ctrl != null
+                  ? AspectRatio(
+                      aspectRatio: 1,
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        child: SizedBox(
+                          width: _ctrl!.value.size.width,
+                          height: _ctrl!.value.size.height,
+                          child: VideoPlayer(_ctrl!),
+                        ),
+                      ),
+                    )
+                  : Container(
+                      width: size,
+                      height: size,
+                      color: Colors.black87,
+                      child: const Center(
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2),
+                      ),
+                    ),
+            ),
+            // Кнопка play/pause поверх видео
+            if (_initialized && !_playing)
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: Colors.black45,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 30,
+                ),
+              ),
+            // Прогресс поверх кольца
+            if (_initialized && _ctrl != null)
+              SizedBox.expand(
+                child: ValueListenableBuilder<VideoPlayerValue>(
+                  valueListenable: _ctrl!,
+                  builder: (_, val, unused) {
+                    final total = val.duration.inMilliseconds;
+                    final pos = val.position.inMilliseconds;
+                    final progress =
+                        total > 0 ? (pos / total).clamp(0.0, 1.0) : 0.0;
+                    return CircularProgressIndicator(
+                      value: progress,
+                      strokeWidth: 3,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        widget.isMe
+                            ? Colors.white
+                            : Theme.of(context).colorScheme.primary,
+                      ),
+                      backgroundColor: Colors.white30,
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }

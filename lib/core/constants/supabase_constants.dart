@@ -38,6 +38,10 @@ class SupabaseConstants {
   static const String userChannelsTable = 'user_channels';
   static const String channelMessagesTable = 'channel_messages';
   static const String channelSubscribersTable = 'channel_subscribers';
+  static const String liveBattlesTable = 'live_battles';
+  static const String liveBattleEventsTable = 'live_battle_events';
+  static const String liveBattleResultsTable = 'live_battle_results';
+  static const String giftCatalogTable = 'gift_catalog';
 
   static const String bucketProducts = 'products';
   static const String bucketStories = 'stories';

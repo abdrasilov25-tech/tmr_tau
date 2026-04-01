@@ -277,7 +277,13 @@ class _PostMedia extends StatefulWidget {
 }
 
 class _PostMediaState extends State<_PostMedia> {
-  int _currentImage = 0;
+  final ValueNotifier<int> _currentImage = ValueNotifier<int>(0);
+
+  @override
+  void dispose() {
+    _currentImage.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -307,8 +313,8 @@ class _PostMediaState extends State<_PostMedia> {
           imageUrl: images.first,
           fit: BoxFit.contain,
           width: double.infinity,
-          placeholder: (_, __) => const _ImageShimmer(),
-          errorWidget: (_, __, ___) => const _ImageError(),
+          placeholder: (_, unused) => const _ImageShimmer(),
+          errorWidget: (_, unused, error) => const _ImageError(),
         ),
       );
     }
@@ -321,32 +327,33 @@ class _PostMediaState extends State<_PostMedia> {
         children: [
           PageView.builder(
             itemCount: images.length,
-            onPageChanged: (i) => setState(() => _currentImage = i),
+            onPageChanged: (i) => _currentImage.value = i,
             itemBuilder: (_, i) => CachedNetworkImage(
               imageUrl: images[i],
               fit: BoxFit.contain,
               width: double.infinity,
-              placeholder: (_, __) => const _ImageShimmer(),
-              errorWidget: (_, __, ___) => const _ImageError(),
+              placeholder: (_, unused) => const _ImageShimmer(),
+              errorWidget: (_, unused, error) => const _ImageError(),
             ),
           ),
-          // Индикаторы точек
+          // Индикаторы точек — перестраиваются только они, не весь виджет
           Positioned(
             bottom: 8,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(
-                images.length,
-                (i) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  margin: const EdgeInsets.symmetric(horizontal: 2.5),
-                  width: _currentImage == i ? 16 : 6,
-                  height: 6,
-                  decoration: BoxDecoration(
-                    color: _currentImage == i
-                        ? Colors.white
-                        : Colors.white54,
-                    borderRadius: BorderRadius.circular(3),
+            child: ValueListenableBuilder<int>(
+              valueListenable: _currentImage,
+              builder: (_, current, unused) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: List.generate(
+                  images.length,
+                  (i) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                    width: current == i ? 16 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: current == i ? Colors.white : Colors.white54,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
                   ),
                 ),
               ),
@@ -615,6 +622,8 @@ class _CommentTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 RichText(
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 6,
                   text: TextSpan(
                     children: [
                       TextSpan(

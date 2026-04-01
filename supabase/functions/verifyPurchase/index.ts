@@ -36,7 +36,14 @@ serve(async (req) => {
     if (!productId || !verificationData || !source || !platform) {
       return json({ error: "Invalid purchase payload" }, 400);
     }
-    if (productId !== "boost_post" && productId !== "premium_subscription") {
+    const isSupportedProduct =
+      productId === "boost_post" ||
+      productId === "premium_subscription" ||
+      productId === "qarmet_10" ||
+      productId === "qarmet_20" ||
+      productId === "qarmet_30" ||
+      productId === "qarmet_40";
+    if (!isSupportedProduct) {
       return json({ error: "Unsupported productId" }, 400);
     }
 
@@ -44,7 +51,10 @@ serve(async (req) => {
     await admin.from("payment_orders").insert({
       user_id: user.id,
       provider: "iap",
-      kind: productId === "premium_subscription" ? "subscription" : "boost",
+      kind:
+        productId === "premium_subscription" || productId === "qarmet_40"
+          ? "subscription"
+          : "boost",
       plan_code: productId,
       amount_minor: 0,
       currency: "KZT",
@@ -57,6 +67,30 @@ serve(async (req) => {
       },
       paid_at: new Date().toISOString(),
     });
+
+    if (productId === "qarmet_40") {
+      const { data: currentUserRow } = await admin
+        .from("users")
+        .select("seller_plan")
+        .eq("id", user.id)
+        .maybeSingle();
+      const currentPlan = String(currentUserRow?.seller_plan ?? "")
+        .trim()
+        .toLowerCase();
+      const nextPlan = currentPlan === "pro" ? "pro" : "standard";
+      await admin
+        .from("users")
+        .update({
+          official_page_active: true,
+          official_page_profile_perks: true,
+          official_page_promo_perks: true,
+          is_verified: true,
+          seller_verified_store: true,
+          seller_plan: nextPlan,
+          official_page_last_credit_at: new Date().toISOString(),
+        })
+        .eq("id", user.id);
+    }
 
     return json({ verified: true });
   } catch (e) {

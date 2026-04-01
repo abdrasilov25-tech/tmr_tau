@@ -89,9 +89,9 @@ class CachedAvatar extends StatelessWidget {
                   fit: BoxFit.cover,
                   fadeInDuration: Duration.zero,
                   fadeOutDuration: Duration.zero,
-                  placeholder: (_, __) =>
+                  placeholder: (_, unused) =>
                       const ColoredBox(color: Colors.black26),
-                  errorWidget: (_, __, ___) =>
+                  errorWidget: (_, unused, error) =>
                       const ColoredBox(color: Colors.black54),
                 ),
               ),

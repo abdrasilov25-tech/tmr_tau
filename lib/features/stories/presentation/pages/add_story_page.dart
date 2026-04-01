@@ -17,9 +17,15 @@ const double _storyAspectRatio = 9 / 16;
 enum _CreateMode { publication, story, video, live }
 
 class AddStoryPage extends StatefulWidget {
-  const AddStoryPage({super.key, this.isVideoMode = false});
+  const AddStoryPage({
+    super.key,
+    this.isVideoMode = false,
+    this.preloadedFile,
+  });
 
   final bool isVideoMode;
+  /// Файл, уже захваченный StoryCameraPage (пропускаем авто-открытие галереи).
+  final File? preloadedFile;
 
   @override
   State<AddStoryPage> createState() => _AddStoryPageState();
@@ -56,39 +62,71 @@ class _AddStoryPageState extends State<AddStoryPage> {
     return false;
   }
 
-  Future<bool> _requestCameraPermission({required bool includeMicrophone}) async {
-    final cameraStatus = await Permission.camera.request();
-    if (!cameraStatus.isGranted) {
-      if (!mounted) return false;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Разрешите доступ к камере в настройках приложения')),
-      );
-      if (cameraStatus.isPermanentlyDenied) {
-        await openAppSettings();
-      }
-      return false;
-    }
-    if (!includeMicrophone) return true;
-    final micStatus = await Permission.microphone.request();
-    if (micStatus.isGranted) return true;
-    if (!mounted) return false;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Для записи видео нужен доступ к микрофону')),
-    );
-    if (micStatus.isPermanentlyDenied) {
-      await openAppSettings();
-    }
-    return false;
-  }
 
   @override
   void initState() {
     super.initState();
     _activeMode = widget.isVideoMode ? _CreateMode.video : _CreateMode.story;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+
+    // Если файл пришёл с StoryCameraPage — загружаем сразу
+    final preloaded = widget.preloadedFile;
+    if (preloaded != null) {
+      _autoGalleryOpened = true; // Не открываем галерею
+      if (widget.isVideoMode) {
+        _video = preloaded;
+        _validatePreloadedVideo(preloaded);
+      } else {
+        _image = preloaded;
+      }
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _openGalleryOnEnter();
+      });
+    }
+  }
+
+  Future<void> _validatePreloadedVideo(File file) async {
+    setState(() => _loading = true);
+    try {
+      final ctrl = VideoPlayerController.file(file);
+      await ctrl.initialize();
+      final seconds = ctrl.value.duration.inSeconds;
+      await ctrl.dispose();
       if (!mounted) return;
-      _openGalleryOnEnter();
-    });
+      if (seconds > _maxVideoSeconds) {
+        setState(() {
+          _video = null;
+          _loading = false;
+        });
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: Colors.grey.shade900,
+            title: const Text('Видео слишком длинное',
+                style: TextStyle(color: Colors.white)),
+            content: Text(
+              'Длительность — ${seconds ~/ 60} мин ${seconds % 60} сек. '
+              'Для историй допускается не более 2 минут.',
+              style: TextStyle(color: Colors.grey.shade300, height: 1.4),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Понятно'),
+              ),
+            ],
+          ),
+        );
+      } else {
+        setState(() {
+          _videoDurationSeconds = seconds;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -174,17 +212,18 @@ class _AddStoryPageState extends State<AddStoryPage> {
     if (source == ImageSource.gallery) {
       final ok = await _requestGalleryPermission(forVideo: false);
       if (!ok || !mounted) return;
+      final picker = ImagePicker();
+      final x = await picker.pickImage(source: ImageSource.gallery);
+      if (x != null && mounted) {
+        setState(() {
+          _image = File(x.path);
+          _video = null;
+        });
+      }
     } else {
-      final ok = await _requestCameraPermission(includeMicrophone: false);
-      if (!ok || !mounted) return;
-    }
-    final picker = ImagePicker();
-    final x = await picker.pickImage(source: source);
-    if (x != null && mounted) {
-      setState(() {
-        _image = File(x.path);
-        _video = null;
-      });
+      // Открываем StoryCameraPage — hold-to-record UX
+      if (!mounted) return;
+      context.push('/story-camera');
     }
   }
 
@@ -238,13 +277,14 @@ class _AddStoryPageState extends State<AddStoryPage> {
   }
 
   Future<void> _pickVideoFromSource(ImageSource source) async {
-    if (source == ImageSource.gallery) {
-      final ok = await _requestGalleryPermission(forVideo: true);
-      if (!ok || !mounted) return;
-    } else {
-      final ok = await _requestCameraPermission(includeMicrophone: true);
-      if (!ok || !mounted) return;
+    if (source == ImageSource.camera) {
+      // Открываем StoryCameraPage — hold-to-record UX
+      if (!mounted) return;
+      context.push('/story-camera');
+      return;
     }
+    final ok = await _requestGalleryPermission(forVideo: true);
+    if (!ok || !mounted) return;
     final picker = ImagePicker();
     final x = await picker.pickVideo(source: source);
     if (x == null || !mounted) return;

@@ -389,7 +389,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
                   ),
                   if (_post.caption.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    Text(_post.caption, style: const TextStyle(fontSize: 15, height: 1.4)),
+                    Text(_post.caption, style: const TextStyle(fontSize: 15, height: 1.4), overflow: TextOverflow.visible, softWrap: true),
                   ],
                   if (_post.videoUrl != null && _post.videoUrl!.isNotEmpty) ...[
                     const SizedBox(height: 12),

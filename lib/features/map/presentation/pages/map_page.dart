@@ -37,7 +37,7 @@ class _MapPageState extends State<MapPage> {
   LatLng? _myPosition;
   // Временный предпросмотр карты без подписки (для демонстрации дизайна).
   // После проверки установите false.
-  static const bool _temporaryPreviewUnlock = true;
+  static const bool _temporaryPreviewUnlock = false;
 
   static const _radii = [5.0, 10.0, 25.0, 50.0];
 

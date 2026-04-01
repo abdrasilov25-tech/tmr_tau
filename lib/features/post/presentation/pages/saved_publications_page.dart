@@ -95,9 +95,9 @@ class _SavedPublicationsPageState extends State<SavedPublicationsPage> {
                               memCacheWidth: gridThumbPx,
                               fadeInDuration: Duration.zero,
                               fadeOutDuration: Duration.zero,
-                              placeholder: (_, __) =>
+                              placeholder: (_, unused) =>
                                   ColoredBox(color: Colors.grey.shade200),
-                              errorWidget: (_, __, ___) => Container(
+                              errorWidget: (_, unused, error) => Container(
                                 color: Colors.grey.shade200,
                                 child:
                                     const Icon(Icons.broken_image_outlined),

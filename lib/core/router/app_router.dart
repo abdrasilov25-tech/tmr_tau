@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -52,7 +53,11 @@ import '../../features/home/presentation/pages/publication_discover_search_page.
 import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
 import '../../features/stories/presentation/pages/add_story_page.dart';
+import '../../features/stories/presentation/pages/story_camera_page.dart';
 import '../../features/stories/presentation/pages/live_stream_page.dart';
+import '../../features/live_battle/presentation/pages/live_battle_page.dart';
+import '../../features/live_battle/presentation/pages/live_battle_lobby_page.dart';
+import '../../features/live_battle/presentation/pages/live_battle_history_page.dart';
 import '../../features/stories/presentation/pages/story_viewer_page.dart';
 import '../../features/stories/presentation/pages/story_viewer_args.dart';
 import '../../features/settings/presentation/screens/settings_page.dart';
@@ -208,15 +213,44 @@ class AppRouter {
         builder: (context, state) => const PremiumPurchasePage(),
       ),
       GoRoute(
+        path: '/story-camera',
+        builder: (context, state) => const StoryCameraPage(),
+      ),
+      GoRoute(
         path: '/add-story',
         builder: (context, state) {
           final isVideo = state.uri.queryParameters['video'] == '1';
-          return AddStoryPage(isVideoMode: isVideo);
+          final extra = state.extra;
+          File? preloadedFile;
+          bool preloadedIsVideo = false;
+          if (extra is StoryCameraResult) {
+            preloadedFile = extra.file;
+            preloadedIsVideo = extra.isVideo;
+          }
+          return AddStoryPage(
+            isVideoMode: preloadedIsVideo || isVideo,
+            preloadedFile: preloadedFile,
+          );
         },
       ),
       GoRoute(
         path: '/live',
         builder: (context, state) => const LiveStreamPage(),
+      ),
+      GoRoute(
+        path: '/live-battle/:battleId',
+        builder: (context, state) {
+          final battleId = state.pathParameters['battleId']!;
+          return LiveBattlePage(battleId: battleId);
+        },
+      ),
+      GoRoute(
+        path: '/live-battle-lobby',
+        builder: (context, state) => const LiveBattleLobbyPage(),
+      ),
+      GoRoute(
+        path: '/live-battle-history',
+        builder: (context, state) => const LiveBattleHistoryPage(),
       ),
       GoRoute(
         path: '/stories',

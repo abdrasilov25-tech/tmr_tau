@@ -34,7 +34,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       final userRes = await _client
           .from(SupabaseConstants.usersTable)
           .select(
-            'id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, total_received_post_likes',
+            'id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, total_received_post_likes, instagram_url, telegram_username, website_url',
           )
           .eq('id', sellerId)
           .maybeSingle();
@@ -47,45 +47,74 @@ class ProfileRepositoryImpl implements ProfileRepository {
         totalReceivedPostLikes = v.toInt();
       }
     } on PostgrestException catch (_) {
-      final userRes = await _client
-          .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
-          .eq('id', sellerId)
-          .maybeSingle();
-      if (userRes == null) return null;
-      userMap = Map<String, dynamic>.from(userRes as Map);
-      totalReceivedPostLikes = await _sumLikesFromPosts(sellerId);
+      try {
+        final userRes = await _client
+            .from(SupabaseConstants.usersTable)
+            .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, instagram_url, telegram_username, website_url')
+            .eq('id', sellerId)
+            .maybeSingle();
+        if (userRes == null) return null;
+        userMap = Map<String, dynamic>.from(userRes as Map);
+        totalReceivedPostLikes = await _sumLikesFromPosts(sellerId);
+      } on PostgrestException catch (_) {
+        // Совместимость со старой схемой БД без части полей монетизации.
+        final userRes = await _client
+            .from(SupabaseConstants.usersTable)
+            .select('id, name, avatar, bio, followers_count, is_verified, instagram_url, telegram_username, website_url')
+            .eq('id', sellerId)
+            .maybeSingle();
+        if (userRes == null) return null;
+        userMap = Map<String, dynamic>.from(userRes as Map)
+          ..putIfAbsent('official_page_active', () => false)
+          ..putIfAbsent('seller_verified_store', () => false);
+        totalReceivedPostLikes = await _sumLikesFromPosts(sellerId);
+      }
     }
 
-    // Считаем количество подписчиков и подписок на основе таблицы followers,
-    // чтобы цифры всегда были актуальными.
-    final followersRes = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('follower_id')
-        .eq('following_id', sellerId);
-    final followingRes = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('following_id')
-        .eq('follower_id', sellerId);
-    final followersCount = (followersRes as List).length;
-    final followingCount = (followingRes as List).length;
-    final productsRes = await _client
-        .from(SupabaseConstants.productsTable)
-        .select('*, users!seller_id(name, avatar)')
-        .eq('seller_id', sellerId)
-        .order('created_at', ascending: false);
-    final products = (productsRes as List)
-        .map((e) => _mapProduct(e as Map<String, dynamic>))
-        .toList();
-    bool isFollowingByMe = false;
-    if (currentUserId != null && currentUserId != sellerId) {
-      final f = await _client
+    var followersCount = userMap['followers_count'] as int? ?? 0;
+    var followingCount = 0;
+    var products = <ProductModel>[];
+    var isFollowingByMe = false;
+    try {
+      // Считаем количество подписчиков и подписок на основе таблицы followers,
+      // чтобы цифры всегда были актуальными.
+      final followersRes = await _client
+          .from(SupabaseConstants.followersTable)
+          .select('follower_id')
+          .eq('following_id', sellerId);
+      final followingRes = await _client
           .from(SupabaseConstants.followersTable)
           .select('following_id')
-          .eq('follower_id', currentUserId)
-          .eq('following_id', sellerId)
-          .maybeSingle();
-      isFollowingByMe = f != null;
+          .eq('follower_id', sellerId);
+      followersCount = (followersRes as List).length;
+      followingCount = (followingRes as List).length;
+    } catch (_) {
+      followingCount = 0;
+    }
+    try {
+      final productsRes = await _client
+          .from(SupabaseConstants.productsTable)
+          .select('*, users!seller_id(name, avatar)')
+          .eq('seller_id', sellerId)
+          .order('created_at', ascending: false);
+      products = (productsRes as List)
+          .map((e) => _mapProduct(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      products = const <ProductModel>[];
+    }
+    if (currentUserId != null && currentUserId != sellerId) {
+      try {
+        final f = await _client
+            .from(SupabaseConstants.followersTable)
+            .select('following_id')
+            .eq('follower_id', currentUserId)
+            .eq('following_id', sellerId)
+            .maybeSingle();
+        isFollowingByMe = f != null;
+      } catch (_) {
+        isFollowingByMe = false;
+      }
     }
     final resolvedVerified = (userMap['is_verified'] as bool? ?? false) ||
         (userMap['official_page_active'] as bool? ?? false) ||
@@ -102,6 +131,9 @@ class ProfileRepositoryImpl implements ProfileRepository {
       isFollowingByMe: isFollowingByMe,
       products: products,
       isVerified: resolvedVerified,
+      instagramUrl: userMap['instagram_url'] as String?,
+      telegramUsername: userMap['telegram_username'] as String?,
+      websiteUrl: userMap['website_url'] as String?,
     );
   }
 
@@ -111,7 +143,9 @@ class ProfileRepositoryImpl implements ProfileRepository {
       final res = await _client
           .from(SupabaseConstants.usersTable)
           .select('id, name, avatar, bio, followers_count, following_count, is_verified, official_page_active, seller_verified_store')
-          .eq('is_verified', true)
+          .or(
+            'is_verified.eq.true,official_page_active.eq.true,seller_verified_store.eq.true',
+          )
           .order('followers_count', ascending: false);
       final list = res as List;
       return list.map((e) {

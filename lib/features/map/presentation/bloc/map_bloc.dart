@@ -17,15 +17,23 @@ class MapBloc extends Bloc<MapEvent, MapState> {
   LatLng? _lastPosition;
   double _lastRadius = 10;
 
+  void _safeEmit(Emitter<MapState> emit, MapState state) {
+    if (!isClosed) emit(state);
+  }
+
+  void _safeAdd(MapEvent event) {
+    if (!isClosed) add(event);
+  }
+
   Future<void> _onLocationRequested(
     MapLocationRequested event,
     Emitter<MapState> emit,
   ) async {
-    emit(const MapLocating());
+    _safeEmit(emit, const MapLocating());
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        emit(const MapError(
+        _safeEmit(emit, const MapError(
           'Геолокация выключена. Включите её в настройках устройства.',
         ));
         return;
@@ -36,11 +44,11 @@ class MapBloc extends Bloc<MapEvent, MapState> {
         permission = await Geolocator.requestPermission();
       }
       if (permission == LocationPermission.deniedForever) {
-        emit(const MapError('Доступ к геолокации запрещён в настройках'));
+        _safeEmit(emit, const MapError('Доступ к геолокации запрещён в настройках'));
         return;
       }
       if (permission == LocationPermission.denied) {
-        emit(const MapError('Разрешите доступ к геолокации для раздела «Рядом»'));
+        _safeEmit(emit, const MapError('Разрешите доступ к геолокации для раздела «Рядом»'));
         return;
       }
 
@@ -58,17 +66,17 @@ class MapBloc extends Bloc<MapEvent, MapState> {
 
       pos ??= await Geolocator.getLastKnownPosition();
       if (pos == null) {
-        emit(const MapError('Не удалось определить местоположение'));
+        _safeEmit(emit, const MapError('Не удалось определить местоположение'));
         return;
       }
 
-      add(MapProductsRequested(
+      _safeAdd(MapProductsRequested(
         latitude: pos.latitude,
         longitude: pos.longitude,
         radiusKm: _lastRadius,
       ));
     } catch (_) {
-      emit(const MapError('Не удалось определить местоположение'));
+      _safeEmit(emit, const MapError('Не удалось определить местоположение'));
     }
   }
 
@@ -79,23 +87,26 @@ class MapBloc extends Bloc<MapEvent, MapState> {
     final pos = LatLng(event.latitude, event.longitude);
     _lastPosition = pos;
     _lastRadius = event.radiusKm;
-    emit(MapLoading(position: pos, radiusKm: event.radiusKm));
+    _safeEmit(emit, MapLoading(position: pos, radiusKm: event.radiusKm));
     try {
       final products = await _getNearbyProducts(
         latitude: event.latitude,
         longitude: event.longitude,
         radiusKm: event.radiusKm,
       );
-      emit(MapLoaded(products: products, position: pos, radiusKm: event.radiusKm));
+      _safeEmit(
+        emit,
+        MapLoaded(products: products, position: pos, radiusKm: event.radiusKm),
+      );
     } catch (e) {
-      emit(MapError(e.toString()));
+      _safeEmit(emit, MapError(e.toString()));
     }
   }
 
   void _onRadiusChanged(MapRadiusChanged event, Emitter<MapState> emit) {
     final pos = _lastPosition;
     if (pos == null) return;
-    add(MapProductsRequested(
+    _safeAdd(MapProductsRequested(
       latitude: pos.latitude,
       longitude: pos.longitude,
       radiusKm: event.radiusKm,

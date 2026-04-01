@@ -382,7 +382,7 @@ class _EditPostPageState extends State<EditPostPage> {
                                 fit: BoxFit.cover,
                                 fadeInDuration: Duration.zero,
                                 fadeOutDuration: Duration.zero,
-                                placeholder: (_, __) =>
+                                placeholder: (_, unused) =>
                                     ColoredBox(color: Colors.grey.shade100),
                                 errorWidget: (context, error, stackTrace) =>
                                     Container(

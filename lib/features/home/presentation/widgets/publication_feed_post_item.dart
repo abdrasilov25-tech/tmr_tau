@@ -67,13 +67,13 @@ class PublicationFeedPostItem extends StatelessWidget {
 
     Navigator.of(context).push(
       PageRouteBuilder<void>(
-        pageBuilder: (_, __, ___) => VideoFeedScreen(
+        pageBuilder: (_, unused, unused2) => VideoFeedScreen(
           initialPost: post,
           allPosts: videoPosts,
           postRepository: postRepository,
           currentUserId: currentUserId,
         ),
-        transitionsBuilder: (_, animation, __, child) => FadeTransition(
+        transitionsBuilder: (_, animation, unused, child) => FadeTransition(
           opacity: animation,
           child: child,
         ),
@@ -266,11 +266,17 @@ class _OptionsMenu extends StatelessWidget {
   }
 
   void _showOptions(BuildContext context) {
-    final isOwn =
-        currentUserId != null && currentUserId == post.userId;
+    final isOwn = currentUserId != null && currentUserId == post.userId;
+    // Захватываем router до показа модалки — предотвращает stale context
+    // и rebuild нижележащей страницы при открытии/закрытии шита.
+    final router = GoRouter.of(context);
+
     showModalBottomSheet<void>(
       context: context,
-      builder: (_) => SafeArea(
+      // useRootNavigator: true — модалка монтируется поверх root navigator,
+      // нижележащая страница не получает didChangeDependencies и не перестраивается.
+      useRootNavigator: true,
+      builder: (sheetCtx) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -279,30 +285,32 @@ class _OptionsMenu extends StatelessWidget {
                 leading: const Icon(Icons.edit_outlined),
                 title: const Text('Редактировать'),
                 onTap: () {
-                  Navigator.pop(context);
-                  context.push('/edit-post', extra: post);
+                  Navigator.of(sheetCtx).pop();
+                  router.push('/edit-post', extra: post);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text('Удалить',
-                    style: TextStyle(color: Colors.red)),
-                onTap: () => Navigator.pop(context),
+                title: const Text(
+                  'Удалить',
+                  style: TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.of(sheetCtx).pop(),
               ),
             ] else ...[
               ListTile(
                 leading: const Icon(Icons.flag_outlined),
                 title: const Text('Пожаловаться'),
                 onTap: () {
-                  Navigator.pop(context);
-                  context.push('/report-post', extra: post);
+                  Navigator.of(sheetCtx).pop();
+                  router.push('/report-post', extra: post);
                 },
               ),
             ],
             ListTile(
               leading: const Icon(Icons.link_outlined),
               title: const Text('Скопировать ссылку'),
-              onTap: () => Navigator.pop(context),
+              onTap: () => Navigator.of(sheetCtx).pop(),
             ),
           ],
         ),
@@ -357,9 +365,9 @@ class _PostMediaState extends State<_PostMedia> {
             child: CachedNetworkImage(
               imageUrl: images.first,
               fit: BoxFit.cover,
-              placeholder: (_, __) =>
+              placeholder: (_, unused) =>
                   const ColoredBox(color: Color(0xFFEEEEEE)),
-              errorWidget: (_, __, ___) => const ColoredBox(
+              errorWidget: (_, unused, error) => const ColoredBox(
                 color: Color(0xFFEEEEEE),
                 child: Icon(Icons.broken_image_outlined,
                     color: Colors.grey, size: 40),
@@ -386,9 +394,9 @@ class _PostMediaState extends State<_PostMedia> {
                 child: CachedNetworkImage(
                   imageUrl: images[i],
                   fit: BoxFit.cover,
-                  placeholder: (_, __) =>
+                  placeholder: (_, unused) =>
                       const ColoredBox(color: Color(0xFFEEEEEE)),
-                  errorWidget: (_, __, ___) => const ColoredBox(
+                  errorWidget: (_, unused, error) => const ColoredBox(
                     color: Color(0xFFEEEEEE),
                     child: Icon(Icons.broken_image_outlined,
                         color: Colors.grey, size: 40),
@@ -470,7 +478,7 @@ class _VideoThumbnail extends StatelessWidget {
                 ? CachedNetworkImage(
                     imageUrl: imageUrl,
                     fit: BoxFit.cover,
-                    placeholder: (_, __) =>
+                    placeholder: (_, unused) =>
                         const ColoredBox(color: Color(0xFF1A1A1A)),
                   )
                 : const ColoredBox(color: Color(0xFF1A1A1A)),

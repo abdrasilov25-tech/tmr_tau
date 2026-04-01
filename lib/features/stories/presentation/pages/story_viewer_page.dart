@@ -427,6 +427,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       if (!mounted) return;
       showModalBottomSheet<void>(
         context: context,
+        useRootNavigator: true,
         showDragHandle: true,
         builder: (ctx) => SafeArea(
           child: SizedBox(
@@ -572,6 +573,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       }
       final picked = await showModalBottomSheet<_StoryShareUser>(
         context: context,
+        useRootNavigator: true,
         isScrollControlled: true,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(16)),

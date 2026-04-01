@@ -968,8 +968,52 @@ create table if not exists public.chat_group_messages (
   group_id uuid not null references public.chat_groups(id) on delete cascade,
   sender_id uuid not null references public.users(id) on delete cascade,
   text text not null,
+  message_type text not null default 'text',
+  audio_url text,
+  video_url text,
+  duration_seconds int,
+  city_thread text not null default 'general',
   created_at timestamptz default now()
 );
+
+alter table public.chat_group_messages
+  add column if not exists city_thread text not null default 'general';
+alter table public.chat_group_messages
+  add column if not exists message_type text not null default 'text';
+alter table public.chat_group_messages
+  add column if not exists audio_url text;
+alter table public.chat_group_messages
+  add column if not exists video_url text;
+alter table public.chat_group_messages
+  add column if not exists duration_seconds int;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chat_group_messages_city_thread_allowed'
+      and conrelid = 'public.chat_group_messages'::regclass
+  ) then
+    alter table public.chat_group_messages
+      add constraint chat_group_messages_city_thread_allowed
+      check (city_thread in ('general', 'roads', 'checks', 'market', 'help'));
+  end if;
+end $$;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'chat_group_messages_message_type_allowed'
+      and conrelid = 'public.chat_group_messages'::regclass
+  ) then
+    alter table public.chat_group_messages
+      add constraint chat_group_messages_message_type_allowed
+      check (message_type in ('text', 'audio', 'video_circle'));
+  end if;
+end $$;
 
 alter table public.chat_groups enable row level security;
 alter table public.chat_group_members enable row level security;
@@ -1548,4 +1592,54 @@ $$;
 
 revoke all on function public.spend_qarmet_and_apply_product_promotion(uuid, text, int, int) from public;
 grant execute on function public.spend_qarmet_and_apply_product_promotion(uuid, text, int, int) to authenticated;
+
+create table if not exists public.gift_catalog (
+  id text primary key,
+  name text not null,
+  price int not null check (price > 0),
+  animation text not null default 'default'
+);
+
+create table if not exists public.live_battles (
+  id uuid primary key default gen_random_uuid(),
+  host_a uuid not null references public.users(id) on delete cascade,
+  host_b uuid not null references public.users(id) on delete cascade,
+  score_a int not null default 0 check (score_a >= 0),
+  score_b int not null default 0 check (score_b >= 0),
+  end_time timestamptz not null,
+  is_active boolean not null default true,
+  winner_id uuid references public.users(id) on delete set null,
+  mvp_sender_id uuid references public.users(id) on delete set null,
+  top3_donators jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.live_battle_events (
+  id uuid primary key default gen_random_uuid(),
+  battle_id uuid not null references public.live_battles(id) on delete cascade,
+  sender_id uuid not null references public.users(id) on delete cascade,
+  target_host uuid not null references public.users(id) on delete cascade,
+  event_type text not null check (event_type in ('like', 'gift')),
+  gift_id text references public.gift_catalog(id) on delete set null,
+  gift_price int not null default 0 check (gift_price >= 0),
+  points_awarded int not null default 0 check (points_awarded >= 0),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_live_battle_events_battle_created
+  on public.live_battle_events (battle_id, created_at desc);
+
+create table if not exists public.live_battle_results (
+  id uuid primary key default gen_random_uuid(),
+  battle_id uuid not null unique references public.live_battles(id) on delete cascade,
+  host_a uuid not null references public.users(id) on delete cascade,
+  host_b uuid not null references public.users(id) on delete cascade,
+  winner_id uuid references public.users(id) on delete set null,
+  score_a int not null default 0,
+  score_b int not null default 0,
+  mvp_sender_id uuid references public.users(id) on delete set null,
+  top3_donators jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now()
+);
 

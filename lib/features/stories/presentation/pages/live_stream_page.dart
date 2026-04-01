@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class LiveStreamPage extends StatelessWidget {
   const LiveStreamPage({super.key});
@@ -42,6 +43,12 @@ class LiveStreamPage extends StatelessWidget {
                   height: 1.35,
                 ),
                 textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => context.push('/live-battle-lobby'),
+                icon: const Icon(Icons.sports_kabaddi_rounded),
+                label: const Text('Открыть Live Battle Lobby'),
               ),
             ],
           ),

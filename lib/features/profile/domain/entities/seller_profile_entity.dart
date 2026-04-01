@@ -14,6 +14,9 @@ class SellerProfileEntity extends Equatable {
     this.isFollowingByMe = false,
     this.products = const [],
     this.isVerified = false,
+    this.instagramUrl,
+    this.telegramUsername,
+    this.websiteUrl,
   });
 
   final String id;
@@ -26,6 +29,9 @@ class SellerProfileEntity extends Equatable {
   final bool isFollowingByMe;
   final List<ProductEntity> products;
   final bool isVerified;
+  final String? instagramUrl;
+  final String? telegramUsername;
+  final String? websiteUrl;
 
   SellerProfileEntity copyWith({
     String? id,
@@ -38,6 +44,9 @@ class SellerProfileEntity extends Equatable {
     bool? isFollowingByMe,
     List<ProductEntity>? products,
     bool? isVerified,
+    String? instagramUrl,
+    String? telegramUsername,
+    String? websiteUrl,
   }) {
     return SellerProfileEntity(
       id: id ?? this.id,
@@ -51,6 +60,9 @@ class SellerProfileEntity extends Equatable {
       isFollowingByMe: isFollowingByMe ?? this.isFollowingByMe,
       products: products ?? this.products,
       isVerified: isVerified ?? this.isVerified,
+      instagramUrl: instagramUrl ?? this.instagramUrl,
+      telegramUsername: telegramUsername ?? this.telegramUsername,
+      websiteUrl: websiteUrl ?? this.websiteUrl,
     );
   }
 
@@ -66,5 +78,8 @@ class SellerProfileEntity extends Equatable {
         isFollowingByMe,
         products,
         isVerified,
+        instagramUrl,
+        telegramUsername,
+        websiteUrl,
       ];
 }

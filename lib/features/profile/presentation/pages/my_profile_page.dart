@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/products/deleted_product_bus.dart';
 import '../../../../core/accounts/account_manager.dart';
 import '../../../../core/accounts/account_model.dart';
@@ -59,6 +60,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
   bool _updatingAvatar = false;
   bool _isSwitchingAccount = false;
   bool _isLoadingProfileData = false;
+  bool _selfVerified = false;
   int _loadRequestId = 0;
   Set<String> _hiddenPostIds = const <String>{};
   bool _autoReloadTriggeredForPublications = false;
@@ -316,12 +318,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
     try {
       final repo = context.read<ProfileRepository>();
       final postRepo = context.read<PostRepository>();
+      final verifiedFuture = _loadSelfVerifiedFlag(uid);
       final profileFuture = repo
           .getSellerProfile(uid)
           .timeout(const Duration(seconds: 10));
       final postsFuture = postRepo
           .getPostsByUser(uid, currentUserId: uid)
           .timeout(const Duration(seconds: 12));
+      final verifiedFlag = await verifiedFuture;
       final profile = await profileFuture;
       if (!mounted || requestId != _loadRequestId) return;
       final posts = await postsFuture;
@@ -384,8 +388,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   isFollowingByMe: profile.isFollowingByMe,
                   products: profile.products,
                   isVerified: profile.isVerified,
+                  instagramUrl: profile.instagramUrl,
+                  telegramUsername: profile.telegramUsername,
+                  websiteUrl: profile.websiteUrl,
                   totalReceivedPostLikes: profile.totalReceivedPostLikes,
                 );
+          _selfVerified = (profile?.isVerified ?? false) || verifiedFlag;
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
           _videoPosts = videoPosts;
@@ -404,6 +412,108 @@ class _MyProfilePageState extends State<MyProfilePage> {
       if (requestId == _loadRequestId) {
         _isLoadingProfileData = false;
       }
+    }
+  }
+
+  Future<void> _openBioEditor() async {
+    final state = context.read<AuthBloc>().state;
+    if (state is! AuthAuthenticated) return;
+    final repo = context.read<ProfileRepository>();
+    final currentBio = (_profile?.bio ?? state.user.bio ?? '').trim();
+    final controller = TextEditingController(text: currentBio);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            16,
+            8,
+            16,
+            MediaQuery.of(ctx).viewInsets.bottom + 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Редактировать био',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: controller,
+                maxLength: 120,
+                minLines: 1,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Био профиля',
+                  hintText: 'Расскажите о себе',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, 'delete'),
+                      child: const Text('Удалить'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.pop(ctx, 'save'),
+                      child: const Text('Сохранить'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (action == null) return;
+    try {
+      final nextBio = action == 'save' ? controller.text.trim() : '';
+      await repo.updateProfile(
+        userId: state.user.id,
+        bio: nextBio,
+      );
+      if (!mounted) return;
+      setState(() {
+        _profile = _profile?.copyWith(bio: nextBio);
+      });
+      _storeWarmCache(state.user.id);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось обновить био')),
+      );
+    }
+  }
+
+  Future<bool> _loadSelfVerifiedFlag(String uid) async {
+    try {
+      final row = await supa.Supabase.instance.client
+          .from(SupabaseConstants.usersTable)
+          .select('is_verified, official_page_active, seller_verified_store')
+          .eq('id', uid)
+          .maybeSingle();
+      return (row?['is_verified'] as bool? ?? false) ||
+          (row?['official_page_active'] as bool? ?? false) ||
+          (row?['seller_verified_store'] as bool? ?? false);
+    } on supa.PostgrestException catch (_) {
+      final row = await supa.Supabase.instance.client
+          .from(SupabaseConstants.usersTable)
+          .select('is_verified')
+          .eq('id', uid)
+          .maybeSingle();
+      return row?['is_verified'] as bool? ?? false;
     }
   }
 
@@ -699,6 +809,11 @@ class _MyProfilePageState extends State<MyProfilePage> {
         centerTitle: true,
         actions: [
           IconButton(
+            tooltip: 'История баттлов',
+            icon: const Icon(Icons.emoji_events_outlined, size: 24),
+            onPressed: () => context.push('/live-battle-history'),
+          ),
+          IconButton(
             icon: const Icon(Icons.menu_rounded, size: 26),
             onPressed: () {
               // Меню: темки, избранное, настройки, выйти
@@ -777,6 +892,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             return _ProfileContent(
               user: user,
               profile: _profile,
+              selfVerified: _selfVerified,
               newsPosts: visibleNewsPosts,
               publicationPosts: visiblePublicationPosts,
               videoPosts: visibleVideoPosts,
@@ -786,6 +902,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
               onRefresh: _load,
               onAddTap: _showAddChoice,
               onOpenAccountSwitcher: () => _showAccountSwitcher(context, user),
+              onEditBio: _openBioEditor,
               onHidePost: _onHidePost,
               onUnhidePost: _onUnhidePost,
               onAvatarTap: _changeAvatar,
@@ -1303,6 +1420,7 @@ class _ProfileContent extends StatelessWidget {
   const _ProfileContent({
     required this.user,
     required this.profile,
+    required this.selfVerified,
     required this.newsPosts,
     required this.publicationPosts,
     required this.videoPosts,
@@ -1312,6 +1430,7 @@ class _ProfileContent extends StatelessWidget {
     required this.onRefresh,
     required this.onAddTap,
     required this.onOpenAccountSwitcher,
+    required this.onEditBio,
     required this.onHidePost,
     required this.onUnhidePost,
     required this.onAvatarTap,
@@ -1326,6 +1445,7 @@ class _ProfileContent extends StatelessWidget {
 
   final AppUser user;
   final SellerProfileEntity? profile;
+  final bool selfVerified;
   final List<PostEntity> newsPosts;
   final List<PostEntity> publicationPosts;
   final List<PostEntity> videoPosts;
@@ -1335,6 +1455,7 @@ class _ProfileContent extends StatelessWidget {
   final VoidCallback onRefresh;
   final VoidCallback onAddTap;
   final VoidCallback onOpenAccountSwitcher;
+  final Future<void> Function() onEditBio;
   final Future<void> Function(PostEntity post) onHidePost;
   final Future<void> Function(PostEntity post) onUnhidePost;
   final VoidCallback onAvatarTap;
@@ -1350,6 +1471,43 @@ class _ProfileContent extends StatelessWidget {
       (profile?.products.length ?? 0) +
       newsPosts.length +
       publicationPosts.length;
+
+  String? _normalizeInstagramUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    final handle = value.replaceFirst('@', '');
+    if (handle.isEmpty) return null;
+    return 'https://instagram.com/$handle';
+  }
+
+  String? _normalizeTelegramUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    final handle = value.replaceFirst('@', '');
+    if (handle.isEmpty) return null;
+    return 'https://t.me/$handle';
+  }
+
+  String? _normalizeWebsiteUrl(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty) return null;
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    return 'https://$value';
+  }
+
+  Future<void> _openExternal(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1605,6 +1763,10 @@ class _ProfileContent extends StatelessWidget {
                                                     ),
                                               ),
                                             ),
+                                            if ((profile?.isVerified ?? selfVerified)) ...[
+                                              const SizedBox(width: 6),
+                                              const VerifiedBadge(size: 18),
+                                            ],
                                           ],
                                         ),
                                         if (user.name != null &&
@@ -1628,10 +1790,6 @@ class _ProfileContent extends StatelessWidget {
                                                       ),
                                                 ),
                                               ),
-                                              if ((profile?.isVerified ?? false)) ...[
-                                                const SizedBox(width: 6),
-                                                const VerifiedBadge(size: 18),
-                                              ],
                                             ],
                                           ),
                                         ],
@@ -1644,30 +1802,65 @@ class _ProfileContent extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if ((user.bio ?? profile?.bio) != null &&
-                          (user.bio ?? profile?.bio)!.isNotEmpty)
-                        Padding(
+                      Padding(
                           padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
-                          child: Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(16),
+                            onTap: () => unawaited(onEditBio()),
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF3F5F9),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Text(
+                                (user.bio ?? profile?.bio ?? '').isNotEmpty
+                                    ? (user.bio ?? profile?.bio ?? '')
+                                    : 'Нажмите, чтобы добавить био',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: ThemedContentSurface
+                                          .profileTextSecondary,
+                                      height: 1.45,
+                                    ),
+                              ),
                             ),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF3F5F9),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Text(
-                              user.bio ?? profile?.bio ?? '',
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodyMedium
-                                  ?.copyWith(
-                                    color: ThemedContentSurface
-                                        .profileTextSecondary,
-                                    height: 1.45,
-                                  ),
-                            ),
+                          ),
+                      ),
+                      if (_normalizeInstagramUrl(profile?.instagramUrl) != null ||
+                          _normalizeTelegramUrl(profile?.telegramUsername) != null ||
+                          _normalizeWebsiteUrl(profile?.websiteUrl) != null)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+                          child: Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              if (_normalizeInstagramUrl(profile?.instagramUrl) case final instagram?)
+                                _ProfileSocialChip(
+                                  icon: Icons.camera_alt_outlined,
+                                  label: 'Instagram',
+                                  onTap: () => unawaited(_openExternal(instagram)),
+                                ),
+                              if (_normalizeTelegramUrl(profile?.telegramUsername) case final telegram?)
+                                _ProfileSocialChip(
+                                  icon: Icons.send_outlined,
+                                  label: 'Telegram',
+                                  onTap: () => unawaited(_openExternal(telegram)),
+                                ),
+                              if (_normalizeWebsiteUrl(profile?.websiteUrl) case final website?)
+                                _ProfileSocialChip(
+                                  icon: Icons.language_outlined,
+                                  label: 'Website',
+                                  onTap: () => unawaited(_openExternal(website)),
+                                ),
+                            ],
                           ),
                         ),
                       Padding(
@@ -2184,6 +2377,56 @@ class _PostsGrid extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _ProfileSocialChip extends StatelessWidget {
+  const _ProfileSocialChip({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: const Color(0xFFE5E7EB)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: const Color(0xFF111827)),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF111827),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

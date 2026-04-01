@@ -58,36 +58,36 @@ class PaymentService {
   static const String _walletCachePrefix = 'qarmet_wallet_snapshot_v1_';
 
   static const Map<String, QarmetProduct> _qarmetCatalog = {
-    // Стартовый пакет: 3 Qarmet без бонуса.
+    // LIVE-battle mapping: qarmet_10 -> 100.
     promotionStartProductId: QarmetProduct(
       productId: promotionStartProductId,
       title: 'Start',
-      baseQarmet: 3,
+      baseQarmet: 100,
       bonusQarmet: 0,
       priceKzt: 199,
     ),
-    // Средний пакет: бонус мотивирует брать больше.
+    // LIVE-battle mapping: qarmet_20 -> 250.
     promotionPremiumProductId: QarmetProduct(
       productId: promotionPremiumProductId,
       title: 'Premium',
-      baseQarmet: 10,
-      bonusQarmet: 2,
+      baseQarmet: 250,
+      bonusQarmet: 0,
       priceKzt: 499,
     ),
-    // Большой пакет: лучшая цена за 1 Qarmet.
+    // LIVE-battle mapping: qarmet_30 -> 400.
     promotionBusinessProductId: QarmetProduct(
       productId: promotionBusinessProductId,
       title: 'Business',
-      baseQarmet: 50,
-      bonusQarmet: 5,
+      baseQarmet: 400,
+      bonusQarmet: 0,
       priceKzt: 1299,
     ),
-    // Подписка: ежемесячные Qarmet + постоянные преимущества.
+    // LIVE-battle mapping: qarmet_40 -> 700.
     officialPageProductId: QarmetProduct(
       productId: officialPageProductId,
       title: 'Official Page',
-      baseQarmet: 20,
-      bonusQarmet: 5,
+      baseQarmet: 700,
+      bonusQarmet: 0,
       priceKzt: 1999,
       isSubscription: true,
     ),
@@ -146,9 +146,6 @@ class PaymentService {
       onVerified: (purchase) async {
         await _verifyPurchase(purchase, productId);
         await _creditPurchasedQarmet(package);
-        if (package.isSubscription) {
-          await _activateOfficialPageSubscription(package);
-        }
       },
     );
   }
@@ -242,34 +239,13 @@ class PaymentService {
 
     final auth = _client.auth.currentUser;
     if (auth == null) return;
-    final row = await _client
-        .from('users')
-        .select(
-          'official_page_active, official_page_last_credit_at, qarmet_balance',
-        )
-        .eq('id', auth.id)
-        .maybeSingle();
-    if (row == null) return;
-    final active = row['official_page_active'] as bool? ?? false;
-    if (!active) return;
-    final lastRaw = row['official_page_last_credit_at'] as String?;
-    final lastCreditAt = DateTime.tryParse(lastRaw ?? '')?.toUtc();
-    if (lastCreditAt == null) return;
-    final monthsPassed = now.difference(lastCreditAt).inDays ~/ 30;
-    if (monthsPassed <= 0) return;
-    final subscriptionPack = _qarmetCatalog[officialPageProductId]!;
-    final monthlyCredit = subscriptionPack.totalQarmet * monthsPassed;
-    final currentBalance = row['qarmet_balance'] as int? ?? 0;
-    await _client
-        .from('users')
-        .update({
-          'qarmet_balance': currentBalance + monthlyCredit,
-          'official_page_last_credit_at': now.toIso8601String(),
-        })
-        .eq('id', auth.id);
-    debugPrint(
-      'Qarmet monthly credit: +$monthlyCredit (${subscriptionPack.baseQarmet}+${subscriptionPack.bonusQarmet} x $monthsPassed)',
-    );
+    try {
+      await _client.rpc<int>('credit_official_page_monthly_qarmet');
+    } on PostgrestException catch (e) {
+      debugPrint(
+        'Monthly Qarmet credit skipped: ${e.message.isNotEmpty ? e.message : e.code}',
+      );
+    }
   }
 
   WalletSnapshot? getCachedWalletSnapshot({
@@ -727,52 +703,19 @@ class PaymentService {
     );
   }
 
-  Future<void> _activateOfficialPageSubscription(QarmetProduct package) async {
-    final auth = _requireAuthUser();
-    final now = DateTime.now().toUtc();
-    final current = await _client
-        .from('users')
-        .select('seller_plan')
-        .eq('id', auth.id)
-        .maybeSingle();
-    final currentPlan = (current?['seller_plan'] as String?)?.toLowerCase().trim();
-    final resolvedPlan = currentPlan == 'pro' ? 'pro' : 'standard';
-    await _client
-        .from('users')
-        .update({
-          'official_page_active': true,
-          'official_page_profile_perks': true,
-          'official_page_promo_perks': true,
-          // Даём "инстаграм-галочку" сразу после покупки official_page.
-          'is_verified': true,
-          'seller_verified_store': true,
-          'seller_plan': resolvedPlan,
-          'official_page_last_credit_at': now.toIso8601String(),
-        })
-        .eq('id', auth.id);
-    debugPrint(
-      'Official page activated: monthly ${package.totalQarmet} Qarmet + perks',
-    );
-  }
-
   Future<void> _creditQarmet(
     int amount, {
     required String reason,
     int? baseAmount,
     int? bonusAmount,
   }) async {
-    final auth = _requireAuthUser();
-    final row = await _client
-        .from('users')
-        .select('qarmet_balance')
-        .eq('id', auth.id)
-        .maybeSingle();
-    final current = row?['qarmet_balance'] as int? ?? 0;
-    final next = current + amount;
-    await _client
-        .from('users')
-        .update({'qarmet_balance': next})
-        .eq('id', auth.id);
+    final next = await _client.rpc<int>(
+      'credit_qarmet',
+      params: <String, dynamic>{
+        'p_amount': amount,
+        'p_reason': reason,
+      },
+    );
     debugPrint(
       'Qarmet credited: +$amount (base=${baseAmount ?? amount}, bonus=${bonusAmount ?? 0}) reason=$reason balance=$next',
     );
@@ -803,24 +746,24 @@ class PaymentService {
     if (amount <= 0) {
       throw Exception('Сумма списания должна быть больше 0');
     }
-    final auth = _requireAuthUser();
-    final row = await _client
-        .from('users')
-        .select('qarmet_balance')
-        .eq('id', auth.id)
-        .maybeSingle();
-    final current = row?['qarmet_balance'] as int? ?? 0;
-    if (current < amount) {
+    try {
+      final next = await _client.rpc<int>(
+        'spend_qarmet',
+        params: <String, dynamic>{
+          'p_amount': amount,
+          'p_reason': reason,
+        },
+      );
+      debugPrint('Qarmet spent: -$amount reason=$reason balance=$next');
+    } on PostgrestException catch (e) {
+      final normalized = e.message.trim().toLowerCase();
+      if (normalized.contains('insufficient_qarmet')) {
+        throw Exception('Недостаточно Qarmet для списания');
+      }
       throw Exception(
-        'Недостаточно Qarmet. Нужно: $amount, доступно: $current',
+        e.message.isNotEmpty ? e.message : 'Не удалось списать Qarmet',
       );
     }
-    final next = current - amount;
-    await _client
-        .from('users')
-        .update({'qarmet_balance': next})
-        .eq('id', auth.id);
-    debugPrint('Qarmet spent: -$amount reason=$reason balance=$next');
   }
 
   User _requireAuthUser() {
@@ -834,10 +777,8 @@ class PaymentService {
   void _assertPackageValueLadder() {
     final premium = _qarmetCatalog[promotionPremiumProductId]!;
     final business = _qarmetCatalog[promotionBusinessProductId]!;
-    if (business.pricePerQarmet >= premium.pricePerQarmet) {
-      throw StateError(
-        'Business пакет должен быть выгоднее Premium по цене за 1 Qarmet',
-      );
+    if (business.totalQarmet <= premium.totalQarmet) {
+      throw StateError('Qarmet mapping invalid: business must exceed premium');
     }
   }
 
