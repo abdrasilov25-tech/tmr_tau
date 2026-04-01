@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/services/geo_service.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../widgets/post_photo_gallery.dart';
 import 'video_trim_page.dart';
@@ -426,8 +427,10 @@ class _AddPostPageState extends State<AddPostPage> {
     }
 
     final postRepository = context.read<PostRepository>();
+    final geoService = context.read<GeoService>();
     final userId = authState.user.id;
     final caption = _captionController.text.trim();
+    GeoPoint? location;
 
     setState(() => _loading = true);
     try {
@@ -449,6 +452,11 @@ class _AddPostPageState extends State<AddPostPage> {
         videoDurationSeconds = controller.value.duration.inSeconds;
         await controller.dispose();
       }
+      try {
+        location = await geoService.getCurrentLocation();
+      } catch (_) {
+        location = null;
+      }
 
       final createdPost = await postRepository.createPost(
         userId: userId,
@@ -458,6 +466,8 @@ class _AddPostPageState extends State<AddPostPage> {
         videoUrl: videoUrl,
         videoDurationSeconds: videoDurationSeconds,
         kind: widget.kind,
+        latitude: location?.latitude,
+        longitude: location?.longitude,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

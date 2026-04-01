@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../domain/entities/map_product.dart';
 import '../../../../features/product/domain/entities/product_entity.dart';
@@ -12,6 +13,56 @@ class MapProductSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return _MapProductSheetBody(product: product);
+  }
+}
+
+class _MapProductSheetBody extends StatefulWidget {
+  const _MapProductSheetBody({required this.product});
+
+  final MapProduct product;
+
+  @override
+  State<_MapProductSheetBody> createState() => _MapProductSheetBodyState();
+}
+
+class _MapProductSheetBodyState extends State<_MapProductSheetBody> {
+  bool _ratingLoading = false;
+  int _myStars = 0;
+
+  Future<void> _rateBusiness(int stars) async {
+    final client = Supabase.instance.client;
+    final authUser = client.auth.currentUser;
+    if (authUser == null) return;
+    setState(() {
+      _ratingLoading = true;
+      _myStars = stars;
+    });
+    try {
+      await client.from('business_reviews').upsert({
+        'business_user_id': widget.product.sellerId,
+        'reviewer_id': authUser.id,
+        'stars': stars,
+      }, onConflict: 'business_user_id,reviewer_id');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Спасибо за оценку!')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось отправить оценку')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _ratingLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final product = widget.product;
     return Container(
       decoration: const BoxDecoration(
         color: Colors.white,
@@ -96,10 +147,54 @@ class MapProductSheet extends StatelessWidget {
                             ?.copyWith(color: Colors.grey.shade500),
                       ),
                     ],
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        const Icon(Icons.star_rounded, size: 16, color: Color(0xFFF59E0B)),
+                        const SizedBox(width: 4),
+                        Text(
+                          product.sellerRatingCount > 0
+                              ? '${product.sellerRatingAverage.toStringAsFixed(1)} (${product.sellerRatingCount})'
+                              : 'Нет оценок',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: Colors.grey.shade700),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.grey.shade200),
+            ),
+            child: Row(
+              children: [
+                const Text(
+                  'Оцените бизнес:',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 8),
+                for (var i = 1; i <= 5; i++)
+                  IconButton(
+                    onPressed: _ratingLoading ? null : () => _rateBusiness(i),
+                    icon: Icon(
+                      i <= _myStars ? Icons.star_rounded : Icons.star_outline_rounded,
+                      color: const Color(0xFFF59E0B),
+                    ),
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           SizedBox(

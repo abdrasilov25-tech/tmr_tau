@@ -58,6 +58,11 @@ class NewsFeedPage extends StatelessWidget {
                 centerTitle: true,
                 actions: [
                   IconButton(
+                    tooltip: 'Рядом',
+                    onPressed: () => context.push('/nearby'),
+                    icon: Icon(Icons.near_me_rounded, color: Colors.grey.shade800),
+                  ),
+                  IconButton(
                     tooltip: 'Новая новость',
                     onPressed: () => _openAddNews(nested, userId),
                     icon: Icon(Icons.add, color: Colors.grey.shade800),
@@ -341,7 +346,9 @@ class _NewsPostCard extends StatelessWidget {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade200),
+        side: BorderSide(
+          color: post.isPromoted ? Colors.purple.shade300 : Colors.grey.shade200,
+        ),
       ),
       child: InkWell(
         onTap: () async {
@@ -373,12 +380,34 @@ class _NewsPostCard extends StatelessWidget {
                       children: [
                         GestureDetector(
                           onTap: () => context.push('/profile/${post.userId}'),
-                          child: Text(
-                            post.userName ?? 'Житель',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                            ),
+                          child: Row(
+                            children: [
+                              Text(
+                                post.userName ?? 'Житель',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              if (post.isPromoted) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.purple.shade700,
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: const Text(
+                                    'PRO',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
                           ),
                         ),
                         Text(

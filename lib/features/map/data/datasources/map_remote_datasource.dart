@@ -18,7 +18,7 @@ class MapRemoteDataSourceImpl implements MapRemoteDataSource {
   final SupabaseClient _client;
 
   static const _select =
-      'id, title, price, image_url, image_urls, city, seller_id, latitude, longitude, users!seller_id(name, avatar)';
+      'id, title, price, image_url, image_urls, city, seller_id, latitude, longitude, is_urgent, is_top, users!seller_id(name, avatar)';
 
   @override
   Future<List<MapProductModel>> getNearbyProducts({
@@ -42,8 +42,45 @@ class MapRemoteDataSourceImpl implements MapRemoteDataSource {
         .lte('longitude', longitude + deltaLng)
         .limit(300);
 
-    return (res as List)
-        .map((e) => MapProductModel.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final products = (res as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList(growable: false);
+    final sellerIds = products
+        .map((e) => e['seller_id'] as String?)
+        .whereType<String>()
+        .toSet()
+        .toList(growable: false);
+
+    final ratingBySeller = <String, ({double avg, int count})>{};
+    if (sellerIds.isNotEmpty) {
+      final reviews = await _client
+          .from('business_reviews')
+          .select('business_user_id,stars')
+          .inFilter('business_user_id', sellerIds);
+      for (final row in (reviews as List)) {
+        final m = row as Map<String, dynamic>;
+        final sellerId = m['business_user_id'] as String?;
+        final stars = (m['stars'] as num?)?.toDouble();
+        if (sellerId == null || stars == null) continue;
+        final prev = ratingBySeller[sellerId];
+        if (prev == null) {
+          ratingBySeller[sellerId] = (avg: stars, count: 1);
+        } else {
+          final sum = prev.avg * prev.count + stars;
+          final count = prev.count + 1;
+          ratingBySeller[sellerId] = (avg: sum / count, count: count);
+        }
+      }
+    }
+
+    return products.map((p) {
+      final sellerId = p['seller_id'] as String?;
+      final rating = sellerId == null ? null : ratingBySeller[sellerId];
+      return MapProductModel.fromJson({
+        ...p,
+        'seller_rating_avg': rating?.avg ?? 0,
+        'seller_rating_count': rating?.count ?? 0,
+      });
+    }).toList(growable: false);
   }
 }

@@ -48,6 +48,15 @@ abstract class PostRepository {
     String? videoUrl,
     int videoDurationSeconds = 0,
     String kind = 'news',
+    double? latitude,
+    double? longitude,
+  });
+  Future<List<PostEntity>> getPostsNearby({
+    required double userLatitude,
+    required double userLongitude,
+    required int radiusKm,
+    int limit = 50,
+    String? currentUserId,
   });
   Future<void> toggleLike(String postId, String userId);
   Future<void> toggleDislike(String postId, String userId);
@@ -93,6 +102,10 @@ abstract class PostRepository {
     int? videoDurationSeconds,
     bool clearImage = false,
     bool clearVideo = false,
+  });
+  Future<void> activatePostPromotion({
+    required String postId,
+    required Duration duration,
   });
   Future<void> deletePost(String postId, String userId);
   Future<void> deletePostComment(String commentId, String userId);

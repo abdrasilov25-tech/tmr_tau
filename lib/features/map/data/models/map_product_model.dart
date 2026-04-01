@@ -25,6 +25,10 @@ class MapProductModel extends MapProduct {
     super.sellerName,
     super.sellerAvatarUrl,
     super.sellerId,
+    super.isUrgent,
+    super.isTop,
+    super.sellerRatingAverage,
+    super.sellerRatingCount,
   });
 
   factory MapProductModel.fromJson(Map<String, dynamic> json) {
@@ -41,6 +45,10 @@ class MapProductModel extends MapProduct {
       sellerId: json['seller_id'] as String? ?? '',
       sellerName: user is Map ? user['name'] as String? : null,
       sellerAvatarUrl: user is Map ? user['avatar'] as String? : null,
+      isUrgent: json['is_urgent'] == true,
+      isTop: json['is_top'] == true,
+      sellerRatingAverage: (json['seller_rating_avg'] as num?)?.toDouble() ?? 0,
+      sellerRatingCount: (json['seller_rating_count'] as num?)?.toInt() ?? 0,
     );
   }
 }

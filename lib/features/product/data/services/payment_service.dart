@@ -44,6 +44,8 @@ class PaymentService {
   static const String promotionPremiumProductId = 'qarmet_20';
   static const String promotionBusinessProductId = 'qarmet_30';
   static const String officialPageProductId = 'qarmet_40';
+  static const String premiumSubscriptionProductId = 'premium_subscription';
+  static const String promotePostProductId = 'promote_post';
 
   final SupabaseClient _client;
   final InAppPurchase _iap;
@@ -91,6 +93,11 @@ class PaymentService {
     ),
   };
 
+  static const Set<String> _extraIapProductIds = <String>{
+    premiumSubscriptionProductId,
+    promotePostProductId,
+  };
+
   List<QarmetProduct> get catalog =>
       _qarmetCatalog.values.toList(growable: false);
 
@@ -108,7 +115,7 @@ class PaymentService {
       }
 
       final response = await _iap.queryProductDetails(
-        _qarmetCatalog.keys.toSet(),
+        {..._qarmetCatalog.keys, ..._extraIapProductIds},
       );
       if (response.error != null) {
         _products = const <ProductDetails>[];
@@ -148,6 +155,58 @@ class PaymentService {
 
   Future<void> restorePurchases() async {
     await _iap.restorePurchases();
+  }
+
+  Future<bool> isPremiumActive() async {
+    final auth = _client.auth.currentUser;
+    if (auth == null) return false;
+    try {
+      final row = await _client
+          .from('users')
+          .select('premium_active,premium_until,official_page_active')
+          .eq('id', auth.id)
+          .maybeSingle();
+      if (row == null) return false;
+      final active = row['premium_active'] as bool? ?? false;
+      final untilRaw = row['premium_until'] as String?;
+      final until = DateTime.tryParse(untilRaw ?? '')?.toUtc();
+      final byDate = until != null && until.isAfter(DateTime.now().toUtc());
+      return active || byDate || (row['official_page_active'] as bool? ?? false);
+    } catch (_) {
+      return isOfficialPageActive();
+    }
+  }
+
+  Future<PaymentResult> purchasePremium() async {
+    return _purchase(
+      storeProductId: premiumSubscriptionProductId,
+      onVerified: (purchase) async {
+        await _verifyPurchase(purchase, premiumSubscriptionProductId);
+        final auth = _requireAuthUser();
+        final until = DateTime.now().toUtc().add(const Duration(days: 30));
+        await _client.from('users').update({
+          'premium_active': true,
+          'premium_until': until.toIso8601String(),
+        }).eq('id', auth.id);
+      },
+    );
+  }
+
+  Future<PaymentResult> purchasePromotePost({
+    required String postId,
+    Duration duration = const Duration(hours: 24),
+  }) async {
+    return _purchase(
+      storeProductId: promotePostProductId,
+      onVerified: (purchase) async {
+        await _verifyPurchase(purchase, promotePostProductId);
+        final until = DateTime.now().toUtc().add(duration).toIso8601String();
+        await _client.from('posts').update({
+          'is_promoted': true,
+          'promoted_until': until,
+        }).eq('id', postId);
+      },
+    );
   }
 
   Future<int> getQarmetBalance() async {
@@ -342,89 +401,48 @@ class PaymentService {
     if (positions <= 0) {
       throw Exception('Количество позиций должно быть больше 0');
     }
-    final cost = positions;
-    await _spendQarmet(cost, reason: 'promotion_positions');
-
-    final row = await _client
-        .from('products')
-        .select('promo_top_until')
-        .eq('id', productId)
-        .maybeSingle();
-    final now = DateTime.now().toUtc();
-    DateTime base = now;
-    if (row != null) {
-      final raw = row['promo_top_until'] as String?;
-      final until = DateTime.tryParse(raw ?? '')?.toUtc();
-      if (until != null && until.isAfter(now)) {
-        base = until;
-      }
-    }
-    final updatedUntil = base.add(Duration(hours: positions));
-    await _client
-        .from('products')
-        .update({
-          'is_top': true,
-          'promo_top_until': updatedUntil.toIso8601String(),
-        })
-        .eq('id', productId);
+    await _activatePromotionAtomic(
+      productId: productId,
+      kind: 'top',
+      cost: positions,
+      durationHours: positions,
+    );
   }
 
   Future<void> spendForTopPromotion(String productId) async {
-    await _activatePromotion(
+    await _activatePromotionAtomic(
       productId: productId,
-      promoUntilColumn: 'promo_top_until',
-      reason: 'promotion_top',
-      setFlags: const <String, dynamic>{'is_top': true},
+      kind: 'top',
+      cost: 1,
+      durationHours: 24,
     );
   }
 
   Future<void> spendForUrgentPromotion(String productId) async {
-    await _activatePromotion(
+    await _activatePromotionAtomic(
       productId: productId,
-      promoUntilColumn: 'promo_urgent_until',
-      reason: 'promotion_urgent',
-      setFlags: const <String, dynamic>{'is_urgent': true},
+      kind: 'urgent',
+      cost: 1,
+      durationHours: 24,
     );
   }
 
   Future<void> spendForHighlightPromotion(String productId) async {
-    await _activatePromotion(
+    await _activatePromotionAtomic(
       productId: productId,
-      promoUntilColumn: 'promo_highlight_until',
-      reason: 'promotion_highlight',
+      kind: 'highlight',
+      cost: 1,
+      durationHours: 24,
     );
   }
 
   Future<void> spendForAllInOnePromotion(String productId) async {
-    // "Все и сразу": топ + срочно + выделение на 24ч за 2 Qarmet.
-    await _spendQarmet(2, reason: 'promotion_all_in_one');
-    final now = DateTime.now().toUtc();
-    final row = await _client
-        .from('products')
-        .select('promo_top_until,promo_urgent_until,promo_highlight_until')
-        .eq('id', productId)
-        .maybeSingle();
-
-    DateTime resolveNext(String? raw) {
-      final until = DateTime.tryParse(raw ?? '')?.toUtc();
-      final base = (until != null && until.isAfter(now)) ? until : now;
-      return base.add(const Duration(hours: 24));
-    }
-
-    final nextTop = resolveNext(row?['promo_top_until'] as String?);
-    final nextUrgent = resolveNext(row?['promo_urgent_until'] as String?);
-    final nextHighlight = resolveNext(row?['promo_highlight_until'] as String?);
-
-    await _client
-        .from('products')
-        .update({
-          'is_top': true,
-          'is_urgent': true,
-          'promo_top_until': nextTop.toIso8601String(),
-          'promo_urgent_until': nextUrgent.toIso8601String(),
-          'promo_highlight_until': nextHighlight.toIso8601String(),
-        })
-        .eq('id', productId);
+    await _activatePromotionAtomic(
+      productId: productId,
+      kind: 'all_in_one',
+      cost: 2,
+      durationHours: 24,
+    );
   }
 
   Future<List<QarmetPromotionHistoryItem>> getMyPromotionHistory() async {
@@ -725,6 +743,9 @@ class PaymentService {
           'official_page_active': true,
           'official_page_profile_perks': true,
           'official_page_promo_perks': true,
+          // Даём "инстаграм-галочку" сразу после покупки official_page.
+          'is_verified': true,
+          'seller_verified_store': true,
           'seller_plan': resolvedPlan,
           'official_page_last_credit_at': now.toIso8601String(),
         })
@@ -757,37 +778,25 @@ class PaymentService {
     );
   }
 
-  Future<void> _activatePromotion({
+  Future<void> _activatePromotionAtomic({
     required String productId,
-    required String promoUntilColumn,
-    required String reason,
-    Map<String, dynamic> setFlags = const <String, dynamic>{},
+    required String kind,
+    required int cost,
+    required int durationHours,
   }) async {
-    // Любое продвижение товара стоит ровно 1 Qarmet.
-    await _spendQarmet(1, reason: reason);
-
-    final row = await _client
-        .from('products')
-        .select(promoUntilColumn)
-        .eq('id', productId)
-        .maybeSingle();
-    final now = DateTime.now().toUtc();
-    DateTime base = now;
-    if (row != null) {
-      final raw = row[promoUntilColumn] as String?;
-      final until = DateTime.tryParse(raw ?? '')?.toUtc();
-      if (until != null && until.isAfter(now)) {
-        base = until;
-      }
+    try {
+      await _client.rpc<void>(
+        'spend_qarmet_and_apply_product_promotion',
+        params: <String, dynamic>{
+          'p_product_id': productId,
+          'p_kind': kind,
+          'p_cost': cost,
+          'p_duration_hours': durationHours,
+        },
+      );
+    } on PostgrestException catch (e) {
+      throw Exception(e.message.isNotEmpty ? e.message : 'Не удалось применить продвижение');
     }
-    final nextUntil = base.add(const Duration(hours: 24));
-    await _client
-        .from('products')
-        .update({...setFlags, promoUntilColumn: nextUntil.toIso8601String()})
-        .eq('id', productId);
-    debugPrint(
-      'Promotion activated: product=$productId type=$reason cost=1 nextUntil=$nextUntil',
-    );
   }
 
   Future<void> _spendQarmet(int amount, {required String reason}) async {

@@ -15,6 +15,7 @@ import '../../domain/exceptions/post_comment_exceptions.dart';
 import '../../domain/repositories/post_repository.dart';
 import '../widgets/post_photo_gallery.dart';
 import '../widgets/post_share_sheet.dart';
+import '../../../product/data/services/payment_service.dart';
 
 class PostDetailPage extends StatefulWidget {
   const PostDetailPage({
@@ -414,6 +415,14 @@ class _PostDetailPageState extends State<PostDetailPage> {
                     onRepost: _toggleRepost,
                     onShare: _sharePost,
                   ),
+                  if (isOwner) ...[
+                    const SizedBox(height: 10),
+                    FilledButton.icon(
+                      onPressed: _promotePost,
+                      icon: const Icon(Icons.rocket_launch_outlined),
+                      label: const Text('Поднять пост'),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   Text(
                     'Комментарии (${_comments.length})',
@@ -520,6 +529,30 @@ class _PostDetailPageState extends State<PostDetailPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _promotePost() async {
+    final payment = context.read<PaymentService>();
+    final result = await payment.purchasePromotePost(postId: _post.id);
+    if (!mounted) return;
+    if (result.status == PaymentResultStatus.success) {
+      setState(() {
+        _post = _post.copyWith(
+          isPromoted: true,
+          promotedUntil: DateTime.now().toUtc().add(const Duration(hours: 24)),
+        );
+      });
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          result.message ??
+              (result.status == PaymentResultStatus.success
+                  ? 'Пост продвинут на 24 часа'
+                  : 'Не удалось продвинуть пост'),
+        ),
       ),
     );
   }

@@ -18,6 +18,7 @@ import 'core/theme/data/theme_repository_impl.dart';
 import 'core/theme/theme_index_notifier.dart';
 import 'core/router/app_router.dart';
 import 'core/navigation/search_tab_activation_controller.dart';
+import 'core/services/geo_service.dart';
 import 'core/network/connectivity_host.dart';
 import 'features/auth/data/datasources/auth_remote_datasource.dart';
 import 'features/auth/data/repositories/auth_repository_impl.dart';
@@ -98,6 +99,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
   late final MapRepository _mapRepository;
   late final OrdersRepository _ordersRepository;
   late final AppRouter _appRouter;
+  late final GeoService _geoService;
   late final SearchTabActivationController _searchTabActivation;
   late final AccountManager _accountManager;
   late final ThemeRepository _themeRepository;
@@ -140,6 +142,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
     _postRepository = PostRepositoryImpl(_client);
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
     _ordersRepository = OrdersRepositoryImpl(_client);
+    _geoService = const GeoService();
     _searchTabActivation = SearchTabActivationController();
     _accountManager = AccountManager(
       widget.accountRepository,
@@ -239,6 +242,7 @@ class _TmrTauAppState extends State<TmrTauApp> {
         ),
         RepositoryProvider<MapRepository>.value(value: _mapRepository),
         RepositoryProvider<OrdersRepository>.value(value: _ordersRepository),
+        RepositoryProvider<GeoService>.value(value: _geoService),
         ChangeNotifierProvider<SearchTabActivationController>.value(
           value: _searchTabActivation,
         ),

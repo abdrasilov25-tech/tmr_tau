@@ -13,6 +13,7 @@ import '../../features/auth/presentation/bloc/auth_bloc.dart';
 import '../../features/feed/presentation/pages/favorites_screen.dart';
 import '../../features/feed/presentation/pages/search_page.dart';
 import '../../features/news/presentation/pages/news_feed_page.dart';
+import '../../features/news/presentation/pages/nearby_feed_page.dart';
 import '../../features/notifications/presentation/pages/notifications_activity_page.dart';
 import '../../features/notifications/domain/repositories/notifications_repository.dart';
 import '../../features/notifications/presentation/notification_activity_peek_bus.dart';
@@ -31,6 +32,7 @@ import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/edit_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
 import '../../features/product/presentation/pages/qarmet_wallet_page.dart';
+import '../../features/product/presentation/pages/premium_purchase_page.dart';
 import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
 import '../../features/profile/presentation/pages/following_page.dart';
@@ -196,6 +198,14 @@ class AppRouter {
       GoRoute(
         path: '/qarmet-wallet',
         builder: (context, state) => const QarmetWalletPage(),
+      ),
+      GoRoute(
+        path: '/nearby',
+        builder: (context, state) => const NearbyFeedPage(),
+      ),
+      GoRoute(
+        path: '/premium',
+        builder: (context, state) => const PremiumPurchasePage(),
       ),
       GoRoute(
         path: '/add-story',

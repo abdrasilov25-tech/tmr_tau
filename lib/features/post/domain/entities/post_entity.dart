@@ -22,6 +22,11 @@ class PostEntity extends Equatable {
     this.isDislikedByMe = false,
     this.isRepostedByMe = false,
     this.isSavedByMe = false,
+    this.latitude,
+    this.longitude,
+    this.distanceKm,
+    this.isPromoted = false,
+    this.promotedUntil,
   });
 
   final String id;
@@ -46,6 +51,11 @@ class PostEntity extends Equatable {
   final bool isDislikedByMe;
   final bool isRepostedByMe;
   final bool isSavedByMe;
+  final double? latitude;
+  final double? longitude;
+  final double? distanceKm;
+  final bool isPromoted;
+  final DateTime? promotedUntil;
 
   /// Все URL фото для карусели (мульти или одно из legacy `image_url`).
   List<String> get displayImageUrls {
@@ -77,6 +87,11 @@ class PostEntity extends Equatable {
     bool? isDislikedByMe,
     bool? isRepostedByMe,
     bool? isSavedByMe,
+    double? latitude,
+    double? longitude,
+    double? distanceKm,
+    bool? isPromoted,
+    DateTime? promotedUntil,
   }) {
     return PostEntity(
       id: id ?? this.id,
@@ -99,6 +114,11 @@ class PostEntity extends Equatable {
       isDislikedByMe: isDislikedByMe ?? this.isDislikedByMe,
       isRepostedByMe: isRepostedByMe ?? this.isRepostedByMe,
       isSavedByMe: isSavedByMe ?? this.isSavedByMe,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      distanceKm: distanceKm ?? this.distanceKm,
+      isPromoted: isPromoted ?? this.isPromoted,
+      promotedUntil: promotedUntil ?? this.promotedUntil,
     );
   }
 
@@ -124,5 +144,10 @@ class PostEntity extends Equatable {
         isDislikedByMe,
         isRepostedByMe,
         isSavedByMe,
+        latitude,
+        longitude,
+        distanceKm,
+        isPromoted,
+        promotedUntil,
       ];
 }

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import '../../../../core/products/deleted_product_bus.dart';
@@ -16,6 +17,7 @@ import '../../../../core/storage/hidden_posts_storage.dart';
 import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
+import '../../../../core/widgets/verified_badge.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/formatting/compact_count_format.dart';
 import '../../../../core/theme/themed_content_surface.dart';
@@ -166,12 +168,50 @@ class _MyProfilePageState extends State<MyProfilePage> {
     final picker = ImagePicker();
     final picked = await picker.pickImage(source: ImageSource.gallery);
     if (picked == null) return;
+    if (!mounted) return;
+    var avatarPath = picked.path;
+    try {
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: picked.path,
+        compressFormat: ImageCompressFormat.jpg,
+        compressQuality: 92,
+        aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Обрезать аватар',
+            toolbarColor: Colors.black,
+            toolbarWidgetColor: Colors.white,
+            lockAspectRatio: true,
+            hideBottomControls: false,
+            initAspectRatio: CropAspectRatioPreset.square,
+          ),
+          IOSUiSettings(
+            title: 'Обрезать аватар',
+            aspectRatioLockEnabled: true,
+            resetAspectRatioEnabled: false,
+            rotateButtonsHidden: false,
+            rotateClockwiseButtonHidden: false,
+          ),
+          if (kIsWeb)
+            WebUiSettings(
+              context: context,
+              presentStyle: WebPresentStyle.dialog,
+              size: const CropperSize(width: 380, height: 520),
+            ),
+        ],
+      );
+      if (cropped == null) return;
+      avatarPath = cropped.path;
+    } on MissingPluginException {
+      // Тихий fallback: продолжаем с исходным фото без лишних сообщений.
+    } on PlatformException catch (_) {
+      // Cropper может быть недоступен на части платформ/сборок.
+    }
     setState(() => _updatingAvatar = true);
     try {
-      final file = File(picked.path);
-      final ext = file.path.split('.').last;
+      final file = File(avatarPath);
       final fileName =
-          '${authState.user.id}_${DateTime.now().millisecondsSinceEpoch}.$ext';
+          '${authState.user.id}_${DateTime.now().millisecondsSinceEpoch}.jpg';
       // Храним аватары в отдельном бакете avatars.
       final storageRef = supa.Supabase.instance.client.storage.from(
         SupabaseConstants.bucketAvatars,
@@ -1543,36 +1583,56 @@ class _ProfileContent extends StatelessWidget {
                                     ),
                                     child: Column(
                                       children: [
-                                        Text(
-                                          (user.username != null &&
-                                                  user.username!.isNotEmpty)
-                                              ? '@${user.username}'
-                                              : user.email,
-                                          textAlign: TextAlign.center,
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleLarge
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w700,
-                                                letterSpacing: -0.3,
-                                                color: ThemedContentSurface
-                                                    .profileTextPrimary,
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                (user.username != null &&
+                                                        user.username!.isNotEmpty)
+                                                    ? '@${user.username}'
+                                                    : user.email,
+                                                textAlign: TextAlign.center,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .titleLarge
+                                                    ?.copyWith(
+                                                      fontWeight: FontWeight.w700,
+                                                      letterSpacing: -0.3,
+                                                      color: ThemedContentSurface
+                                                          .profileTextPrimary,
+                                                    ),
                                               ),
+                                            ),
+                                          ],
                                         ),
                                         if (user.name != null &&
                                             user.name!.isNotEmpty) ...[
                                           const SizedBox(height: 6),
-                                          Text(
-                                            user.name!,
-                                            textAlign: TextAlign.center,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .bodyLarge
-                                                ?.copyWith(
-                                                  color: ThemedContentSurface
-                                                      .profileTextSecondary,
-                                                  fontWeight: FontWeight.w500,
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  user.name!,
+                                                  textAlign: TextAlign.center,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodyLarge
+                                                      ?.copyWith(
+                                                        color: ThemedContentSurface
+                                                            .profileTextSecondary,
+                                                        fontWeight: FontWeight.w500,
+                                                      ),
                                                 ),
+                                              ),
+                                              if ((profile?.isVerified ?? false)) ...[
+                                                const SizedBox(width: 6),
+                                                const VerifiedBadge(size: 18),
+                                              ],
+                                            ],
                                           ),
                                         ],
                                       ],

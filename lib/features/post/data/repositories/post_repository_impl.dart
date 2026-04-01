@@ -92,6 +92,11 @@ class PostRepositoryImpl implements PostRepository {
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: repostedIds.contains(p.id),
             isSavedByMe: savedIds.contains(p.id),
+            latitude: p.latitude,
+            longitude: p.longitude,
+            distanceKm: p.distanceKm,
+            isPromoted: p.isPromoted,
+            promotedUntil: p.promotedUntil,
           ),
         )
         .toList();
@@ -553,6 +558,11 @@ class PostRepositoryImpl implements PostRepository {
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: repostedIds.contains(p.id),
             isSavedByMe: savedIds.contains(p.id),
+            latitude: p.latitude,
+            longitude: p.longitude,
+            distanceKm: p.distanceKm,
+            isPromoted: p.isPromoted,
+            promotedUntil: p.promotedUntil,
           ),
         )
         .toList(growable: false);
@@ -715,7 +725,8 @@ class PostRepositoryImpl implements PostRepository {
     final engagement = math.log(1 + engagementRaw) / 4.5;
     final hasMedia = post.videoUrl != null && post.videoUrl!.isNotEmpty || post.displayImageUrls.isNotEmpty;
     final mediaBoost = hasMedia ? 0.08 : 0.0;
-    return freshness * 0.64 + engagement * 0.33 + mediaBoost;
+    final promotedBoost = _isPromotionActive(post) ? 0.2 : 0.0;
+    return freshness * 0.64 + engagement * 0.33 + mediaBoost + promotedBoost;
   }
 
   @override
@@ -773,6 +784,11 @@ class PostRepositoryImpl implements PostRepository {
                 isDislikedByMe: p.isDislikedByMe,
                 isRepostedByMe: p.isRepostedByMe,
                 isSavedByMe: savedIds.contains(p.id),
+                latitude: p.latitude,
+                longitude: p.longitude,
+                distanceKm: p.distanceKm,
+                isPromoted: p.isPromoted,
+                promotedUntil: p.promotedUntil,
               ))
           .toList();
     }
@@ -801,6 +817,8 @@ class PostRepositoryImpl implements PostRepository {
     String? videoUrl,
     int videoDurationSeconds = 0,
     String kind = 'news',
+    double? latitude,
+    double? longitude,
   }) async {
     final normalizedKind = kind.trim().toLowerCase() == 'news'
         ? 'news'
@@ -819,6 +837,10 @@ class PostRepositoryImpl implements PostRepository {
     if (videoUrl != null && videoUrl.isNotEmpty) {
       data['video_url'] = videoUrl;
       data['video_duration_seconds'] = videoDurationSeconds;
+    }
+    if (latitude != null && longitude != null) {
+      data['latitude'] = latitude;
+      data['longitude'] = longitude;
     }
     final res = await _client
         .from(SupabaseConstants.postsTable)
@@ -993,6 +1015,11 @@ class PostRepositoryImpl implements PostRepository {
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: p.isRepostedByMe,
             isSavedByMe: true,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            distanceKm: p.distanceKm,
+            isPromoted: p.isPromoted,
+            promotedUntil: p.promotedUntil,
           ),
         )
         .toList(growable: false);
@@ -1050,6 +1077,11 @@ class PostRepositoryImpl implements PostRepository {
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: p.isRepostedByMe,
             isSavedByMe: p.isSavedByMe,
+            latitude: p.latitude,
+            longitude: p.longitude,
+            distanceKm: p.distanceKm,
+            isPromoted: p.isPromoted,
+            promotedUntil: p.promotedUntil,
           ),
         )
         .toList(growable: false);
@@ -1222,6 +1254,11 @@ class PostRepositoryImpl implements PostRepository {
             isDislikedByMe: p.isDislikedByMe,
             isRepostedByMe: repostedIds.contains(p.id),
             isSavedByMe: savedIds.contains(p.id),
+            latitude: p.latitude,
+            longitude: p.longitude,
+            distanceKm: p.distanceKm,
+            isPromoted: p.isPromoted,
+            promotedUntil: p.promotedUntil,
           ),
         )
         .toList(growable: false);
@@ -1305,6 +1342,11 @@ class PostRepositoryImpl implements PostRepository {
               isDislikedByMe: p.isDislikedByMe,
               isRepostedByMe: repostedIds.contains(p.id),
               isSavedByMe: savedIds.contains(p.id),
+              latitude: p.latitude,
+              longitude: p.longitude,
+              distanceKm: p.distanceKm,
+              isPromoted: p.isPromoted,
+              promotedUntil: p.promotedUntil,
             ),
           )
           .toList(growable: false);
@@ -1362,6 +1404,11 @@ class PostRepositoryImpl implements PostRepository {
         isDislikedByMe: post.isDislikedByMe,
         isRepostedByMe: repost != null,
         isSavedByMe: save != null,
+        latitude: post.latitude,
+        longitude: post.longitude,
+        distanceKm: post.distanceKm,
+        isPromoted: post.isPromoted,
+        promotedUntil: post.promotedUntil,
       );
     }
     return post;
@@ -1389,6 +1436,62 @@ class PostRepositoryImpl implements PostRepository {
     if (videoDurationSeconds != null) data['video_duration_seconds'] = videoDurationSeconds;
     if (data.isEmpty) return;
     await _client.from(SupabaseConstants.postsTable).update(data).eq('id', postId);
+  }
+
+  @override
+  Future<void> activatePostPromotion({
+    required String postId,
+    required Duration duration,
+  }) async {
+    final until = DateTime.now().toUtc().add(duration).toIso8601String();
+    await _client.from(SupabaseConstants.postsTable).update({
+      'is_promoted': true,
+      'promoted_until': until,
+    }).eq('id', postId);
+  }
+
+  @override
+  Future<List<PostEntity>> getPostsNearby({
+    required double userLatitude,
+    required double userLongitude,
+    required int radiusKm,
+    int limit = 50,
+    String? currentUserId,
+  }) async {
+    final res = await _client
+        .from(SupabaseConstants.postsTable)
+        .select(_postSelect)
+        .eq('kind', 'news')
+        .not('latitude', 'is', null)
+        .not('longitude', 'is', null)
+        .order('created_at', ascending: false)
+        .limit(limit * 3);
+    final source = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+    final filtered = <PostEntity>[];
+    for (final p in source) {
+      final lat = p.latitude;
+      final lng = p.longitude;
+      if (lat == null || lng == null) continue;
+      final distance = _distanceKm(userLatitude, userLongitude, lat, lng);
+      if (distance > radiusKm) continue;
+      filtered.add(p.copyWith(distanceKm: distance));
+    }
+    filtered.sort((a, b) {
+      final aPromoted = _isPromotionActive(a) ? 1 : 0;
+      final bPromoted = _isPromotionActive(b) ? 1 : 0;
+      if (aPromoted != bPromoted) return bPromoted.compareTo(aPromoted);
+      final ad = a.distanceKm ?? 999999;
+      final bd = b.distanceKm ?? 999999;
+      final byDistance = ad.compareTo(bd);
+      if (byDistance != 0) return byDistance;
+      final aAct = a.likesCount + (a.commentsCount * 2);
+      final bAct = b.likesCount + (b.commentsCount * 2);
+      return bAct.compareTo(aAct);
+    });
+    final limited = filtered.take(limit).toList(growable: false);
+    return _applyPostUserState(limited, currentUserId);
   }
 
   @override
@@ -1505,6 +1608,28 @@ class PostRepositoryImpl implements PostRepository {
     if (post == null) return null;
     return post['user_id'] as String?;
   }
+
+  bool _isPromotionActive(PostEntity post) {
+    final until = post.promotedUntil;
+    if (!post.isPromoted) return false;
+    if (until == null) return true;
+    return until.isAfter(DateTime.now().toUtc());
+  }
+
+  double _distanceKm(double lat1, double lon1, double lat2, double lon2) {
+    const earth = 6371.0;
+    final dLat = _degToRad(lat2 - lat1);
+    final dLon = _degToRad(lon2 - lon1);
+    final a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_degToRad(lat1)) *
+            math.cos(_degToRad(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return earth * c;
+  }
+
+  double _degToRad(double deg) => deg * (math.pi / 180.0);
 }
 
 class _RecommendationSignals {

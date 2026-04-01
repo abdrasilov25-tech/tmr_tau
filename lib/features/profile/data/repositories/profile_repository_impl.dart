@@ -34,7 +34,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       final userRes = await _client
           .from(SupabaseConstants.usersTable)
           .select(
-            'id, name, avatar, bio, followers_count, is_verified, total_received_post_likes',
+            'id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, total_received_post_likes',
           )
           .eq('id', sellerId)
           .maybeSingle();
@@ -49,7 +49,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
     } on PostgrestException catch (_) {
       final userRes = await _client
           .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count, is_verified')
+          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
           .eq('id', sellerId)
           .maybeSingle();
       if (userRes == null) return null;
@@ -87,6 +87,10 @@ class ProfileRepositoryImpl implements ProfileRepository {
           .maybeSingle();
       isFollowingByMe = f != null;
     }
+    final resolvedVerified = (userMap['is_verified'] as bool? ?? false) ||
+        (userMap['official_page_active'] as bool? ?? false) ||
+        (userMap['seller_verified_store'] as bool? ?? false);
+
     return SellerProfileEntity(
       id: userMap['id'] as String,
       name: userMap['name'] as String? ?? 'Seller',
@@ -97,7 +101,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       totalReceivedPostLikes: totalReceivedPostLikes,
       isFollowingByMe: isFollowingByMe,
       products: products,
-      isVerified: userMap['is_verified'] as bool? ?? false,
+      isVerified: resolvedVerified,
     );
   }
 
@@ -106,12 +110,15 @@ class ProfileRepositoryImpl implements ProfileRepository {
     try {
       final res = await _client
           .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count, following_count, is_verified')
+          .select('id, name, avatar, bio, followers_count, following_count, is_verified, official_page_active, seller_verified_store')
           .eq('is_verified', true)
           .order('followers_count', ascending: false);
       final list = res as List;
       return list.map((e) {
         final m = Map<String, dynamic>.from(e as Map);
+        final resolvedVerified = (m['is_verified'] as bool? ?? false) ||
+            (m['official_page_active'] as bool? ?? false) ||
+            (m['seller_verified_store'] as bool? ?? false);
         return SellerProfileEntity(
           id: m['id'] as String,
           name: m['name'] as String? ?? 'Official',
@@ -122,7 +129,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           totalReceivedPostLikes: 0,
           isFollowingByMe: false,
           products: const [],
-          isVerified: true,
+          isVerified: resolvedVerified,
         );
       }).toList();
     } on PostgrestException catch (_) {
@@ -142,7 +149,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       // Поиск по имени и по bio (как в Instagram). is_verified может отсутствовать в БД.
       final res = await _client
           .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count')
+          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
           .or(
             'name.ilike.%$safe%,bio.ilike.%$safe%,telegram_username.ilike.%$safe%',
           )
@@ -152,6 +159,9 @@ class ProfileRepositoryImpl implements ProfileRepository {
       return list.map((e) {
         final m = Map<String, dynamic>.from(e as Map);
         final name = m['name'] ?? m['Name'];
+        final resolvedVerified = (m['is_verified'] ?? m['isVerified']) as bool? ?? false ||
+            (m['official_page_active'] as bool? ?? false) ||
+            (m['seller_verified_store'] as bool? ?? false);
         return SellerProfileEntity(
           id: m['id'] as String,
           name: name != null ? name.toString() : 'Пользователь',
@@ -162,7 +172,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           totalReceivedPostLikes: 0,
           isFollowingByMe: false,
           products: const [],
-          isVerified: (m['is_verified'] ?? m['isVerified']) as bool? ?? false,
+          isVerified: resolvedVerified,
         );
       }).toList();
     } on PostgrestException catch (e) {
@@ -192,11 +202,14 @@ class ProfileRepositoryImpl implements ProfileRepository {
     for (final id in followingIds) {
       final userRes = await _client
           .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count')
+          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
           .eq('id', id)
           .maybeSingle();
       if (userRes == null) continue;
       final m = Map<String, dynamic>.from(userRes as Map);
+      final resolvedVerified = (m['is_verified'] as bool? ?? false) ||
+          (m['official_page_active'] as bool? ?? false) ||
+          (m['seller_verified_store'] as bool? ?? false);
       result.add(
         SellerProfileEntity(
           id: m['id'] as String,
@@ -208,7 +221,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           totalReceivedPostLikes: 0,
           isFollowingByMe: true,
           products: const [],
-          isVerified: false,
+          isVerified: resolvedVerified,
         ),
       );
     }
@@ -242,11 +255,14 @@ class ProfileRepositoryImpl implements ProfileRepository {
     for (final id in followerIds) {
       final userRes = await _client
           .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count')
+          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
           .eq('id', id)
           .maybeSingle();
       if (userRes == null) continue;
       final m = Map<String, dynamic>.from(userRes as Map);
+      final resolvedVerified = (m['is_verified'] as bool? ?? false) ||
+          (m['official_page_active'] as bool? ?? false) ||
+          (m['seller_verified_store'] as bool? ?? false);
       result.add(
         SellerProfileEntity(
           id: m['id'] as String,
@@ -258,7 +274,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           totalReceivedPostLikes: 0,
           isFollowingByMe: myFollowingIds.contains(id),
           products: const [],
-          isVerified: false,
+          isVerified: resolvedVerified,
         ),
       );
     }

@@ -12,6 +12,10 @@ class MapProduct extends Equatable {
     this.sellerName,
     this.sellerAvatarUrl,
     this.sellerId = '',
+    this.isUrgent = false,
+    this.isTop = false,
+    this.sellerRatingAverage = 0,
+    this.sellerRatingCount = 0,
   });
 
   final String id;
@@ -24,9 +28,23 @@ class MapProduct extends Equatable {
   final String? sellerName;
   final String? sellerAvatarUrl;
   final String sellerId;
+  final bool isUrgent;
+  final bool isTop;
+  final double sellerRatingAverage;
+  final int sellerRatingCount;
 
   String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
 
   @override
-  List<Object?> get props => [id, title, price, latitude, longitude];
+  List<Object?> get props => [
+        id,
+        title,
+        price,
+        latitude,
+        longitude,
+        isUrgent,
+        isTop,
+        sellerRatingAverage,
+        sellerRatingCount,
+      ];
 }

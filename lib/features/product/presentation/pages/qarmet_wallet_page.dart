@@ -605,15 +605,60 @@ class _QarmetPackageCard extends StatelessWidget {
   String get _packTitle {
     switch (pack.productId) {
       case PaymentService.promotionStartProductId:
-        return 'Start пакет';
+        return 'Легкий старт';
       case PaymentService.promotionPremiumProductId:
-        return 'Premium пакет';
+        return 'Новичок';
       case PaymentService.promotionBusinessProductId:
-        return 'Business пакет';
+        return 'Лучшая цена';
       case PaymentService.officialPageProductId:
-        return 'Official Page';
+        return 'Донатер';
       default:
         return pack.title;
+    }
+  }
+
+  String get _marketingNote {
+    switch (pack.productId) {
+      case PaymentService.promotionStartProductId:
+        return 'Минимальная цена входа. Быстрый старт продвижения.';
+      case PaymentService.promotionPremiumProductId:
+        return 'Для тех, кто только начинает и хочет буст с бонусом.';
+      case PaymentService.promotionBusinessProductId:
+        return 'Максимум Qarmet за ваши деньги. Самый выгодный пакет.';
+      case PaymentService.officialPageProductId:
+        return 'Инстаграм-галочка, статус профиля и ежемесячные начисления.';
+      default:
+        return 'Пакет Qarmet для продвижения и выделения.';
+    }
+  }
+
+  String get _badgeText {
+    switch (pack.productId) {
+      case PaymentService.promotionStartProductId:
+        return 'Низкая цена';
+      case PaymentService.promotionPremiumProductId:
+        return 'Хит для старта';
+      case PaymentService.promotionBusinessProductId:
+        return 'Топ выгода';
+      case PaymentService.officialPageProductId:
+        return 'Статус';
+      default:
+        return 'Пакет';
+    }
+  }
+
+  Color get _badgeColor {
+    switch (pack.productId) {
+      case PaymentService.promotionStartProductId:
+        return const Color(0xFF0891B2);
+      case PaymentService.promotionPremiumProductId:
+        return const Color(0xFF7C3AED);
+      case PaymentService.promotionBusinessProductId:
+        return const Color(0xFF1D4ED8);
+      case PaymentService.officialPageProductId:
+        return const Color(0xFFBE123C);
+      default:
+        return const Color(0xFF334155);
     }
   }
 
@@ -636,6 +681,28 @@ class _QarmetPackageCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    _badgeColor.withValues(alpha: 0.16),
+                    _badgeColor.withValues(alpha: 0.05),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: _badgeColor.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                _badgeText,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: _badgeColor,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
             Row(
               children: [
                 Icon(
@@ -676,6 +743,14 @@ class _QarmetPackageCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
+              _marketingNote,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
               '${pack.totalQarmet} Qarmet (${pack.baseQarmet} + бонус ${pack.bonusQarmet})',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
@@ -690,7 +765,7 @@ class _QarmetPackageCard extends StatelessWidget {
             if (pack.isSubscription) ...[
               const SizedBox(height: 6),
               Text(
-                'Ежемесячно: +20 + 5 Qarmet и преимущества профиля.',
+                'Ежемесячно: +20 + 5 Qarmet, галочка профиля и премиум-привилегии.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],

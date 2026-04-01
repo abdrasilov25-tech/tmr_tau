@@ -22,6 +22,11 @@ class PostModel extends PostEntity {
     super.isDislikedByMe = false,
     super.isRepostedByMe = false,
     super.isSavedByMe = false,
+    super.latitude,
+    super.longitude,
+    super.distanceKm,
+    super.isPromoted = false,
+    super.promotedUntil,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
@@ -58,6 +63,11 @@ class PostModel extends PostEntity {
       isDislikedByMe: (json['is_disliked_by_me'] as bool?) ?? false,
       isRepostedByMe: (json['is_reposted_by_me'] as bool?) ?? false,
       isSavedByMe: (json['is_saved_by_me'] as bool?) ?? false,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      distanceKm: (json['distance_km'] as num?)?.toDouble(),
+      isPromoted: (json['is_promoted'] as bool?) ?? false,
+      promotedUntil: DateTime.tryParse((json['promoted_until'] ?? '').toString()),
     );
   }
 }
