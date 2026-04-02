@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -18,7 +19,6 @@ import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../bloc/auth_bloc.dart';
 import 'login_result.dart';
 
-/// Цвета неоновой палитры
 class _NeonColors {
   static const pink = Color(0xFFE91E8C);
   static const orange = Color(0xFFFF6B35);
@@ -31,17 +31,14 @@ class _NeonColors {
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key, this.addAccountMode = false, this.initialEmail});
 
-  /// Если true, после входа возвращаем LoginResult (для добавления аккаунта в переключатель).
   final bool addAccountMode;
-  /// Подставить email (например при переключении аккаунта — остаётся ввести только пароль).
   final String? initialEmail;
 
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
 
-class _LoginPageState extends State<LoginPage>
-    with TickerProviderStateMixin {
+class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -52,16 +49,35 @@ class _LoginPageState extends State<LoginPage>
   bool _appleInProgress = false;
   bool _authHandled = false;
   List<AccountModel> _quickAccounts = const [];
+
+  // Scale for main login button
   late AnimationController _scaleController;
   late Animation<double> _scaleAnimation;
+
+  // Theme button
   late AnimationController _themeButtonScaleController;
   late Animation<double> _themeButtonScaleAnimation;
   late AnimationController _themeButtonGlowController;
   late Animation<double> _themeButtonGlowAnimation;
 
+  // Staggered entrance
+  late AnimationController _entranceController;
+  late Animation<double> _logoScale;
+  late Animation<double> _logoFade;
+  late Animation<Offset> _panelSlide;
+  late Animation<double> _panelFade;
+
+  // Floating particles
+  late AnimationController _particlesController;
+
+  // Shimmer on login button
+  late AnimationController _shimmerController;
+  late Animation<double> _shimmerAnimation;
+
   @override
   void initState() {
     super.initState();
+
     _scaleController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 100),
@@ -69,25 +85,82 @@ class _LoginPageState extends State<LoginPage>
     _scaleAnimation = Tween<double>(begin: 1.0, end: 0.96).animate(
       CurvedAnimation(parent: _scaleController, curve: Curves.easeInOut),
     );
+
     _themeButtonScaleController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 120),
     );
-    _themeButtonScaleAnimation = Tween<double>(begin: 1.0, end: 0.95).animate(
-      CurvedAnimation(parent: _themeButtonScaleController, curve: Curves.easeInOut),
+    _themeButtonScaleAnimation =
+        Tween<double>(begin: 1.0, end: 0.95).animate(
+      CurvedAnimation(
+          parent: _themeButtonScaleController, curve: Curves.easeInOut),
     );
     _themeButtonGlowController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
-    _themeButtonGlowAnimation = Tween<double>(begin: 0.4, end: 0.8).animate(
-      CurvedAnimation(parent: _themeButtonGlowController, curve: Curves.easeInOut),
+    _themeButtonGlowAnimation =
+        Tween<double>(begin: 0.4, end: 0.8).animate(
+      CurvedAnimation(
+          parent: _themeButtonGlowController, curve: Curves.easeInOut),
     );
+
+    // Entrance: logo fades in first, then panel slides up
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    );
+    _logoScale = Tween<double>(begin: 0.6, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.0, 0.45, curve: Curves.easeOutBack),
+      ),
+    );
+    _logoFade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.0, 0.35, curve: Curves.easeOut),
+      ),
+    );
+    _panelSlide =
+        Tween<Offset>(begin: const Offset(0, 0.10), end: Offset.zero).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.25, 0.85, curve: Curves.easeOutCubic),
+      ),
+    );
+    _panelFade = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _entranceController,
+        curve: const Interval(0.25, 0.75, curve: Curves.easeOut),
+      ),
+    );
+
+    // Particles loop
+    _particlesController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 10),
+    )..repeat();
+
+    // Shimmer loop
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2800),
+    )..repeat();
+    _shimmerAnimation =
+        Tween<double>(begin: -1.5, end: 2.5).animate(
+      CurvedAnimation(parent: _shimmerController, curve: Curves.easeInOut),
+    );
+
     _emailFocus.addListener(() => setState(() {}));
     _passwordFocus.addListener(() => setState(() {}));
+
     if (widget.initialEmail != null && widget.initialEmail!.isNotEmpty) {
       _emailController.text = widget.initialEmail!;
     }
+
+    _entranceController.forward();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       try {
@@ -95,14 +168,11 @@ class _LoginPageState extends State<LoginPage>
         manager.loadAccounts().then((accounts) {
           if (!mounted) return;
           if (accounts.isEmpty) return;
-          // Удаляем дубликаты по userId: оставляем последний вариант.
           final byId = <String, AccountModel>{};
           for (final acc in accounts) {
             byId[acc.userId] = acc;
           }
-          setState(() {
-            _quickAccounts = byId.values.toList();
-          });
+          setState(() => _quickAccounts = byId.values.toList());
         }).catchError((_) {});
       } catch (_) {}
     });
@@ -117,6 +187,9 @@ class _LoginPageState extends State<LoginPage>
     _scaleController.dispose();
     _themeButtonScaleController.dispose();
     _themeButtonGlowController.dispose();
+    _entranceController.dispose();
+    _particlesController.dispose();
+    _shimmerController.dispose();
     super.dispose();
   }
 
@@ -135,23 +208,34 @@ class _LoginPageState extends State<LoginPage>
       body: Stack(
         fit: StackFit.expand,
         children: [
+          // Theme background
           ListenableBuilder(
             listenable: context.read<ThemeIndexNotifier>().listenable,
             builder: (context, _) {
               final notifier = context.read<ThemeIndexNotifier>();
               return Positioned.fill(
                 child: Container(
-                  decoration: themeDecoration(notifier.value, notifier.customImagePath),
+                  decoration: themeDecoration(
+                      notifier.value, notifier.customImagePath),
                 ),
               );
             },
           ),
-          ColoredBox(color: Colors.black.withValues(alpha: 0.40)),
-          // Глубина: размытые светящиеся пятна
+          ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
+          // Static glow spots
           _buildGlowSpots(),
-          // Волнистые световые линии (неоновые волны)
+          // Animated floating particles
+          AnimatedBuilder(
+            animation: _particlesController,
+            builder: (context, _) => Positioned.fill(
+              child: CustomPaint(
+                painter: _ParticlesPainter(_particlesController.value),
+              ),
+            ),
+          ),
+          // Neon waves
           _buildNeonWaves(),
-          // Контент поверх
+          // Main content
           SafeArea(
             child: Stack(
               clipBehavior: Clip.none,
@@ -209,11 +293,13 @@ class _LoginPageState extends State<LoginPage>
               context.go('/home/feed');
             }
           }
+
           if (password.isEmpty) {
             doNavigate();
             return;
           }
-          storage.savePasswordImmediate(state.user.id, state.user.email, password);
+          storage.savePasswordImmediate(
+              state.user.id, state.user.email, password);
           if (widget.addAccountMode) {
             doNavigate();
             return;
@@ -258,8 +344,7 @@ class _LoginPageState extends State<LoginPage>
         final appleAvailable = !kIsWeb &&
             (defaultTargetPlatform == TargetPlatform.iOS ||
                 defaultTargetPlatform == TargetPlatform.macOS);
-        const titleColor = Color(0xFF1A1A1E);
-        const subtitleColor = Color(0xFF5C5C66);
+
         return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: Form(
@@ -267,52 +352,180 @@ class _LoginPageState extends State<LoginPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const SizedBox(height: 44),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(24),
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: ThemedContentSurface.loginPanel,
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(
-                          color: Colors.black.withValues(alpha: 0.06),
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.08),
-                            blurRadius: 24,
-                            offset: const Offset(0, 8),
-                          ),
-                        ],
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                Text(
-                  'Вход',
-                  style: GoogleFonts.poppins(
-                    fontSize: 30,
-                    fontWeight: FontWeight.bold,
-                    color: titleColor,
-                    letterSpacing: 1.2,
+                const SizedBox(height: 28),
+                // Animated logo section
+                AnimatedBuilder(
+                  animation: Listenable.merge([_logoScale, _logoFade]),
+                  builder: (_, child) => Opacity(
+                    opacity: _logoFade.value,
+                    child: Transform.scale(
+                      scale: _logoScale.value,
+                      child: child,
+                    ),
                   ),
-                  textAlign: TextAlign.center,
+                  child: _buildAppLogo(),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  'Войдите, чтобы продолжить',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w400,
-                    color: subtitleColor,
+                const SizedBox(height: 28),
+                // Animated main panel
+                SlideTransition(
+                  position: _panelSlide,
+                  child: FadeTransition(
+                    opacity: _panelFade,
+                    child: _buildMainPanel(
+                      loading: loading,
+                      oauthLoading: oauthLoading,
+                      googleLoading: googleLoading,
+                      appleLoading: appleLoading,
+                      appleAvailable: appleAvailable,
+                    ),
                   ),
-                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 22),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAppLogo() {
+    return Column(
+      children: [
+        // Glowing icon container
+        Container(
+          width: 84,
+          height: 84,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFE91E8C), Color(0xFFFF6B35)],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFE91E8C).withValues(alpha: 0.55),
+                blurRadius: 36,
+                spreadRadius: 4,
+              ),
+              BoxShadow(
+                color: const Color(0xFFFF6B35).withValues(alpha: 0.3),
+                blurRadius: 20,
+                spreadRadius: -4,
+              ),
+            ],
+          ),
+          child: const Icon(Icons.bolt_rounded, color: Colors.white, size: 46),
+        ),
+        const SizedBox(height: 18),
+        Text(
+          'TMR TAU',
+          style: GoogleFonts.poppins(
+            fontSize: 30,
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+            letterSpacing: 5,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Войдите в свой аккаунт',
+          style: GoogleFonts.poppins(
+            fontSize: 13,
+            color: Colors.white.withValues(alpha: 0.55),
+            letterSpacing: 0.4,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMainPanel({
+    required bool loading,
+    required bool oauthLoading,
+    required bool googleLoading,
+    required bool appleLoading,
+    required bool appleAvailable,
+  }) {
+    const subtitleColor = Color(0xFF5C5C66);
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(28),
+            color: ThemedContentSurface.loginPanel,
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.14),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.18),
+                blurRadius: 48,
+                offset: const Offset(0, 20),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 28, 20, 24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Social buttons first (like Airbnb, Spotify, etc.) ──
+                if (appleAvailable) ...[
+                  _SocialAuthButton(
+                    onPressed: loading || oauthLoading
+                        ? null
+                        : () {
+                            setState(() {
+                              _appleInProgress = true;
+                              _googleInProgress = false;
+                            });
+                            context
+                                .read<AuthBloc>()
+                                .add(const AuthSignInWithAppleRequested());
+                          },
+                    loading: appleLoading,
+                    backgroundColor: const Color(0xFF111111),
+                    textColor: Colors.white,
+                    borderColor: Colors.white.withValues(alpha: 0.12),
+                    icon: const FaIcon(
+                      FontAwesomeIcons.apple,
+                      size: 21,
+                      color: Colors.white,
+                    ),
+                    label: 'Продолжить с Apple',
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                _SocialAuthButton(
+                  onPressed: loading || oauthLoading
+                      ? null
+                      : () {
+                          setState(() {
+                            _googleInProgress = true;
+                            _appleInProgress = false;
+                          });
+                          context
+                              .read<AuthBloc>()
+                              .add(const AuthSignInWithGoogleRequested());
+                        },
+                  loading: googleLoading,
+                  backgroundColor: Colors.white,
+                  textColor: const Color(0xFF3C4043),
+                  borderColor: const Color(0xFFE8EAED),
+                  icon: const _GoogleLogo(size: 20),
+                  label: 'Продолжить с Google',
+                ),
+                const SizedBox(height: 24),
+                // ── Divider "или" ──
+                const _OrDivider(),
+                const SizedBox(height: 20),
+                // ── Email & password ──
                 _NeonTextField(
                   controller: _emailController,
                   focusNode: _emailFocus,
@@ -341,7 +554,7 @@ class _LoginPageState extends State<LoginPage>
                   validator: (v) =>
                       (v == null || v.isEmpty) ? 'Введите пароль' : null,
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 8),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
@@ -352,7 +565,8 @@ class _LoginPageState extends State<LoginPage>
                             if (email.isEmpty || !email.contains('@')) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Введите корректный email для сброса пароля'),
+                                  content: Text(
+                                      'Введите корректный email для сброса пароля'),
                                 ),
                               );
                               return;
@@ -361,69 +575,34 @@ class _LoginPageState extends State<LoginPage>
                                   AuthResetPasswordRequested(email: email),
                                 );
                           },
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 4, vertical: 2),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                     child: Text(
                       'Забыли пароль?',
                       style: GoogleFonts.poppins(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
+                        color: _NeonColors.pink,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
+                // ── Main login button with shimmer ──
                 _NeonLoginButton(
                   scaleAnimation: _scaleAnimation,
+                  shimmerAnimation: _shimmerAnimation,
                   onTapDown: () => _scaleController.forward(),
                   onTapUp: () => _scaleController.reverse(),
                   onTapCancel: () => _scaleController.reverse(),
                   onPressed: loading || oauthLoading ? null : _submit,
                   loading: loading,
                 ),
-                if (appleAvailable) ...[
-                  const SizedBox(height: 12),
-                  FilledButton.tonal(
-                    onPressed: loading || oauthLoading
-                        ? null
-                        : () {
-                            setState(() {
-                              _appleInProgress = true;
-                              _googleInProgress = false;
-                            });
-                            context
-                                .read<AuthBloc>()
-                                .add(const AuthSignInWithAppleRequested());
-                          },
-                    child: appleLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Продолжить с Apple'),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                FilledButton.tonal(
-                  onPressed: loading || oauthLoading
-                      ? null
-                      : () {
-                          setState(() {
-                            _googleInProgress = true;
-                            _appleInProgress = false;
-                          });
-                          context
-                              .read<AuthBloc>()
-                              .add(const AuthSignInWithGoogleRequested());
-                        },
-                  child: googleLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Text('Продолжить с Google'),
-                ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 22),
+                // ── Register link ──
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -440,27 +619,27 @@ class _LoginPageState extends State<LoginPage>
                         'Зарегистрироваться',
                         style: GoogleFonts.poppins(
                           fontSize: 13,
-                          color: const Color(0xFF2196F3),
+                          color: _NeonColors.pink,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
+                // ── Quick accounts ──
                 if (_quickAccounts.isNotEmpty) ...[
+                  const SizedBox(height: 22),
                   Text(
                     'Быстрый вход',
                     style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: subtitleColor,
                     ),
-                    textAlign: TextAlign.left,
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 10),
                   SizedBox(
-                    height: 66,
+                    height: 76,
                     child: Builder(
                       builder: (context) {
                         final saved =
@@ -468,7 +647,7 @@ class _LoginPageState extends State<LoginPage>
                         return ListView.separated(
                           scrollDirection: Axis.horizontal,
                           itemCount: _quickAccounts.length,
-                          separatorBuilder: (context, index) =>
+                          separatorBuilder: (context, _) =>
                               const SizedBox(width: 12),
                           itemBuilder: (context, index) {
                             final acc = _quickAccounts[index];
@@ -478,30 +657,44 @@ class _LoginPageState extends State<LoginPage>
                                   s.email.toLowerCase() ==
                                       acc.email.toLowerCase(),
                               orElse: () => SavedAccount(
-                                id: acc.userId,
-                                email: acc.email,
-                              ),
+                                  id: acc.userId, email: acc.email),
                             );
                             final originalUrl = savedMatch.avatarUrl;
-                            final uniqueUrl = (originalUrl != null &&
-                                    originalUrl.isNotEmpty)
-                                ? '$originalUrl?uid=${savedMatch.id}'
-                                : null;
+                            final uniqueUrl =
+                                (originalUrl != null && originalUrl.isNotEmpty)
+                                    ? '$originalUrl?uid=${savedMatch.id}'
+                                    : null;
                             return GestureDetector(
                               onTap: loading
                                   ? null
-                                  : () async {
-                                      await _quickSwitchToAccount(acc);
-                                    },
+                                  : () async =>
+                                      _quickSwitchToAccount(acc),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  CachedAvatar(
-                                    imageUrl: uniqueUrl,
-                                    radius: 16,
-                                    fallbackText: savedMatch.displayName,
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      border: Border.all(
+                                        color: _NeonColors.pink
+                                            .withValues(alpha: 0.45),
+                                        width: 2,
+                                      ),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: _NeonColors.pink
+                                              .withValues(alpha: 0.2),
+                                          blurRadius: 8,
+                                        ),
+                                      ],
+                                    ),
+                                    child: CachedAvatar(
+                                      imageUrl: uniqueUrl,
+                                      radius: 20,
+                                      fallbackText: savedMatch.displayName,
+                                    ),
                                   ),
-                                  const SizedBox(height: 3),
+                                  const SizedBox(height: 5),
                                   SizedBox(
                                     width: 74,
                                     child: Text(
@@ -523,20 +716,12 @@ class _LoginPageState extends State<LoginPage>
                       },
                     ),
                   ),
-                  const SizedBox(height: 8),
                 ],
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 
@@ -553,8 +738,7 @@ class _LoginPageState extends State<LoginPage>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Не удалось войти в сохранённый аккаунт. Войдите заново.',
-          ),
+              'Не удалось войти в сохранённый аккаунт. Войдите заново.'),
         ),
       );
       _emailController.text = account.email;
@@ -563,7 +747,8 @@ class _LoginPageState extends State<LoginPage>
 
   Widget _buildThemeButton() {
     return AnimatedBuilder(
-      animation: Listenable.merge([_themeButtonScaleAnimation, _themeButtonGlowAnimation]),
+      animation:
+          Listenable.merge([_themeButtonScaleAnimation, _themeButtonGlowAnimation]),
       builder: (context, child) {
         final glow = _themeButtonGlowAnimation.value;
         return Transform.scale(
@@ -575,7 +760,6 @@ class _LoginPageState extends State<LoginPage>
                 BoxShadow(
                   color: Colors.white.withValues(alpha: 0.12 * glow),
                   blurRadius: 12,
-                  spreadRadius: 0,
                 ),
               ],
             ),
@@ -650,61 +834,260 @@ class _LoginPageState extends State<LoginPage>
   }
 }
 
-/// Светящиеся размытые пятна для глубины
-class _GlowSpotsPainter extends CustomPainter {
+// ─────────────────────────────────────────────
+// Social auth button (Apple / Google style)
+// ─────────────────────────────────────────────
+
+class _SocialAuthButton extends StatefulWidget {
+  const _SocialAuthButton({
+    required this.onPressed,
+    required this.loading,
+    required this.backgroundColor,
+    required this.textColor,
+    required this.borderColor,
+    required this.icon,
+    required this.label,
+  });
+
+  final VoidCallback? onPressed;
+  final bool loading;
+  final Color backgroundColor;
+  final Color textColor;
+  final Color borderColor;
+  final Widget icon;
+  final String label;
+
   @override
-  void paint(Canvas canvas, Size size) {
-    final spots = <({Offset offset, Color color})>[
-      (offset: Offset(0.1 * size.width, 0.15 * size.height), color: const Color(0x406B2D9E)),
-      (offset: Offset(0.85 * size.width, 0.3 * size.height), color: const Color(0x30E91E8C)),
-      (offset: Offset(0.2 * size.width, 0.7 * size.height), color: const Color(0x25FF6B35)),
-      (offset: Offset(0.9 * size.width, 0.8 * size.height), color: const Color(0x3000D9D9)),
-      (offset: Offset(0.5 * size.width, 0.5 * size.height), color: const Color(0x15FFFFFF)),
-    ];
-    for (final spot in spots) {
-      final paint = Paint()
-        ..color = spot.color
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 100);
-      canvas.drawCircle(spot.offset, 120, paint);
-    }
+  State<_SocialAuthButton> createState() => _SocialAuthButtonState();
+}
+
+class _SocialAuthButtonState extends State<_SocialAuthButton>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 90),
+    );
+    _scale = Tween<double>(begin: 1.0, end: 0.97).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => _ctrl.forward(),
+      onTapUp: (_) {
+        _ctrl.reverse();
+        widget.onPressed?.call();
+      },
+      onTapCancel: () => _ctrl.reverse(),
+      child: AnimatedBuilder(
+        animation: _scale,
+        builder: (_, child) =>
+            Transform.scale(scale: _scale.value, child: child),
+        child: Container(
+          height: 56,
+          decoration: BoxDecoration(
+            color: widget.backgroundColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: widget.borderColor, width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: widget.loading
+              ? Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(widget.textColor),
+                    ),
+                  ),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    widget.icon,
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        widget.label,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: widget.textColor,
+                          letterSpacing: 0.1,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
+    );
+  }
 }
 
-/// Волнистые неоновые линии на фоне
-class _NeonWavesPainter extends CustomPainter {
+// ─────────────────────────────────────────────
+// Google 4-color "G" logo (CustomPaint)
+// ─────────────────────────────────────────────
+
+class _GoogleLogo extends StatelessWidget {
+  const _GoogleLogo({required this.size});
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: CustomPaint(painter: _GoogleLogoPainter()),
+    );
+  }
+}
+
+class _GoogleLogoPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+    final cx = w / 2;
+    final cy = h / 2;
+    final r = w * 0.46;
+    final stroke = w * 0.175;
+
     final paint = Paint()
-      ..color = const Color(0x18FFFFFF)
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt
+      ..isAntiAlias = true;
 
-    for (var i = 0; i < 4; i++) {
-      final path = Path();
-      final yBase = 0.2 * size.height + i * 0.25 * size.height;
-      path.moveTo(0, yBase);
-      for (var x = 0.0; x <= size.width + 50; x += 20) {
-        final t = x * 0.008 + i * 0.5;
-        final y = yBase + 25 * (i.isEven ? 1 : -1) * _wave(t);
-        if (x == 0) path.moveTo(x, y);
-        path.lineTo(x, y);
-      }
-      canvas.drawPath(path, paint);
-    }
+    final rect = Rect.fromCircle(
+        center: Offset(cx, cy), radius: r - stroke / 2);
+
+    // Red arc  (top-right → right gap)  ~315° → 60°  (= -45° → 60°)
+    paint.color = const Color(0xFFEA4335);
+    canvas.drawArc(
+        rect, _deg(-45), _deg(105), false, paint);
+
+    // Yellow arc  60° → 120°
+    paint.color = const Color(0xFFFBBC05);
+    canvas.drawArc(rect, _deg(60), _deg(60), false, paint);
+
+    // Green arc  120° → 240°
+    paint.color = const Color(0xFF34A853);
+    canvas.drawArc(rect, _deg(120), _deg(120), false, paint);
+
+    // Blue arc  240° → 315°
+    paint.color = const Color(0xFF4285F4);
+    canvas.drawArc(rect, _deg(240), _deg(75), false, paint);
+
+    // Horizontal bar (the tongue of the G)
+    final barPaint = Paint()
+      ..color = const Color(0xFF4285F4)
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
+    final barTop = cy - stroke / 2;
+    final barBottom = cy + stroke / 2;
+    final barLeft = cx; // starts from center
+    final barRight = cx + r - stroke / 2 + stroke * 0.05;
+
+    final barPath = Path()
+      ..addRRect(RRect.fromRectAndCorners(
+        Rect.fromLTRB(barLeft, barTop, barRight, barBottom),
+        topRight: const Radius.circular(4),
+        bottomRight: const Radius.circular(4),
+      ));
+    canvas.drawPath(barPath, barPaint);
   }
 
-  double _wave(double t) {
-    return math.sin(t);
-  }
+  static double _deg(double degrees) => degrees * math.pi / 180;
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Поле ввода в стиле glassmorphism с неоновой обводкой и glow при фокусе
+// ─────────────────────────────────────────────
+// "— или —" divider
+// ─────────────────────────────────────────────
+
+class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  Colors.grey.shade300,
+                ],
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Text(
+            'или',
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              color: const Color(0xFFAAAAAA),
+              letterSpacing: 0.5,
+            ),
+          ),
+        ),
+        Expanded(
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.grey.shade300,
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Neon text field (glassmorphism + glow)
+// ─────────────────────────────────────────────
+
 class _NeonTextField extends StatelessWidget {
   const _NeonTextField({
     required this.controller,
@@ -738,9 +1121,8 @@ class _NeonTextField extends StatelessWidget {
       tween: Tween(begin: 0, end: isFocused ? 1 : 0),
       duration: const Duration(milliseconds: 200),
       builder: (context, value, child) {
-        final glowOpacity = lightSurface
-            ? (0.08 + 0.12 * value)
-            : (0.3 + 0.4 * value);
+        final glowOpacity =
+            lightSurface ? (0.08 + 0.12 * value) : (0.3 + 0.4 * value);
         final fillColor = lightSurface
             ? Colors.grey.shade50
             : Colors.white.withValues(alpha: 0.12);
@@ -748,13 +1130,14 @@ class _NeonTextField extends StatelessWidget {
             lightSurface ? Colors.grey.shade600 : _NeonColors.white40;
         final iconColor =
             lightSurface ? Colors.grey.shade700 : _NeonColors.white60;
+
         return Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(_radius),
             boxShadow: [
               BoxShadow(
                 color: borderColor.withValues(alpha: glowOpacity),
-                blurRadius: isFocused ? 16 : 6,
+                blurRadius: isFocused ? 18 : 6,
                 spreadRadius: isFocused ? 1 : 0,
               ),
             ],
@@ -766,8 +1149,8 @@ class _NeonTextField extends StatelessWidget {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(_radius),
                       border: Border.all(
-                        color: borderColor.withValues(
-                            alpha: isFocused ? 0.85 : 0.45),
+                        color: borderColor
+                            .withValues(alpha: isFocused ? 0.85 : 0.45),
                         width: isFocused ? 2 : 1.5,
                       ),
                       color: fillColor,
@@ -815,8 +1198,8 @@ class _NeonTextField extends StatelessWidget {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(_radius),
                         border: Border.all(
-                          color: borderColor.withValues(
-                              alpha: isFocused ? 0.9 : 0.5),
+                          color: borderColor
+                              .withValues(alpha: isFocused ? 0.9 : 0.5),
                           width: isFocused ? 2 : 1.5,
                         ),
                         color: fillColor,
@@ -866,10 +1249,14 @@ class _NeonTextField extends StatelessWidget {
   }
 }
 
-/// Кнопка «Войти»: pill, градиент розовый→оранжевый, glow, scale при нажатии
+// ─────────────────────────────────────────────
+// Main "Войти" button with shimmer sweep
+// ─────────────────────────────────────────────
+
 class _NeonLoginButton extends StatelessWidget {
   const _NeonLoginButton({
     required this.scaleAnimation,
+    required this.shimmerAnimation,
     required this.onTapDown,
     required this.onTapUp,
     required this.onTapCancel,
@@ -878,6 +1265,7 @@ class _NeonLoginButton extends StatelessWidget {
   });
 
   final Animation<double> scaleAnimation;
+  final Animation<double> shimmerAnimation;
   final VoidCallback onTapDown;
   final VoidCallback onTapUp;
   final VoidCallback onTapCancel;
@@ -889,76 +1277,259 @@ class _NeonLoginButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
-      animation: scaleAnimation,
+      animation: Listenable.merge([scaleAnimation, shimmerAnimation]),
       builder: (context, child) {
         return Transform.scale(
           scale: scaleAnimation.value,
-          child: child,
+          child: GestureDetector(
+            onTapDown: (_) => onTapDown(),
+            onTapUp: (_) => onTapUp(),
+            onTapCancel: onTapCancel,
+            child: Container(
+              height: 58,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(_radius),
+                gradient: const LinearGradient(
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                  colors: [
+                    Color(0xFFE91E8C),
+                    Color(0xFFE85A4F),
+                    Color(0xFFFF6B35),
+                  ],
+                  stops: [0.0, 0.5, 1.0],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: _NeonColors.pink.withValues(alpha: 0.55),
+                    blurRadius: 28,
+                    spreadRadius: 0,
+                    offset: const Offset(0, 8),
+                  ),
+                  BoxShadow(
+                    color: _NeonColors.orange.withValues(alpha: 0.35),
+                    blurRadius: 16,
+                    spreadRadius: -4,
+                  ),
+                ],
+              ),
+              child: Stack(
+                children: [
+                  // Shimmer sweep overlay
+                  if (!loading)
+                    Positioned.fill(
+                      child: LayoutBuilder(builder: (_, constraints) {
+                        final w = constraints.maxWidth;
+                        final sweep = shimmerAnimation.value;
+                        return CustomPaint(
+                          painter: _ShimmerPainter(
+                            progress: sweep,
+                            width: w,
+                          ),
+                        );
+                      }),
+                    ),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onPressed,
+                      borderRadius: BorderRadius.circular(_radius),
+                      child: Center(
+                        child: loading
+                            ? const SizedBox(
+                                height: 26,
+                                width: 26,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      _NeonColors.white),
+                                ),
+                              )
+                            : Text(
+                                'Войти',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                  color: _NeonColors.white,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         );
       },
-      child: GestureDetector(
-        onTapDown: (_) => onTapDown(),
-        onTapUp: (_) => onTapUp(),
-        onTapCancel: onTapCancel,
-        child: Container(
-          height: 58,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(_radius),
-            gradient: LinearGradient(
-              begin: Alignment.centerLeft,
-              end: Alignment.centerRight,
-              colors: [
-                _NeonColors.pink,
-                const Color(0xFFE85A4F),
-                _NeonColors.orange,
-              ],
-              stops: const [0.0, 0.5, 1.0],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: _NeonColors.pink.withValues(alpha: 0.6),
-                blurRadius: 24,
-                spreadRadius: 0,
-                offset: const Offset(0, 6),
-              ),
-              BoxShadow(
-                color: _NeonColors.orange.withValues(alpha: 0.4),
-                blurRadius: 16,
-                spreadRadius: -2,
-              ),
-            ],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onPressed,
-              borderRadius: BorderRadius.circular(_radius),
-              child: Center(
-                child: loading
-                    ? const SizedBox(
-                        height: 26,
-                        width: 26,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            _NeonColors.white,
-                          ),
-                        ),
-                      )
-                    : Text(
-                        'Войти',
-                        style: GoogleFonts.poppins(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: _NeonColors.white,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-              ),
-            ),
-          ),
-        ),
-      ),
     );
   }
+}
+
+// ─────────────────────────────────────────────
+// Shimmer sweep painter
+// ─────────────────────────────────────────────
+
+class _ShimmerPainter extends CustomPainter {
+  const _ShimmerPainter({required this.progress, required this.width});
+  final double progress;
+  final double width;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shimmerWidth = size.width * 0.4;
+    final x = progress * (size.width + shimmerWidth) - shimmerWidth;
+
+    final gradient = LinearGradient(
+      colors: [
+        Colors.white.withValues(alpha: 0.0),
+        Colors.white.withValues(alpha: 0.18),
+        Colors.white.withValues(alpha: 0.0),
+      ],
+      stops: const [0.0, 0.5, 1.0],
+    );
+
+    final paint = Paint()
+      ..shader = gradient.createShader(
+        Rect.fromLTWH(x, 0, shimmerWidth, size.height),
+      );
+
+    canvas.drawRect(
+      Rect.fromLTWH(x, 0, shimmerWidth, size.height),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _ShimmerPainter old) =>
+      old.progress != progress;
+}
+
+// ─────────────────────────────────────────────
+// Floating particles painter
+// ─────────────────────────────────────────────
+
+class _ParticlesPainter extends CustomPainter {
+  _ParticlesPainter(this.t);
+  final double t;
+
+  static final _rand = math.Random(42);
+  static final List<_Particle> _particles = List.generate(28, (i) {
+    return _Particle(
+      x: _rand.nextDouble(),
+      y: _rand.nextDouble(),
+      radius: 1.2 + _rand.nextDouble() * 2.0,
+      speed: 0.04 + _rand.nextDouble() * 0.08,
+      phase: _rand.nextDouble() * math.pi * 2,
+      opacity: 0.15 + _rand.nextDouble() * 0.35,
+    );
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final p in _particles) {
+      final yProgress = (p.y + p.speed * t) % 1.0;
+      final xWave = p.x + 0.04 * math.sin(t * math.pi * 2 + p.phase);
+      final px = xWave * size.width;
+      final py = (1.0 - yProgress) * size.height;
+
+      final paint = Paint()
+        ..color = Colors.white.withValues(alpha: p.opacity * (1 - yProgress * 0.5))
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, p.radius * 0.8);
+
+      canvas.drawCircle(Offset(px, py), p.radius, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ParticlesPainter old) => old.t != t;
+}
+
+class _Particle {
+  const _Particle({
+    required this.x,
+    required this.y,
+    required this.radius,
+    required this.speed,
+    required this.phase,
+    required this.opacity,
+  });
+  final double x;
+  final double y;
+  final double radius;
+  final double speed;
+  final double phase;
+  final double opacity;
+}
+
+// ─────────────────────────────────────────────
+// Background painters (unchanged)
+// ─────────────────────────────────────────────
+
+class _GlowSpotsPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final spots = <({Offset offset, Color color})>[
+      (
+        offset: Offset(0.1 * size.width, 0.15 * size.height),
+        color: const Color(0x406B2D9E)
+      ),
+      (
+        offset: Offset(0.85 * size.width, 0.3 * size.height),
+        color: const Color(0x30E91E8C)
+      ),
+      (
+        offset: Offset(0.2 * size.width, 0.7 * size.height),
+        color: const Color(0x25FF6B35)
+      ),
+      (
+        offset: Offset(0.9 * size.width, 0.8 * size.height),
+        color: const Color(0x3000D9D9)
+      ),
+      (
+        offset: Offset(0.5 * size.width, 0.5 * size.height),
+        color: const Color(0x15FFFFFF)
+      ),
+    ];
+    for (final spot in spots) {
+      final paint = Paint()
+        ..color = spot.color
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 100);
+      canvas.drawCircle(spot.offset, 120, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _NeonWavesPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0x12FFFFFF)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+
+    for (var i = 0; i < 4; i++) {
+      final path = Path();
+      final yBase = 0.2 * size.height + i * 0.25 * size.height;
+      path.moveTo(0, yBase);
+      for (var x = 0.0; x <= size.width + 50; x += 20) {
+        final tVal = x * 0.008 + i * 0.5;
+        final y = yBase + 25 * (i.isEven ? 1 : -1) * math.sin(tVal);
+        if (x == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

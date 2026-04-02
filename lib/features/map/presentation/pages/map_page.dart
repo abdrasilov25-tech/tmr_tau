@@ -33,6 +33,8 @@ class _MapPageState extends State<MapPage> {
   bool _shareMyLocation = false;
   bool _friendsLoading = false;
   bool _businessActionLoading = false;
+  bool _cosmeticsStickerUnlocked = false;
+  bool _cosmeticsPurchaseLoading = false;
   List<_FriendLocation> _friends = const <_FriendLocation>[];
   LatLng? _myPosition;
   // Временный предпросмотр карты без подписки (для демонстрации дизайна).
@@ -47,6 +49,9 @@ class _MapPageState extends State<MapPage> {
     _checkMapsConfig();
     _checkOfficialPageAccess();
     _loadShareLocationStatus();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadCosmeticsStickerAccess();
+    });
   }
 
   @override
@@ -70,7 +75,10 @@ class _MapPageState extends State<MapPage> {
                 ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose)
                 : BitmapDescriptor.defaultMarker),
         infoWindow: InfoWindow(title: p.title, snippet: p.priceFormatted),
-        onTap: () => _showProductSheet(p),
+        onTap: () {
+          if (!_ensureOfficialPageAccess()) return;
+          _showProductSheet(p);
+        },
       );
     }).toSet();
   }
@@ -82,7 +90,10 @@ class _MapPageState extends State<MapPage> {
         position: LatLng(f.latitude, f.longitude),
         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         infoWindow: InfoWindow(title: f.name, snippet: 'Друг на карте'),
-        onTap: () => _showFriendSheet(f),
+        onTap: () {
+          if (!_ensureOfficialPageAccess()) return;
+          _showFriendSheet(f);
+        },
       );
     }).toSet();
   }
@@ -97,6 +108,7 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _onRadiusChanged(double value) {
+    if (!_ensureOfficialPageAccess()) return;
     setState(() => _radiusKm = value);
     context.read<MapBloc>().add(MapRadiusChanged(value));
   }
@@ -204,7 +216,79 @@ class _MapPageState extends State<MapPage> {
     }
   }
 
-  Future<void> _sendSticker(String friendId, String sticker) async {
+  Future<void> _loadCosmeticsStickerAccess() async {
+    if (!mounted) return;
+    final payment = context.read<PaymentService>();
+    final ok = await payment.getCosmeticsLifetimeUnlocked();
+    if (mounted) setState(() => _cosmeticsStickerUnlocked = ok);
+  }
+
+  Future<void> _purchaseCosmeticsForStickers() async {
+    if (_cosmeticsPurchaseLoading) return;
+    final payment = context.read<PaymentService>();
+    setState(() => _cosmeticsPurchaseLoading = true);
+    try {
+      final result = await payment.purchaseProfileCosmeticsLifetime();
+      if (!mounted) return;
+      if (result.status == PaymentResultStatus.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Оформление активировано — можно отправлять стикеры с карты',
+            ),
+          ),
+        );
+        await _loadCosmeticsStickerAccess();
+      } else if (result.status == PaymentResultStatus.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message ?? 'Не удалось оформить покупку'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cosmeticsPurchaseLoading = false);
+    }
+  }
+
+  Future<void> _showCosmeticsRequiredForStickers() async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Стикеры с карты'),
+        content: const Text(
+          'Отправка стикеров друзьям с карты доступна с покупкой '
+          '«Оформление навсегда»: галочка, рамка и значок в профиле '
+          'без траты Qarmet.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: _cosmeticsPurchaseLoading
+                ? null
+                : () async {
+                    Navigator.pop(ctx);
+                    await _purchaseCosmeticsForStickers();
+                  },
+            child: const Text('Купить'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _sendStickerToFriend(String friendId, String sticker) async {
+    final payment = context.read<PaymentService>();
+    final unlocked = await payment.getCosmeticsLifetimeUnlocked();
+    if (mounted) setState(() => _cosmeticsStickerUnlocked = unlocked);
+    if (!unlocked) {
+      if (!mounted) return;
+      await _showCosmeticsRequiredForStickers();
+      return;
+    }
     final authUser = Supabase.instance.client.auth.currentUser;
     if (authUser == null) return;
     await Supabase.instance.client.from('messages').insert({
@@ -212,6 +296,10 @@ class _MapPageState extends State<MapPage> {
       'receiver_id': friendId,
       'text': sticker,
     });
+  }
+
+  Future<void> _sendSticker(String friendId, String sticker) async {
+    await _sendStickerToFriend(friendId, sticker);
   }
 
   Future<void> _openRouteToFriend(_FriendLocation friend) async {
@@ -224,8 +312,10 @@ class _MapPageState extends State<MapPage> {
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  void _showFriendSheet(_FriendLocation friend) {
-    showModalBottomSheet<void>(
+  Future<void> _showFriendSheet(_FriendLocation friend) async {
+    await _loadCosmeticsStickerAccess();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (_) => SafeArea(
@@ -254,12 +344,19 @@ class _MapPageState extends State<MapPage> {
                       await _sendSticker(friend.id, '🫶');
                       if (!mounted) return;
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Стикер отправлен')),
-                      );
+                      if (!mounted) return;
+                      if (_cosmeticsStickerUnlocked) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Стикер отправлен')),
+                        );
+                      }
                     },
                     icon: const Icon(Icons.emoji_emotions_outlined),
-                    label: const Text('Стикер'),
+                    label: Text(
+                      _cosmeticsStickerUnlocked
+                          ? 'Стикер'
+                          : 'Стикер (оформление)',
+                    ),
                   ),
                   OutlinedButton.icon(
                     onPressed: () async {
@@ -300,6 +397,9 @@ class _MapPageState extends State<MapPage> {
           _hasOfficialPageAccess = false;
           _accessLoading = false;
         });
+        if (mounted) {
+          context.read<MapBloc>().add(const MapLocationRequested());
+        }
         return;
       }
 
@@ -316,8 +416,10 @@ class _MapPageState extends State<MapPage> {
         _accessLoading = false;
       });
       if (hasAccess) {
+        unawaited(_loadFriendsLocations());
+      }
+      if (mounted) {
         context.read<MapBloc>().add(const MapLocationRequested());
-        await _loadFriendsLocations();
       }
     } catch (_) {
       if (!mounted) return;
@@ -325,7 +427,99 @@ class _MapPageState extends State<MapPage> {
         _hasOfficialPageAccess = false;
         _accessLoading = false;
       });
+      if (mounted) {
+        context.read<MapBloc>().add(const MapLocationRequested());
+      }
     }
+  }
+
+  void _showOfficialPageRequiredSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.workspace_premium_outlined,
+                size: 48,
+                color: Color(0xFF2563EB),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Нужна подписка Official Page',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Карту можно смотреть бесплатно. Чтобы открывать объявления, '
+                'менять радиус поиска, видеть друзей и инструменты бизнеса — '
+                'подключите подписку в Qarmet Wallet.',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.grey.shade700,
+                    ),
+              ),
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _businessActionLoading
+                      ? null
+                      : () {
+                          Navigator.pop(ctx);
+                          _buyBusinessSubscriptionQuick();
+                        },
+                  icon: _businessActionLoading
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.flash_on_rounded),
+                  label: const Text('Подключить за 1 тап'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(ctx);
+                    context.push('/qarmet-wallet');
+                  },
+                  icon: const Icon(Icons.account_balance_wallet_outlined),
+                  label: const Text('Подробнее по тарифам'),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  _checkOfficialPageAccess();
+                },
+                child: const Text('Я уже оплатил, проверить снова'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _ensureOfficialPageAccess() {
+    if (_hasOfficialPageAccess) return true;
+    _showOfficialPageRequiredSheet();
+    return false;
   }
 
   Future<void> _buyBusinessSubscriptionQuick() async {
@@ -567,6 +761,7 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _showFriendsControlsSheet() {
+    if (!_ensureOfficialPageAccess()) return;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -616,6 +811,7 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _showBusinessControlsSheet(List<MapProduct> products) {
+    if (!_ensureOfficialPageAccess()) return;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -679,96 +875,6 @@ class _MapPageState extends State<MapPage> {
     if (_accessLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    if (!_hasOfficialPageAccess) {
-      return Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: Card(
-              margin: const EdgeInsets.all(24),
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.workspace_premium_outlined,
-                      size: 52,
-                      color: Color(0xFF2563EB),
-                    ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Карта доступна по подписке Official Page',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Чтобы пользоваться картой и поиском рядом, '
-                      'подключите подписку в Qarmet Wallet.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 14),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Шаг 1: Подключи Official Page'),
-                          SizedBox(height: 4),
-                          Text('Шаг 2: Закрепляй точку и запускай акции'),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: _businessActionLoading ? null : _buyBusinessSubscriptionQuick,
-                        icon: _businessActionLoading
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Icon(Icons.flash_on_rounded),
-                        label: const Text('Подключить за 1 тап'),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => context.push('/qarmet-wallet'),
-                        icon: const Icon(Icons.account_balance_wallet_outlined),
-                        label: const Text('Подробнее по тарифам'),
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: _checkOfficialPageAccess,
-                      child: const Text('Я уже оплатил, проверить снова'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
       );
     }
 
@@ -1114,7 +1220,10 @@ class _MapPageState extends State<MapPage> {
                   heroTag: 'map_friends_refresh',
                   backgroundColor: Colors.white,
                   foregroundColor: const Color(0xFF2563EB),
-                  onPressed: _loadFriendsLocations,
+                  onPressed: () {
+                    if (!_ensureOfficialPageAccess()) return;
+                    _loadFriendsLocations();
+                  },
                   child: const Icon(Icons.group_outlined),
                 ),
               ),

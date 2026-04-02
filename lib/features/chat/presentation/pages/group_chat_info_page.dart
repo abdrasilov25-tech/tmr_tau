@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../widgets/city_chat_fixed_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../data/group_chat_system_api.dart';
 import '../../data/invite_candidates.dart';
@@ -410,24 +411,7 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
                 alignment: Alignment.bottomRight,
                 children: [
                   _isOfficialCity
-                      ? Container(
-                          width: 84,
-                          height: 84,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: <Color>[
-                                Color(0xFF0284C7),
-                                Color(0xFF38BDF8),
-                              ],
-                            ),
-                          ),
-                          child: const Icon(
-                            Icons.location_city_rounded,
-                            color: Colors.white,
-                            size: 40,
-                          ),
-                        )
+                      ? const CityChatFixedAvatar(radius: 42)
                       : CachedAvatar(
                           imageUrl: avatar.isEmpty ? null : avatar,
                           radius: 42,
@@ -504,7 +488,7 @@ class _GroupChatInfoPageState extends State<GroupChatInfoPage> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Название и описание официального городского чата '
+                      'Название, описание и фото официального городского чата '
                       'закреплены и не могут быть изменены. Вы можете '
                       'пригласить участников.',
                       style: TextStyle(

@@ -36,25 +36,40 @@ serve(async (req) => {
     if (!productId || !verificationData || !source || !platform) {
       return json({ error: "Invalid purchase payload" }, 400);
     }
+    const officialPageProductIds = new Set([
+      "com.bazar.tmrtau.subscription.monthly",
+      "com.yourapp.subscription.monthly", // legacy (плейсхолдер в старых сборках)
+      "qarmet_40", // legacy IAP id (до миграции)
+    ]);
+    const cosmeticsForeverProductIds = new Set([
+      "com.bazar.tmrtau.premium",
+      "com.yourapp.premium", // legacy
+    ]);
     const isSupportedProduct =
       productId === "boost_post" ||
       productId === "premium_subscription" ||
       productId === "qarmet_10" ||
       productId === "qarmet_20" ||
       productId === "qarmet_30" ||
-      productId === "qarmet_40";
+      cosmeticsForeverProductIds.has(productId) ||
+      officialPageProductIds.has(productId);
     if (!isSupportedProduct) {
       return json({ error: "Unsupported productId" }, 400);
     }
 
     const admin = createClient(supabaseUrl, serviceKey);
+    const paymentKind =
+      productId === "premium_subscription" ||
+      officialPageProductIds.has(productId)
+        ? "subscription"
+        : cosmeticsForeverProductIds.has(productId)
+          ? "cosmetics_forever"
+          : "boost";
+
     await admin.from("payment_orders").insert({
       user_id: user.id,
       provider: "iap",
-      kind:
-        productId === "premium_subscription" || productId === "qarmet_40"
-          ? "subscription"
-          : "boost",
+      kind: paymentKind,
       plan_code: productId,
       amount_minor: 0,
       currency: "KZT",
@@ -68,7 +83,19 @@ serve(async (req) => {
       paid_at: new Date().toISOString(),
     });
 
-    if (productId === "qarmet_40") {
+    if (cosmeticsForeverProductIds.has(productId)) {
+      await admin
+        .from("users")
+        .update({
+          profile_cosmetics_iap_forever: true,
+          profile_premium_badge: true,
+          profile_frame_level: 3,
+          profile_badge_level: 3,
+        })
+        .eq("id", user.id);
+    }
+
+    if (officialPageProductIds.has(productId)) {
       const { data: currentUserRow } = await admin
         .from("users")
         .select("seller_plan")

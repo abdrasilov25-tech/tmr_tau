@@ -5,6 +5,9 @@ class TemirtauCityGroupConfig {
 
   static const String title = 'Temirtau city';
 
+  /// Локальный аватар городского чата (нельзя сменить из приложения).
+  static const String fixedAvatarAsset = 'assets/city_chat_temirtau_avatar.png';
+
   /// Краткое описание для карточки группы в БД (нельзя менять из приложения).
   static const String communityDescription =
       'Городской чат Темиртау для жителей: новости, взаимопомощь и объявления без спама.';

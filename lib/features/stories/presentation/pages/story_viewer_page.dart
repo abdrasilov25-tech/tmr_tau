@@ -302,7 +302,15 @@ class _StoryGroupView extends StatefulWidget {
 }
 
 class _StoryGroupViewState extends State<_StoryGroupView> {
-  static const List<String> _quickReactions = ['🔥', '😍', '👏', '😂', '😮'];
+  /// Кольцо быстрых реакций как в Instagram (сердце — отдельно, крупнее по центру).
+  static const List<String> _quickReactionsRing = [
+    '😂',
+    '😮',
+    '😍',
+    '😢',
+    '👏',
+    '🔥',
+  ];
   static const String _storyDmPrefix = '__story__';
   int _currentIndex = 0;
   final _replyController = TextEditingController();
@@ -779,6 +787,44 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     context.push('/profile/$authorId');
   }
 
+  Widget _instagramReactionBubble(
+    String emoji, {
+    required double fontSize,
+    required double diameter,
+    bool emphasize = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 5),
+      child: InkWell(
+        onTap: _sendingReply ? null : () => _sendQuickReaction(emoji),
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          width: diameter,
+          height: diameter,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: emphasize ? 0.5 : 0.38),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: emphasize ? Colors.white54 : Colors.white38,
+              width: emphasize ? 1.6 : 1.2,
+            ),
+            boxShadow: emphasize
+                ? [
+                    BoxShadow(
+                      color: Colors.red.withValues(alpha: 0.35),
+                      blurRadius: 18,
+                      spreadRadius: 1,
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(emoji, style: TextStyle(fontSize: fontSize)),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.group.stories.isEmpty) {
@@ -927,20 +973,24 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton(
-                            onPressed: _openComposer,
-                            style: OutlinedButton.styleFrom(
-                              side: const BorderSide(color: Colors.white38),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                            ),
-                            child: const Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                'Отправить сообщение',
-                                style: TextStyle(color: Colors.white),
+                          child: Material(
+                            color: Colors.white12,
+                            borderRadius: BorderRadius.circular(24),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(24),
+                              onTap: _openComposer,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 18,
+                                  vertical: 12,
+                                ),
+                                child: Text(
+                                  'Отправить сообщение...',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade400,
+                                    fontSize: 15,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -961,36 +1011,34 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                       ],
                     ),
                   if (_showReplyComposer) ...[
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.center,
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        spacing: 18,
-                        runSpacing: 14,
-                        children: _quickReactions.map((emoji) {
-                          return InkWell(
-                            onTap: _sendingReply ? null : () => _sendQuickReaction(emoji),
-                            borderRadius: BorderRadius.circular(999),
-                            child: Container(
-                              width: 68,
-                              height: 68,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.38),
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white38, width: 1.2),
-                              ),
-                              child: Text(
-                                emoji,
-                                style: const TextStyle(fontSize: 38),
-                              ),
+                    const SizedBox(height: 6),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          for (var i = 0; i < 3; i++)
+                            _instagramReactionBubble(
+                              _quickReactionsRing[i],
+                              fontSize: 40,
+                              diameter: 64,
                             ),
-                          );
-                        }).toList(),
+                          _instagramReactionBubble(
+                            '❤️',
+                            fontSize: 52,
+                            diameter: 86,
+                            emphasize: true,
+                          ),
+                          for (var i = 3; i < _quickReactionsRing.length; i++)
+                            _instagramReactionBubble(
+                              _quickReactionsRing[i],
+                              fontSize: 40,
+                              diameter: 64,
+                            ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Row(
                       children: [
                         Expanded(
@@ -999,7 +1047,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                             focusNode: _replyFocusNode,
                             style: const TextStyle(color: Colors.white),
                             decoration: InputDecoration(
-                              hintText: 'Написать сообщение...',
+                              hintText: 'Отправить сообщение...',
                               hintStyle: TextStyle(color: Colors.grey.shade400),
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
                               filled: true,

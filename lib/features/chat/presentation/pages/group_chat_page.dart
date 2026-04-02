@@ -20,6 +20,8 @@ import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/city_chat_threads.dart';
 import '../../domain/city_chat_moderation_codes.dart';
 import '../../domain/temirtau_city_group_config.dart';
+import '../city_thread_icons.dart';
+import '../widgets/city_chat_fixed_avatar.dart';
 import '../chat_unread_badge_controller.dart';
 
 class GroupChatPage extends StatefulWidget {
@@ -56,7 +58,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
   bool _officialCity = false;
   DateTime? _cityBanUntil;
   bool _cityPermanentBan = false;
-  String _selectedCityThread = CityChatThreads.general;
+  String _selectedCityThread = CityChatThreads.defaultThreadId;
   int _lastRenderedMessagesCount = 0;
   bool _wasNearBottom = true;
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -193,7 +195,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         'sender_id': uid,
         'text': TemirtauCityGroupConfig.firstVisitRulesMessage,
         'kind': TemirtauCityGroupConfig.messageKindCityRules,
-        'city_thread': CityChatThreads.general,
+        'city_thread': CityChatThreads.defaultThreadId,
       });
       await storage.setSeenCityChatRules(widget.groupId);
     } catch (_) {
@@ -530,21 +532,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primaryContainer
-                            .withValues(alpha: 0.5),
-                      ),
-                      child: Icon(
-                        Icons.location_city_rounded,
-                        size: 52,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
+                    const CityChatFixedAvatar(radius: 56),
                     const SizedBox(height: 24),
                     Text(
                       TemirtauCityGroupConfig.title,
@@ -594,7 +582,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _officialCity
-                  ? const _CityChatAvatarPlaceholder()
+                  ? const CityChatFixedAvatar(radius: 14)
                   : CachedAvatar(
                       imageUrl: _groupAvatarUrl,
                       radius: 14,
@@ -645,9 +633,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 for (final m in allMessages) {
                   if (m['sender_id'] == _currentUserId) continue;
                   final thread = (m['city_thread'] as String?)?.trim();
-                  final threadId = CityChatThreads.all.any((e) => e.id == thread)
-                      ? thread!
-                      : CityChatThreads.general;
+                  final threadId = CityChatThreads.normalizeThreadId(thread);
                   final lastRead = storage.getLastReadAtForGroupThread(
                     widget.groupId,
                     threadId,
@@ -686,11 +672,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
                 final messages = _officialCity
                     ? rawMessages.where((m) {
                         final thread = (m['city_thread'] as String?)?.trim();
-                        final normalized = CityChatThreads.all.any(
-                          (e) => e.id == thread,
-                        )
-                            ? thread
-                            : CityChatThreads.general;
+                        final normalized =
+                            CityChatThreads.normalizeThreadId(thread);
                         return normalized == _selectedCityThread;
                       }).toList(growable: false)
                     : rawMessages;
@@ -860,7 +843,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             hintText: _cityPostingBlocked
                                 ? 'Отправка временно недоступна'
                                 : (_officialCity
-                                      ? 'Сообщение в «${CityChatThreads.all.firstWhere((e) => e.id == _selectedCityThread).label}»'
+                                      ? 'Сообщение в «${CityChatThreads.metaFor(_selectedCityThread).label}»'
                                       : 'Сообщение в группу'),
                             border: const OutlineInputBorder(),
                           ),
@@ -1139,28 +1122,117 @@ class _CityThreadTabs extends StatelessWidget {
   final Map<String, int> unreadByThread;
   final ValueChanged<String> onSelect;
 
+  Widget _threadLeadingGraphic(CityChatThread t, Color accent) {
+    final asset = t.avatarAsset;
+    if (asset != null) {
+      return Container(
+        width: 36,
+        height: 36,
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: accent.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.asset(
+            asset,
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
+          ),
+        ),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(
+        cityThreadMaterialIcon(t.iconKey),
+        color: accent,
+        size: 22,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 2, 12, 6),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final t in CityChatThreads.all)
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Badge(
-                  isLabelVisible: (unreadByThread[t.id] ?? 0) > 0,
-                  label: Text('${unreadByThread[t.id] ?? 0}'),
-                  child: ChoiceChip(
-                    label: Text('${t.emoji} ${t.label}'),
-                    selected: selectedId == t.id,
-                    onSelected: (_) => onSelect(t.id),
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      child: SizedBox(
+        height: 120,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          itemCount: CityChatThreads.all.length,
+          separatorBuilder: (context, i) => const SizedBox(width: 10),
+          itemBuilder: (context, index) {
+            final t = CityChatThreads.all[index];
+            final selected = selectedId == t.id;
+            final accent = cityThreadAccentColor(t.iconKey);
+            final unread = unreadByThread[t.id] ?? 0;
+            return Badge(
+              isLabelVisible: unread > 0,
+              label: Text(
+                unread > 99 ? '99+' : '$unread',
+                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => onSelect(t.id),
+                  borderRadius: BorderRadius.circular(16),
+                  child: Ink(
+                    width: 136,
+                    padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: selected ? accent : scheme.outlineVariant,
+                        width: selected ? 2 : 1,
+                      ),
+                      color: selected
+                          ? accent.withValues(alpha: 0.1)
+                          : scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _threadLeadingGraphic(t, accent),
+                        const SizedBox(height: 8),
+                        Text(
+                          t.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 13,
+                                letterSpacing: -0.2,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          t.description,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                fontSize: 10,
+                                height: 1.28,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-          ],
+            );
+          },
         ),
       ),
     );
@@ -1187,29 +1259,6 @@ class _CityAppBarBadge extends StatelessWidget {
           fontWeight: FontWeight.w800,
           letterSpacing: 0.5,
         ),
-      ),
-    );
-  }
-}
-
-class _CityChatAvatarPlaceholder extends StatelessWidget {
-  const _CityChatAvatarPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: const BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: LinearGradient(
-          colors: <Color>[Color(0xFF0284C7), Color(0xFF38BDF8)],
-        ),
-      ),
-      child: const Icon(
-        Icons.location_city_rounded,
-        color: Colors.white,
-        size: 16,
       ),
     );
   }

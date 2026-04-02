@@ -75,47 +75,54 @@ class ProfileRepositoryImpl implements ProfileRepository {
     var followingCount = 0;
     var products = <ProductModel>[];
     var isFollowingByMe = false;
+
+    // Параллельно грузим: счётчики, товары и статус подписки — 3 запроса вместо 4 последовательных.
     try {
-      // Считаем количество подписчиков и подписок на основе таблицы followers,
-      // чтобы цифры всегда были актуальными.
-      final followersRes = await _client
-          .from(SupabaseConstants.followersTable)
-          .select('follower_id')
-          .eq('following_id', sellerId);
-      final followingRes = await _client
-          .from(SupabaseConstants.followersTable)
-          .select('following_id')
-          .eq('follower_id', sellerId);
-      followersCount = (followersRes as List).length;
-      followingCount = (followingRes as List).length;
+      final countResults = await Future.wait([
+        _client
+            .from(SupabaseConstants.followersTable)
+            .select('follower_id')
+            .eq('following_id', sellerId),
+        _client
+            .from(SupabaseConstants.followersTable)
+            .select('following_id')
+            .eq('follower_id', sellerId),
+      ]);
+      followersCount = (countResults[0] as List).length;
+      followingCount = (countResults[1] as List).length;
     } catch (_) {
       followingCount = 0;
     }
-    try {
-      final productsRes = await _client
+
+    final secondaryResults = await Future.wait([
+      _client
           .from(SupabaseConstants.productsTable)
           .select('*, users!seller_id(name, avatar)')
           .eq('seller_id', sellerId)
-          .order('created_at', ascending: false);
-      products = (productsRes as List)
+          .order('created_at', ascending: false)
+          .then<Object?>((v) => v)
+          .catchError((_) => <dynamic>[]),
+      if (currentUserId != null && currentUserId != sellerId)
+        _client
+            .from(SupabaseConstants.followersTable)
+            .select('following_id')
+            .eq('follower_id', currentUserId)
+            .eq('following_id', sellerId)
+            .maybeSingle()
+            .then<Object?>((v) => v)
+            .catchError((_) => null)
+      else
+        Future<Object?>.value(null),
+    ]);
+
+    try {
+      products = (secondaryResults[0] as List)
           .map((e) => _mapProduct(e as Map<String, dynamic>))
           .toList();
     } catch (_) {
       products = const <ProductModel>[];
     }
-    if (currentUserId != null && currentUserId != sellerId) {
-      try {
-        final f = await _client
-            .from(SupabaseConstants.followersTable)
-            .select('following_id')
-            .eq('follower_id', currentUserId)
-            .eq('following_id', sellerId)
-            .maybeSingle();
-        isFollowingByMe = f != null;
-      } catch (_) {
-        isFollowingByMe = false;
-      }
-    }
+    isFollowingByMe = secondaryResults[1] != null;
     final resolvedVerified = (userMap['is_verified'] as bool? ?? false) ||
         (userMap['official_page_active'] as bool? ?? false) ||
         (userMap['seller_verified_store'] as bool? ?? false);
@@ -218,7 +225,6 @@ class ProfileRepositoryImpl implements ProfileRepository {
 
   @override
   Future<List<SellerProfileEntity>> getFollowingUsers(String followerId) async {
-    // Сначала берём всех, на кого подписан пользователь.
     final followersRes = await _client
         .from(SupabaseConstants.followersTable)
         .select('following_id')
@@ -231,88 +237,81 @@ class ProfileRepositoryImpl implements ProfileRepository {
         .toSet()
         .toList();
 
-    // Для простоты и совместимости без in_ загружаем пользователей по одному.
-    final List<SellerProfileEntity> result = [];
-    for (final id in followingIds) {
-      final userRes = await _client
-          .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
-          .eq('id', id)
-          .maybeSingle();
-      if (userRes == null) continue;
-      final m = Map<String, dynamic>.from(userRes as Map);
+    // Один батч-запрос вместо N запросов по одному.
+    final usersRes = await _client
+        .from(SupabaseConstants.usersTable)
+        .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
+        .inFilter('id', followingIds);
+
+    return (usersRes as List).map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
       final resolvedVerified = (m['is_verified'] as bool? ?? false) ||
           (m['official_page_active'] as bool? ?? false) ||
           (m['seller_verified_store'] as bool? ?? false);
-      result.add(
-        SellerProfileEntity(
-          id: m['id'] as String,
-          name: m['name'] as String? ?? 'User',
-          avatarUrl: m['avatar'] as String?,
-          bio: m['bio'] as String?,
-          followersCount: m['followers_count'] as int? ?? 0,
-          followingCount: 0,
-          totalReceivedPostLikes: 0,
-          isFollowingByMe: true,
-          products: const [],
-          isVerified: resolvedVerified,
-        ),
+      return SellerProfileEntity(
+        id: m['id'] as String,
+        name: m['name'] as String? ?? 'User',
+        avatarUrl: m['avatar'] as String?,
+        bio: m['bio'] as String?,
+        followersCount: m['followers_count'] as int? ?? 0,
+        followingCount: 0,
+        totalReceivedPostLikes: 0,
+        isFollowingByMe: true,
+        products: const [],
+        isVerified: resolvedVerified,
       );
-    }
-    return result;
+    }).toList();
   }
 
   @override
   Future<List<SellerProfileEntity>> getFollowersUsers(String followingId) async {
-    // Все, кто подписаны на данного пользователя.
-    final res = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('follower_id')
-        .eq('following_id', followingId);
-    final list = res as List;
-    if (list.isEmpty) return [];
+    // Параллельно грузим подписчиков и список "на кого я подписан" — два запроса вместо N+2.
+    final results = await Future.wait([
+      _client
+          .from(SupabaseConstants.followersTable)
+          .select('follower_id')
+          .eq('following_id', followingId),
+      _client
+          .from(SupabaseConstants.followersTable)
+          .select('following_id')
+          .eq('follower_id', followingId),
+    ]);
 
-    final followerIds = list
+    final followerIds = (results[0] as List)
         .map((e) => (e as Map)['follower_id'] as String)
         .toSet()
         .toList();
+    if (followerIds.isEmpty) return [];
 
-    final myFollowingRes = await _client
-        .from(SupabaseConstants.followersTable)
-        .select('following_id')
-        .eq('follower_id', followingId);
-    final myFollowingIds = (myFollowingRes as List)
+    final myFollowingIds = (results[1] as List)
         .map((e) => (e as Map)['following_id'] as String)
         .toSet();
 
-    final List<SellerProfileEntity> result = [];
-    for (final id in followerIds) {
-      final userRes = await _client
-          .from(SupabaseConstants.usersTable)
-          .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
-          .eq('id', id)
-          .maybeSingle();
-      if (userRes == null) continue;
-      final m = Map<String, dynamic>.from(userRes as Map);
+    // Один батч-запрос для всех профилей.
+    final usersRes = await _client
+        .from(SupabaseConstants.usersTable)
+        .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store')
+        .inFilter('id', followerIds);
+
+    return (usersRes as List).map((e) {
+      final m = Map<String, dynamic>.from(e as Map);
+      final id = m['id'] as String;
       final resolvedVerified = (m['is_verified'] as bool? ?? false) ||
           (m['official_page_active'] as bool? ?? false) ||
           (m['seller_verified_store'] as bool? ?? false);
-      result.add(
-        SellerProfileEntity(
-          id: m['id'] as String,
-          name: m['name'] as String? ?? 'User',
-          avatarUrl: m['avatar'] as String?,
-          bio: m['bio'] as String?,
-          followersCount: m['followers_count'] as int? ?? 0,
-          followingCount: 0,
-          totalReceivedPostLikes: 0,
-          isFollowingByMe: myFollowingIds.contains(id),
-          products: const [],
-          isVerified: resolvedVerified,
-        ),
+      return SellerProfileEntity(
+        id: id,
+        name: m['name'] as String? ?? 'User',
+        avatarUrl: m['avatar'] as String?,
+        bio: m['bio'] as String?,
+        followersCount: m['followers_count'] as int? ?? 0,
+        followingCount: 0,
+        totalReceivedPostLikes: 0,
+        isFollowingByMe: myFollowingIds.contains(id),
+        products: const [],
+        isVerified: resolvedVerified,
       );
-    }
-    return result;
+    }).toList();
   }
 
   @override

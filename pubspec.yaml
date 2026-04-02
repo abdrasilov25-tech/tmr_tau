@@ -114,6 +114,11 @@ flutter:
     - assets/share_icons/whatsapp.png
     - assets/share_icons/threads.png
     - assets/qarmet_coin_nominal.png
+    - assets/city_chat_temirtau_avatar.png
+    - assets/city_thread_real_estate.png
+    - assets/city_thread_purchases.png
+    - assets/city_thread_sales.png
+    - assets/city_thread_discussion.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

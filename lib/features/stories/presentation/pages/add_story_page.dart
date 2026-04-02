@@ -1,9 +1,9 @@
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
@@ -11,6 +11,7 @@ import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/repositories/stories_repository.dart';
+import '../utils/story_media_permissions.dart';
 
 /// Единый формат сторис 9:16 (как в Instagram).
 const double _storyAspectRatio = 9 / 16;
@@ -46,20 +47,35 @@ class _AddStoryPageState extends State<AddStoryPage> {
 
   bool get _hasMedia => _image != null || _video != null;
 
-  Future<bool> _requestGalleryPermission({required bool forVideo}) async {
-    final statuses = forVideo
-        ? await [Permission.videos, Permission.photos].request()
-        : await [Permission.photos].request();
-    final ok = statuses.values.any((s) => s.isGranted || s.isLimited);
-    if (ok) return true;
-    if (!mounted) return false;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Разрешите доступ к галерее в настройках приложения')),
-    );
-    if (statuses.values.any((s) => s.isPermanentlyDenied)) {
-      await openAppSettings();
+  Future<bool> _ensureGalleryAccess({required bool forVideo}) async {
+    final access =
+        await StoryMediaPermissions.galleryAccess(forVideo: forVideo);
+    switch (access) {
+      case StoryGalleryAccess.ok:
+        return true;
+      case StoryGalleryAccess.deniedInDialog:
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Нужен доступ к галерее. Нажмите «Разрешить» в запросе системы '
+                'или откройте галерею ещё раз.',
+              ),
+            ),
+          );
+        }
+        return false;
+      case StoryGalleryAccess.needsSettings:
+        if (mounted) {
+          await StoryMediaPermissions.offerOpenSettings(
+            context,
+            message:
+                'Доступ к фото и медиатеке для Tmr Tau отключён. '
+                'Включите его в настройках приложения (Фото / Медиа).',
+          );
+        }
+        return false;
     }
-    return false;
   }
 
 
@@ -138,6 +154,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
   Future<void> _openGalleryOnEnter() async {
     if (_autoGalleryOpened) return;
     if (_isLiveMode) return;
+    // Флаг после попытки: при отказе не крутим picker повторно сами, но и не блокируем ручной выбор.
     _autoGalleryOpened = true;
     if (_isVideoMode) {
       await _pickVideoFromSource(ImageSource.gallery);
@@ -210,7 +227,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
 
   Future<void> _pickImageFromSource(ImageSource source) async {
     if (source == ImageSource.gallery) {
-      final ok = await _requestGalleryPermission(forVideo: false);
+      final ok = await _ensureGalleryAccess(forVideo: false);
       if (!ok || !mounted) return;
       final picker = ImagePicker();
       final x = await picker.pickImage(source: ImageSource.gallery);
@@ -283,7 +300,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
       context.push('/story-camera');
       return;
     }
-    final ok = await _requestGalleryPermission(forVideo: true);
+    final ok = await _ensureGalleryAccess(forVideo: true);
     if (!ok || !mounted) return;
     final picker = ImagePicker();
     final x = await picker.pickVideo(source: source);

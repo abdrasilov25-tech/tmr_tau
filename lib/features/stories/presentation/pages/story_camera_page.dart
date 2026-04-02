@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../utils/story_media_permissions.dart';
+
 /// Результат съёмки сторис-камеры.
 class StoryCameraResult {
   const StoryCameraResult({required this.file, required this.isVideo});
@@ -70,19 +72,56 @@ class _StoryCameraPageState extends State<StoryCameraPage>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final ctrl = _cameraCtrl;
-    if (ctrl == null || !ctrl.value.isInitialized) return;
     if (state == AppLifecycleState.inactive) {
-      ctrl.dispose();
-      _cameraCtrl = null;
-    } else if (state == AppLifecycleState.resumed) {
-      _initCamera(_cameras[_cameraIndex]);
+      final ctrl = _cameraCtrl;
+      if (ctrl != null) {
+        ctrl.dispose();
+        _cameraCtrl = null;
+      }
+      return;
+    }
+    if (state == AppLifecycleState.resumed) {
+      if (!_permissionGranted) {
+        unawaited(_retryCameraPermissionAfterResume());
+        return;
+      }
+      final needReconnect = _cameraCtrl == null ||
+          !(_cameraCtrl?.value.isInitialized ?? false);
+      if (_cameras.isNotEmpty && needReconnect) {
+        unawaited(_initCamera(_cameras[_cameraIndex]));
+      }
+    }
+  }
+
+  /// После возврата из «Настроек» с включённой камерой.
+  Future<void> _retryCameraPermissionAfterResume() async {
+    var s = await Permission.camera.status;
+    if (s.isGranted) {
+      if (!mounted) return;
+      setState(() {
+        _permissionGranted = true;
+        _initializing = true;
+      });
+      await _bootstrapCamerasAfterPermission();
+      return;
+    }
+    s = await Permission.camera.request();
+    if (!mounted) return;
+    if (s.isGranted) {
+      setState(() {
+        _permissionGranted = true;
+        _initializing = true;
+      });
+      await _bootstrapCamerasAfterPermission();
     }
   }
 
   Future<void> _init() async {
-    final camStatus = await Permission.camera.request();
-    final micStatus = await Permission.microphone.request();
+    var camStatus = await Permission.camera.status;
+    if (!camStatus.isGranted) {
+      camStatus = await Permission.camera.request();
+    }
+    final micStatus = await Permission.microphone.status;
     if (!mounted) return;
 
     if (!camStatus.isGranted) {
@@ -92,8 +131,16 @@ class _StoryCameraPageState extends State<StoryCameraPage>
       });
       return;
     }
-    _permissionGranted = true;
+    setState(() => _permissionGranted = true);
 
+    await _bootstrapCamerasAfterPermission();
+    if (!mounted) return;
+    if (micStatus.isDenied || micStatus.isRestricted) {
+      await Permission.microphone.request();
+    }
+  }
+
+  Future<void> _bootstrapCamerasAfterPermission() async {
     try {
       _cameras = await availableCameras();
     } catch (_) {
@@ -106,14 +153,11 @@ class _StoryCameraPageState extends State<StoryCameraPage>
       return;
     }
 
-    // Предпочитаем фронтальную камеру (сторис-мод)
     final frontIdx =
         _cameras.indexWhere((c) => c.lensDirection == CameraLensDirection.front);
     _cameraIndex = frontIdx >= 0 ? frontIdx : 0;
 
     await _initCamera(_cameras[_cameraIndex]);
-    // Запрашиваем микрофон заранее (для видео)
-    if (micStatus.isDenied) await Permission.microphone.request();
   }
 
   Future<void> _initCamera(CameraDescription desc) async {
@@ -205,6 +249,30 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   /// Открыть галерею (фото).
   Future<void> _pickFromGallery() async {
     if (_isRecording) return;
+    final access =
+        await StoryMediaPermissions.galleryAccess(forVideo: false);
+    switch (access) {
+      case StoryGalleryAccess.ok:
+        break;
+      case StoryGalleryAccess.deniedInDialog:
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Разрешите доступ к фото в системном запросе или попробуйте снова.',
+            ),
+          ),
+        );
+        return;
+      case StoryGalleryAccess.needsSettings:
+        if (!mounted) return;
+        await StoryMediaPermissions.offerOpenSettings(
+          context,
+          message:
+              'Доступ к фото для Tmr Tau отключён. Включите его в настройках.',
+        );
+        return;
+    }
     final picker = ImagePicker();
     final xFile = await picker.pickImage(source: ImageSource.gallery);
     if (xFile == null || !mounted) return;
@@ -227,7 +295,14 @@ class _StoryCameraPageState extends State<StoryCameraPage>
           if (_initializing)
             const Center(child: CircularProgressIndicator(color: Colors.white))
           else if (!_permissionGranted)
-            _PermissionView(onSettings: openAppSettings)
+            _PermissionView(
+              onOpenSettings: () => StoryMediaPermissions.offerOpenSettings(
+                context,
+                message:
+                    'Чтобы снимать сторис, включите доступ к камере для Tmr Tau '
+                    'в настройках устройства.',
+              ),
+            )
           else if (_cameraCtrl != null && _cameraCtrl!.value.isInitialized)
             _CameraPreviewFill(controller: _cameraCtrl!)
           else
@@ -477,8 +552,8 @@ class _IconBtn extends StatelessWidget {
 }
 
 class _PermissionView extends StatelessWidget {
-  const _PermissionView({required this.onSettings});
-  final VoidCallback onSettings;
+  const _PermissionView({required this.onOpenSettings});
+  final Future<void> Function() onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -500,13 +575,13 @@ class _PermissionView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Разрешите доступ к камере\nв настройках приложения',
+              'Нажмите «Разрешить» в системном запросе или откройте настройки ниже.',
               style: TextStyle(color: Colors.white54, fontSize: 14),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 20),
             FilledButton(
-              onPressed: onSettings,
+              onPressed: () => onOpenSettings(),
               child: const Text('Открыть настройки'),
             ),
           ],

@@ -12,6 +12,7 @@ class PaymentUiState {
     this.balance = 0,
     this.catalog = const <QarmetProduct>[],
     this.isOfficialPageActive = false,
+    this.cosmeticsLifetimeUnlocked = false,
     this.promotionHistory = const <QarmetPromotionHistoryItem>[],
   });
 
@@ -20,6 +21,7 @@ class PaymentUiState {
   final int balance;
   final List<QarmetProduct> catalog;
   final bool isOfficialPageActive;
+  final bool cosmeticsLifetimeUnlocked;
   final List<QarmetPromotionHistoryItem> promotionHistory;
 
   PaymentUiState copyWith({
@@ -28,6 +30,7 @@ class PaymentUiState {
     int? balance,
     List<QarmetProduct>? catalog,
     bool? isOfficialPageActive,
+    bool? cosmeticsLifetimeUnlocked,
     List<QarmetPromotionHistoryItem>? promotionHistory,
   }) {
     return PaymentUiState(
@@ -36,6 +39,8 @@ class PaymentUiState {
       balance: balance ?? this.balance,
       catalog: catalog ?? this.catalog,
       isOfficialPageActive: isOfficialPageActive ?? this.isOfficialPageActive,
+      cosmeticsLifetimeUnlocked:
+          cosmeticsLifetimeUnlocked ?? this.cosmeticsLifetimeUnlocked,
       promotionHistory: promotionHistory ?? this.promotionHistory,
     );
   }
@@ -59,6 +64,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
             balance: cached.balance,
             catalog: cached.catalog,
             isOfficialPageActive: cached.isOfficialPageActive,
+            cosmeticsLifetimeUnlocked: cached.cosmeticsLifetimeUnlocked,
             promotionHistory: cached.promotionHistory,
           ),
         );
@@ -88,12 +94,46 @@ class PaymentCubit extends Cubit<PaymentUiState> {
           balance: snapshot.balance,
           catalog: snapshot.catalog,
           isOfficialPageActive: snapshot.isOfficialPageActive,
+          cosmeticsLifetimeUnlocked: snapshot.cosmeticsLifetimeUnlocked,
           promotionHistory: snapshot.promotionHistory,
         ),
       );
     } catch (e) {
       emit(
         state.copyWith(status: PaymentUiStatus.error, message: e.toString()),
+      );
+    }
+  }
+
+  Future<void> purchaseProfileCosmeticsLifetime() async {
+    emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
+    try {
+      final result = await _service.purchaseProfileCosmeticsLifetime();
+      switch (result.status) {
+        case PaymentResultStatus.success:
+          await refreshWallet();
+          emit(state.copyWith(status: PaymentUiStatus.success));
+        case PaymentResultStatus.cancelled:
+          emit(
+            state.copyWith(
+              status: PaymentUiStatus.cancelled,
+              message: result.message,
+            ),
+          );
+        case PaymentResultStatus.error:
+          emit(
+            state.copyWith(
+              status: PaymentUiStatus.error,
+              message: result.message,
+            ),
+          );
+      }
+    } catch (e) {
+      emit(
+        state.copyWith(
+          status: PaymentUiStatus.error,
+          message: 'Не удалось выполнить покупку: $e',
+        ),
       );
     }
   }
@@ -260,6 +300,8 @@ class PaymentCubit extends Cubit<PaymentUiState> {
   }
 
   void clearStatus() {
-    emit(const PaymentUiState());
+    emit(
+      state.copyWith(status: PaymentUiStatus.idle, message: null),
+    );
   }
 }

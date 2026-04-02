@@ -1,0 +1,87 @@
+{
+  "appPolicies" : {
+    "eula" : "",
+    "policies" : [
+      {
+        "locale" : "en_US",
+        "policyText" : "",
+        "policyURL" : ""
+      }
+    ]
+  },
+  "identifier" : "DF1F19C8",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "0.99",
+      "familyShareable" : false,
+      "internalID" : "6761380556",
+      "localizations" : [
+        {
+          "description" : "Qarmet — our app currency",
+          "displayName" : "Qarmet — монета нашего приложения",
+          "locale" : "ru"
+        }
+      ],
+      "productID" : "qarmet_10",
+      "referenceName" : "Qarmet",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "2.99",
+      "familyShareable" : false,
+      "internalID" : "6761381960",
+      "localizations" : [
+        {
+          "description" : "qarmet-money",
+          "displayName" : "qarmet-деньги",
+          "locale" : "ru"
+        }
+      ],
+      "productID" : "qarmet_20",
+      "referenceName" : "Qarmet1",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "7.99",
+      "familyShareable" : false,
+      "internalID" : "6761382029",
+      "localizations" : [
+        {
+          "description" : "qarmet-money",
+          "displayName" : "qarmet-деньги",
+          "locale" : "ru"
+        }
+      ],
+      "productID" : "qarmet_30",
+      "referenceName" : "Qarmet3",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "6761292230",
+    "_askToBuyEnabled" : false,
+    "_billingGracePeriodEnabled" : false,
+    "_billingIssuesEnabled" : false,
+    "_developerTeamID" : "F5LVV6D5CF",
+    "_disableDialogs" : false,
+    "_failTransactionsEnabled" : false,
+    "_lastSynchronizedDate" : 796855718.18033302,
+    "_locale" : "en_US",
+    "_renewalBillingIssuesEnabled" : false,
+    "_storefront" : "USA",
+    "_storeKitErrors" : [
+
+    ],
+    "_timeRate" : 0
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 5,
+    "minor" : 0
+  }
+}

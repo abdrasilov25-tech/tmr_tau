@@ -369,8 +369,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
       _currentUserId = authState.user.id;
     }
     _loadPublications();
-    _loadMutualFollow();
-    _loadPeerFollowsMe();
+    _loadFollowState();
     _loadCommonFollowers();
   }
 
@@ -379,8 +378,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.profile.id != widget.profile.id ||
         oldWidget.profile.isFollowingByMe != widget.profile.isFollowingByMe) {
-      _loadMutualFollow();
-      _loadPeerFollowsMe();
+      _loadFollowState();
       _loadCommonFollowers();
     }
   }
@@ -404,48 +402,41 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     }
   }
 
-  Future<void> _loadPeerFollowsMe() async {
+  /// Один параллельный запрос вместо двух последовательных.
+  Future<void> _loadFollowState() async {
     final me = _currentUserId;
     if (me == null || me == widget.profile.id) {
       if (!mounted) return;
-      setState(() => _peerFollowsMe = false);
+      setState(() { _peerFollowsMe = false; _isMutualFollow = false; });
       return;
     }
     try {
-      final peerFollowsMe = await Supabase.instance.client
-          .from(SupabaseConstants.followersTable)
-          .select('follower_id')
-          .eq('follower_id', widget.profile.id)
-          .eq('following_id', me)
-          .maybeSingle();
+      final results = await Future.wait([
+        Supabase.instance.client
+            .from(SupabaseConstants.followersTable)
+            .select('follower_id')
+            .eq('follower_id', widget.profile.id)
+            .eq('following_id', me)
+            .maybeSingle(),
+        if (widget.profile.isFollowingByMe)
+          Supabase.instance.client
+              .from(SupabaseConstants.followersTable)
+              .select('follower_id')
+              .eq('follower_id', widget.profile.id)
+              .eq('following_id', me)
+              .maybeSingle()
+        else
+          Future<dynamic>.value(null),
+      ]);
+      final peerFollowsMe = results[0] != null;
       if (!mounted) return;
-      setState(() => _peerFollowsMe = peerFollowsMe != null);
+      setState(() {
+        _peerFollowsMe = peerFollowsMe;
+        _isMutualFollow = widget.profile.isFollowingByMe && peerFollowsMe;
+      });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _peerFollowsMe = false);
-    }
-  }
-
-  Future<void> _loadMutualFollow() async {
-    final me = _currentUserId;
-    if (me == null || me == widget.profile.id) return;
-    if (!widget.profile.isFollowingByMe) {
-      if (!mounted) return;
-      setState(() => _isMutualFollow = false);
-      return;
-    }
-    try {
-      final peerFollowsMe = await Supabase.instance.client
-          .from(SupabaseConstants.followersTable)
-          .select('follower_id')
-          .eq('follower_id', widget.profile.id)
-          .eq('following_id', me)
-          .maybeSingle();
-      if (!mounted) return;
-      setState(() => _isMutualFollow = peerFollowsMe != null);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _isMutualFollow = false);
+      setState(() { _peerFollowsMe = false; _isMutualFollow = false; });
     }
   }
 
@@ -840,8 +831,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                         const Duration(milliseconds: 220),
                                       );
                                       if (!mounted) return;
-                                      await _loadMutualFollow();
-                                      await _loadPeerFollowsMe();
+                                      await _loadFollowState();
                                     },
                                     child: Text(
                                       _isMutualFollow
@@ -866,8 +856,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                         const Duration(milliseconds: 220),
                                       );
                                       if (!mounted) return;
-                                      await _loadMutualFollow();
-                                      await _loadPeerFollowsMe();
+                                      await _loadFollowState();
                                     },
                                     child: Text(
                                       _peerFollowsMe
@@ -1258,9 +1247,36 @@ class _OwnQarmetProfilePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => PaymentCubit(context.read<PaymentService>())..initStore(),
-      child: BlocBuilder<PaymentCubit, PaymentUiState>(
+      child: BlocConsumer<PaymentCubit, PaymentUiState>(
+        listenWhen: (prev, next) =>
+            prev.status != next.status && next.status != PaymentUiStatus.loading,
+        listener: (context, state) {
+          final messenger = ScaffoldMessenger.of(context);
+          switch (state.status) {
+            case PaymentUiStatus.success:
+              messenger.showSnackBar(
+                const SnackBar(content: Text('Готово')),
+              );
+            case PaymentUiStatus.error:
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(state.message ?? 'Ошибка'),
+                ),
+              );
+            case PaymentUiStatus.cancelled:
+              messenger.showSnackBar(
+                SnackBar(
+                  content: Text(state.message ?? 'Отменено'),
+                ),
+              );
+            default:
+              return;
+          }
+          context.read<PaymentCubit>().clearStatus();
+        },
         builder: (context, state) {
           final loading = state.status == PaymentUiStatus.loading;
+          final cosmetics = state.cosmeticsLifetimeUnlocked;
           return DecoratedBox(
             decoration: BoxDecoration(
               color: Colors.grey.shade100,
@@ -1276,7 +1292,30 @@ class _OwnQarmetProfilePanel extends StatelessWidget {
                     'Qarmet в профиле: ${state.balance}',
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
+                  if (cosmetics) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Оформление навсегда: галочка, рамка и значок без списания Qarmet.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: Colors.green.shade800,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
                   const SizedBox(height: 8),
+                  if (!cosmetics)
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: loading
+                            ? null
+                            : () => context
+                                .read<PaymentCubit>()
+                                .purchaseProfileCosmeticsLifetime(),
+                        child: const Text('Оформление навсегда (IAP)'),
+                      ),
+                    ),
+                  if (!cosmetics) const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -1287,25 +1326,25 @@ class _OwnQarmetProfilePanel extends StatelessWidget {
                             : () => context
                                   .read<PaymentCubit>()
                                   .spendPremiumBadge(cost: 5),
-                        child: const Text('Галочка (5)'),
+                        child: Text(cosmetics ? 'Галочка' : 'Галочка (5)'),
                       ),
                       FilledButton.tonal(
                         onPressed: loading
                             ? null
                             : () => context.read<PaymentCubit>().spendFrame(
-                                level: 2,
-                                cost: 2,
-                              ),
-                        child: const Text('Рамка (2)'),
+                                  level: 2,
+                                  cost: 2,
+                                ),
+                        child: Text(cosmetics ? 'Рамка' : 'Рамка (2)'),
                       ),
                       FilledButton.tonal(
                         onPressed: loading
                             ? null
                             : () => context.read<PaymentCubit>().spendBadge(
-                                level: 3,
-                                cost: 3,
-                              ),
-                        child: const Text('Значок (3)'),
+                                  level: 3,
+                                  cost: 3,
+                                ),
+                        child: Text(cosmetics ? 'Значок' : 'Значок (3)'),
                       ),
                       OutlinedButton(
                         onPressed: loading

@@ -22,6 +22,7 @@ class WalletSnapshot {
   const WalletSnapshot({
     required this.balance,
     required this.isOfficialPageActive,
+    required this.cosmeticsLifetimeUnlocked,
     required this.promotionHistory,
     required this.catalog,
     required this.fetchedAt,
@@ -29,6 +30,8 @@ class WalletSnapshot {
 
   final int balance;
   final bool isOfficialPageActive;
+  /// IAP «навсегда»: рамки, значок, галочка в профиле + стикеры на карте без Qarmet.
+  final bool cosmeticsLifetimeUnlocked;
   final List<QarmetPromotionHistoryItem> promotionHistory;
   final List<QarmetProduct> catalog;
   final DateTime fetchedAt;
@@ -43,9 +46,19 @@ class PaymentService {
   static const String promotionStartProductId = 'qarmet_10';
   static const String promotionPremiumProductId = 'qarmet_20';
   static const String promotionBusinessProductId = 'qarmet_30';
-  static const String officialPageProductId = 'qarmet_40';
+  /// App Store Connect: auto-renewable subscription (Official Page / карта).
+  /// Должен **посимвольно** совпадать с Product ID в ASC для приложения `com.bazar.tmr-tau`.
+  static const String officialPageProductId =
+      'com.bazar.tmrtau.subscription.monthly';
   static const String premiumSubscriptionProductId = 'premium_subscription';
   static const String promotePostProductId = 'promote_post';
+  /// Non-consumable: оформление профиля (рамки, бейджи, галочка) + стикеры на карте.
+  static const String profileCosmeticsLifetimeProductId =
+      'com.bazar.tmrtau.premium';
+
+  /// Уровни, выставляемые на сервере при успешной покупке [profileCosmeticsLifetimeProductId].
+  static const int profileCosmeticsIapMaxFrameLevel = 3;
+  static const int profileCosmeticsIapMaxBadgeLevel = 3;
 
   final SupabaseClient _client;
   final InAppPurchase _iap;
@@ -82,7 +95,7 @@ class PaymentService {
       bonusQarmet: 0,
       priceKzt: 1299,
     ),
-    // LIVE-battle mapping: qarmet_40 -> 700.
+    // Месячная подписка Official Page (Store); ежемесячные Qarmet — RPC credit_official_page_monthly_qarmet.
     officialPageProductId: QarmetProduct(
       productId: officialPageProductId,
       title: 'Official Page',
@@ -96,6 +109,7 @@ class PaymentService {
   static const Set<String> _extraIapProductIds = <String>{
     premiumSubscriptionProductId,
     promotePostProductId,
+    profileCosmeticsLifetimeProductId,
   };
 
   List<QarmetProduct> get catalog =>
@@ -119,16 +133,30 @@ class PaymentService {
       );
       if (response.error != null) {
         _products = const <ProductDetails>[];
-        _storeInitError = response.error!.message;
+        _storeInitError =
+            _friendlyIapUserMessage(response.error!.message);
         debugPrint('IAP init queryProductDetails error: ${response.error}');
         return;
       }
       _products = response.productDetails;
-      _storeInitError = null;
+      final notFound = response.notFoundIDs;
+      if (notFound.isNotEmpty) {
+        debugPrint('IAP notFoundIDs (нет в ASC или неверный id): $notFound');
+      }
+      if (_products.isEmpty) {
+        _storeInitError = notFound.isEmpty
+            ? 'Не удалось получить товары из App Store. Проверьте сеть, Sandbox и capability In‑App Purchase.'
+            : 'В App Store не найдены товары: ${notFound.join(", ")}. '
+                'Создайте в App Store Connect In‑App Purchase с **такими же** Product ID или измените константы в PaymentService.';
+      } else {
+        _storeInitError = null;
+      }
     } catch (e, st) {
       _products = const <ProductDetails>[];
       _storeAvailable = false;
-      _storeInitError = e.toString();
+      _storeInitError = e is PlatformException
+          ? _friendlyStoreError(e)
+          : _friendlyIapUserMessage(e.toString());
       debugPrint('IAP init failed: $e\n$st');
     }
   }
@@ -206,6 +234,16 @@ class PaymentService {
     );
   }
 
+  /// Non-consumable IAP: рамки, значки, галочка в профиле и стикеры на карте (без Qarmet).
+  Future<PaymentResult> purchaseProfileCosmeticsLifetime() async {
+    return _purchase(
+      storeProductId: profileCosmeticsLifetimeProductId,
+      onVerified: (purchase) async {
+        await _verifyPurchase(purchase, profileCosmeticsLifetimeProductId);
+      },
+    );
+  }
+
   Future<int> getQarmetBalance() async {
     final auth = _client.auth.currentUser;
     if (auth == null) return 0;
@@ -227,6 +265,17 @@ class PaymentService {
         .eq('id', auth.id)
         .maybeSingle();
     return row?['official_page_active'] as bool? ?? false;
+  }
+
+  Future<bool> getCosmeticsLifetimeUnlocked() async {
+    final auth = _client.auth.currentUser;
+    if (auth == null) return false;
+    final row = await _client
+        .from('users')
+        .select('profile_cosmetics_iap_forever')
+        .eq('id', auth.id)
+        .maybeSingle();
+    return row?['profile_cosmetics_iap_forever'] as bool? ?? false;
   }
 
   Future<void> ensureMonthlySubscriptionCredit() async {
@@ -300,6 +349,8 @@ class PaymentService {
       final snapshot = WalletSnapshot(
         balance: (json['balance'] as num?)?.toInt() ?? 0,
         isOfficialPageActive: json['official_page_active'] == true,
+        cosmeticsLifetimeUnlocked:
+            json['cosmetics_lifetime_unlocked'] == true,
         promotionHistory: history,
         catalog: catalog,
         fetchedAt: fetchedAt,
@@ -322,12 +373,14 @@ class PaymentService {
     final results = await Future.wait<Object>([
       getQarmetBalance(),
       isOfficialPageActive(),
+      getCosmeticsLifetimeUnlocked(),
       getMyPromotionHistory(),
     ]);
     final snapshot = WalletSnapshot(
       balance: results[0] as int,
       isOfficialPageActive: results[1] as bool,
-      promotionHistory: results[2] as List<QarmetPromotionHistoryItem>,
+      cosmeticsLifetimeUnlocked: results[2] as bool,
+      promotionHistory: results[3] as List<QarmetPromotionHistoryItem>,
       catalog: catalog,
       fetchedAt: DateTime.now().toUtc(),
     );
@@ -342,6 +395,7 @@ class PaymentService {
     final payload = <String, dynamic>{
       'balance': snapshot.balance,
       'official_page_active': snapshot.isOfficialPageActive,
+      'cosmetics_lifetime_unlocked': snapshot.cosmeticsLifetimeUnlocked,
       'fetched_at': snapshot.fetchedAt.toUtc().toIso8601String(),
       'promotion_history': snapshot.promotionHistory
           .map(
@@ -475,8 +529,15 @@ class PaymentService {
   }
 
   Future<void> spendForPremiumBadge({required int cost}) async {
-    await _spendQarmet(cost, reason: 'profile_premium_badge');
     final auth = _requireAuthUser();
+    if (await getCosmeticsLifetimeUnlocked()) {
+      await _client
+          .from('users')
+          .update({'profile_premium_badge': true})
+          .eq('id', auth.id);
+      return;
+    }
+    await _spendQarmet(cost, reason: 'profile_premium_badge');
     await _client
         .from('users')
         .update({'profile_premium_badge': true})
@@ -487,8 +548,23 @@ class PaymentService {
     required int frameLevel,
     required int cost,
   }) async {
-    await _spendQarmet(cost, reason: 'profile_frame');
     final auth = _requireAuthUser();
+    if (await getCosmeticsLifetimeUnlocked()) {
+      final row = await _client
+          .from('users')
+          .select('profile_frame_level')
+          .eq('id', auth.id)
+          .maybeSingle();
+      final current = row?['profile_frame_level'] as int? ?? 0;
+      final capped = frameLevel.clamp(0, profileCosmeticsIapMaxFrameLevel);
+      final next = capped > current ? capped : current;
+      await _client
+          .from('users')
+          .update({'profile_frame_level': next})
+          .eq('id', auth.id);
+      return;
+    }
+    await _spendQarmet(cost, reason: 'profile_frame');
     await _client
         .from('users')
         .update({'profile_frame_level': frameLevel})
@@ -499,8 +575,23 @@ class PaymentService {
     required int badgeLevel,
     required int cost,
   }) async {
-    await _spendQarmet(cost, reason: 'profile_badge');
     final auth = _requireAuthUser();
+    if (await getCosmeticsLifetimeUnlocked()) {
+      final row = await _client
+          .from('users')
+          .select('profile_badge_level')
+          .eq('id', auth.id)
+          .maybeSingle();
+      final current = row?['profile_badge_level'] as int? ?? 0;
+      final capped = badgeLevel.clamp(0, profileCosmeticsIapMaxBadgeLevel);
+      final next = capped > current ? capped : current;
+      await _client
+          .from('users')
+          .update({'profile_badge_level': next})
+          .eq('id', auth.id);
+      return;
+    }
+    await _spendQarmet(cost, reason: 'profile_badge');
     await _client
         .from('users')
         .update({'profile_badge_level': badgeLevel})
@@ -573,7 +664,7 @@ class PaymentService {
                   completer.complete(
                     PaymentResult(
                       status: PaymentResultStatus.error,
-                      message: purchase.error?.message ?? 'Ошибка покупки',
+                      message: _friendlyIapUserMessage(purchase.error?.message),
                     ),
                   );
                 }
@@ -595,10 +686,13 @@ class PaymentService {
       onError: (e, st) {
         debugPrint('IAP stream error: $e\n$st');
         if (!completer.isCompleted) {
+          final msg = e is PlatformException
+              ? _friendlyStoreError(e)
+              : _friendlyIapUserMessage(e.toString());
           completer.complete(
             PaymentResult(
               status: PaymentResultStatus.error,
-              message: 'Ошибка потока покупок: $e',
+              message: msg,
             ),
           );
         }
@@ -606,11 +700,10 @@ class PaymentService {
     );
 
     try {
-      final isSubscription =
-          _qarmetCatalog[storeProductId]?.isSubscription ?? false;
+      final nonConsumable = _storeKitUseNonConsumable(storeProductId);
       final ok = await _startPurchaseWithRetry(
         product: product,
-        isSubscription: isSubscription,
+        nonConsumable: nonConsumable,
         storeProductId: storeProductId,
       );
       if (!ok && !completer.isCompleted) {
@@ -643,54 +736,84 @@ class PaymentService {
     }
   }
 
+  bool _isStoreKitNoResponseError(PlatformException e) {
+    final code = (e.code).toLowerCase();
+    final blob = '${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
+    return code.contains('storekit') ||
+        code.contains('platform') ||
+        blob.contains('failed to get response from platform');
+  }
+
+  ProductDetails? _productDetailsById(String storeProductId) {
+    for (final p in _products) {
+      if (p.id == storeProductId) return p;
+    }
+    return null;
+  }
+
+  bool _storeKitUseNonConsumable(String storeProductId) {
+    if (_qarmetCatalog[storeProductId]?.isSubscription ?? false) {
+      return true;
+    }
+    return storeProductId == premiumSubscriptionProductId ||
+        storeProductId == profileCosmeticsLifetimeProductId;
+  }
+
   Future<bool> _startPurchaseWithRetry({
     required ProductDetails product,
-    required bool isSubscription,
+    required bool nonConsumable,
     required String storeProductId,
   }) async {
-    try {
-      final param = PurchaseParam(productDetails: product);
-      return isSubscription
-          ? await _iap.buyNonConsumable(purchaseParam: param)
-          : await _iap.buyConsumable(purchaseParam: param, autoConsume: true);
-    } on PlatformException catch (e) {
-      final code = (e.code).toLowerCase();
-      final details = '${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
-      final isStoreKitNoResponse =
-          code.contains('storekit') ||
-          code.contains('platform') ||
-          details.contains('failed to get response from platform');
-      if (!isStoreKitNoResponse) rethrow;
-
-      // iOS StoreKit can transiently fail to answer after app resume.
-      await Future<void>.delayed(const Duration(milliseconds: 450));
-      await initStore();
-      ProductDetails? refreshed;
-      for (final p in _products) {
-        if (p.id == storeProductId) {
-          refreshed = p;
-          break;
-        }
-      }
-      if (refreshed == null) rethrow;
-      final retryParam = PurchaseParam(productDetails: refreshed);
-      return isSubscription
-          ? await _iap.buyNonConsumable(purchaseParam: retryParam)
-          : await _iap.buyConsumable(
-              purchaseParam: retryParam,
-              autoConsume: true,
-            );
+    Future<bool> startBuy(ProductDetails p) async {
+      final param = PurchaseParam(productDetails: p);
+      return nonConsumable
+          ? _iap.buyNonConsumable(purchaseParam: param)
+          : _iap.buyConsumable(purchaseParam: param, autoConsume: true);
     }
+
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt == 1) {
+        await Future<void>.delayed(const Duration(milliseconds: 520));
+        await initStore();
+      } else if (attempt == 2) {
+        await Future<void>.delayed(const Duration(milliseconds: 1200));
+        await initStore();
+      }
+
+      final details = attempt == 0
+          ? product
+          : _productDetailsById(storeProductId);
+      if (details == null) {
+        continue;
+      }
+
+      try {
+        final ok = await startBuy(details);
+        if (ok) return true;
+      } on PlatformException catch (e) {
+        if (!_isStoreKitNoResponseError(e)) rethrow;
+      }
+    }
+    return false;
+  }
+
+  /// Убираем сырой текст «StoreKit: Failed to get response…» из UI.
+  String _friendlyIapUserMessage(String? raw) {
+    if (raw == null || raw.isEmpty) return 'Ошибка покупки';
+    final lower = raw.toLowerCase();
+    if (lower.contains('failed to get response from platform') ||
+        lower.contains('storekit')) {
+      return 'Не удалось связаться с App Store. Подождите несколько секунд, '
+          'закройте и снова откройте экран оплаты. Для теста нужен Sandbox Apple ID '
+          'и включённые In-App Purchase для приложения.';
+    }
+    return raw;
   }
 
   String _friendlyStoreError(PlatformException e) {
-    final raw = '${e.code} ${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
-    if (raw.contains('failed to get response from platform') ||
-        raw.contains('storekit')) {
-      return 'StoreKit не отвечает. Проверьте: вход в Sandbox Apple ID, '
-          'включённые In-App Purchases для приложения и попробуйте снова через 5-10 секунд.';
-    }
-    return e.message ?? 'Ошибка покупки: ${e.code}';
+    return _friendlyIapUserMessage(
+      '${e.code} ${e.message ?? ''} ${e.details ?? ''}',
+    );
   }
 
   Future<void> _creditPurchasedQarmet(QarmetProduct package) async {

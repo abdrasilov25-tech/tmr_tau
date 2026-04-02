@@ -30,6 +30,7 @@ class SupabaseConstants {
   static const String publicationFeedImpressionsTable =
       'publication_feed_impressions';
   static const String messagesTable = 'messages';
+  static const String messageReactionsTable = 'message_reactions';
   static const String chatGroupsTable = 'chat_groups';
   static const String chatGroupMembersTable = 'chat_group_members';
   static const String chatGroupMessagesTable = 'chat_group_messages';

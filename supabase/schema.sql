@@ -34,6 +34,8 @@ alter table public.users add column if not exists official_page_promo_perks bool
 alter table public.users add column if not exists profile_premium_badge boolean not null default false;
 alter table public.users add column if not exists profile_frame_level int not null default 0;
 alter table public.users add column if not exists profile_badge_level int not null default 0;
+alter table public.users add column if not exists profile_cosmetics_iap_forever boolean not null default false;
+alter table public.users add column if not exists last_active_at timestamptz;
 alter table public.users add column if not exists seller_plan text not null default 'free';
 alter table public.users add column if not exists seller_verified_store boolean not null default false;
 alter table public.users add column if not exists seller_extended_stats boolean not null default false;
@@ -972,12 +974,12 @@ create table if not exists public.chat_group_messages (
   audio_url text,
   video_url text,
   duration_seconds int,
-  city_thread text not null default 'general',
+  city_thread text not null default 'discussion',
   created_at timestamptz default now()
 );
 
 alter table public.chat_group_messages
-  add column if not exists city_thread text not null default 'general';
+  add column if not exists city_thread text not null default 'discussion';
 alter table public.chat_group_messages
   add column if not exists message_type text not null default 'text';
 alter table public.chat_group_messages
@@ -997,7 +999,17 @@ begin
   ) then
     alter table public.chat_group_messages
       add constraint chat_group_messages_city_thread_allowed
-      check (city_thread in ('general', 'roads', 'checks', 'market', 'help'));
+      check (
+        city_thread in (
+          'real_estate',
+          'services',
+          'jobs',
+          'purchases',
+          'sales',
+          'dating',
+          'discussion'
+        )
+      );
   end if;
 end $$;
 
@@ -1394,6 +1406,121 @@ end;
 $$;
 
 grant execute on function public.increment_publication_feed_impression(uuid, int, boolean) to authenticated;
+
+-- ============== Личные сообщения (direct messages) ==============
+-- Базовая таблица и RLS: migrations/20250314000000_messages_rls_delete.sql
+-- Расширения: migrations/20260403190000_dm_read_receipts_presence_reactions.sql
+
+create table if not exists public.messages (
+  id uuid primary key default gen_random_uuid(),
+  sender_id uuid not null references public.users(id) on delete cascade,
+  receiver_id uuid not null references public.users(id) on delete cascade,
+  text text not null default '',
+  created_at timestamptz default now()
+);
+
+alter table public.messages add column if not exists message_type text not null default 'text';
+alter table public.messages add column if not exists audio_url text;
+alter table public.messages add column if not exists video_url text;
+alter table public.messages add column if not exists duration_seconds int not null default 0;
+alter table public.messages add column if not exists read_at timestamptz;
+alter table public.messages add column if not exists forward_of uuid references public.messages(id) on delete set null;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'messages_message_type_allowed'
+      and conrelid = 'public.messages'::regclass
+  ) then
+    alter table public.messages
+      add constraint messages_message_type_allowed
+      check (message_type in ('text', 'audio', 'video_circle'));
+  end if;
+end $$;
+
+create index if not exists idx_messages_dm_unread
+  on public.messages (receiver_id, sender_id)
+  where read_at is null;
+
+create table if not exists public.message_reactions (
+  message_id uuid not null references public.messages(id) on delete cascade,
+  user_id uuid not null references public.users(id) on delete cascade,
+  emoji text not null,
+  created_at timestamptz not null default now(),
+  primary key (message_id, user_id),
+  constraint message_reactions_emoji_len check (
+    char_length(emoji) >= 1 and char_length(emoji) <= 64
+  )
+);
+
+create index if not exists idx_message_reactions_message_id
+  on public.message_reactions (message_id);
+
+alter table public.messages enable row level security;
+drop policy if exists "Messages select own" on public.messages;
+create policy "Messages select own" on public.messages
+  for select using (auth.uid() = sender_id or auth.uid() = receiver_id);
+drop policy if exists "Messages insert own" on public.messages;
+create policy "Messages insert own" on public.messages
+  for insert with check (auth.uid() = sender_id);
+drop policy if exists "Messages delete own" on public.messages;
+create policy "Messages delete own" on public.messages
+  for delete using (auth.uid() = sender_id or auth.uid() = receiver_id);
+
+alter table public.message_reactions enable row level security;
+drop policy if exists "message_reactions select thread" on public.message_reactions;
+create policy "message_reactions select thread"
+  on public.message_reactions for select using (
+    exists (
+      select 1
+      from public.messages m
+      where m.id = message_id
+        and (m.sender_id = auth.uid() or m.receiver_id = auth.uid())
+    )
+  );
+drop policy if exists "message_reactions insert thread" on public.message_reactions;
+create policy "message_reactions insert thread"
+  on public.message_reactions for insert with check (
+    auth.uid() = user_id
+    and exists (
+      select 1
+      from public.messages m
+      where m.id = message_id
+        and (m.sender_id = auth.uid() or m.receiver_id = auth.uid())
+    )
+  );
+drop policy if exists "message_reactions update own" on public.message_reactions;
+create policy "message_reactions update own"
+  on public.message_reactions for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+drop policy if exists "message_reactions delete own" on public.message_reactions;
+create policy "message_reactions delete own"
+  on public.message_reactions for delete using (auth.uid() = user_id);
+
+grant select, insert, update, delete on public.message_reactions to authenticated;
+
+drop function if exists public.mark_dm_messages_read(uuid);
+create or replace function public.mark_dm_messages_read(p_peer_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Not authenticated';
+  end if;
+  update public.messages
+  set read_at = now()
+  where receiver_id = auth.uid()
+    and sender_id = p_peer_id
+    and read_at is null;
+end;
+$$;
+grant execute on function public.mark_dm_messages_read(uuid) to authenticated;
 
 -- ============== Заметка к сторис (RLS, не users.story_note) ==============
 -- См. migrations/20260327140000_user_story_settings.sql

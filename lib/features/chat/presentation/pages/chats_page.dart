@@ -9,6 +9,7 @@ import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/storage/chat_list_storage.dart';
 import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../widgets/city_chat_fixed_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/entities/story_entity.dart';
@@ -152,7 +153,8 @@ class _ChatsPageState extends State<ChatsPage> {
 
   /// Лимит сторис для полосы друзей (без блокировки refresh).
   static const int _kStoriesStripLimit = 120;
-  static const Duration _warmCacheTtl = Duration(seconds: 75);
+  /// Короткий кэш первого кадра списка чатов — меньше «мигания» при возврате на вкладку.
+  static const Duration _warmCacheTtl = Duration(seconds: 120);
 
   /// Не дергать полный resolve Temirtau чаще (меньше запросов при каждом refresh).
   static const Duration _temirtauIdCacheTtl = Duration(minutes: 4);
@@ -2311,27 +2313,7 @@ class _ChatsPageState extends State<ChatsPage> {
               clipBehavior: Clip.none,
               children: [
                 t.isTemirtauCity
-                    ? Container(
-                        width: 52,
-                        height: 52,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: <Color>[
-                              Color(0xFF0284C7),
-                              Color(0xFF0EA5E9),
-                              Color(0xFF22D3EE),
-                            ],
-                          ),
-                        ),
-                        child: const Icon(
-                          Icons.location_city_rounded,
-                          color: Colors.white,
-                          size: 26,
-                        ),
-                      )
+                    ? const CityChatFixedAvatar(radius: 26)
                     : CachedAvatar(
                         imageUrl: t.peerAvatarUrl,
                         radius: 26,
