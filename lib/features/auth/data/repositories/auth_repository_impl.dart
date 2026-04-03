@@ -352,13 +352,28 @@ class AuthRepositoryImpl implements AuthRepository {
     final rawNonce = _generateRawNonce();
     final hashedNonce = sha256.convert(utf8.encode(rawNonce)).toString();
 
-    final credential = await SignInWithApple.getAppleIDCredential(
-      scopes: [
-        AppleIDAuthorizationScopes.email,
-        AppleIDAuthorizationScopes.fullName,
-      ],
-      nonce: hashedNonce,
-    );
+    // Таймаут: если iOS не вернёт результат (редко, но бывает на симуляторе),
+    // иначе Future не завершится и кнопка Apple останется в loading.
+    const appleCredentialTimeout = Duration(minutes: 3);
+
+    late final AuthorizationCredentialAppleID credential;
+    try {
+      credential = await SignInWithApple.getAppleIDCredential(
+        scopes: [
+          AppleIDAuthorizationScopes.email,
+          AppleIDAuthorizationScopes.fullName,
+        ],
+        nonce: hashedNonce,
+      ).timeout(
+        appleCredentialTimeout,
+        onTimeout: () => throw const AuthException('Sign-in canceled'),
+      );
+    } on SignInWithAppleAuthorizationException catch (e) {
+      if (e.code == AuthorizationErrorCode.canceled) {
+        throw const AuthException('Sign-in canceled');
+      }
+      rethrow;
+    }
 
     final idToken = credential.identityToken;
     if (idToken == null || idToken.isEmpty) {
@@ -375,39 +390,66 @@ class AuthRepositoryImpl implements AuthRepository {
     );
 
     final authUser = _client.auth.currentUser;
-    final uid = authUser?.id;
-    if (uid == null) {
+    if (authUser == null) {
       throw const AuthException('Сессия Apple не создана.');
     }
+    final uid = authUser.id;
 
     final gn = credential.givenName ?? '';
     final fn = credential.familyName ?? '';
     final combinedName = [gn, fn].where((s) => s.isNotEmpty).join(' ').trim();
-    if (combinedName.isNotEmpty && (authUser?.userMetadata?['name'] == null)) {
-      try {
-        await _client.auth.updateUser(
-          UserAttributes(data: {'name': combinedName, 'full_name': combinedName}),
-        );
-      } catch (_) {}
+    final displayName = combinedName.isNotEmpty
+        ? combinedName
+        : _getName(authUser);
+
+    // Сразу отдаём управление UI: не ждём updateUser и Supabase `users`.
+    _cachedUser = AppUser(
+      id: uid,
+      email: authUser.email ?? '',
+      name: displayName,
+      followersCount: 0,
+    );
+
+    if (combinedName.isNotEmpty && (authUser.userMetadata?['name'] == null)) {
+      unawaited(() async {
+        try {
+          await _client.auth.updateUser(
+            UserAttributes(
+              data: {'name': combinedName, 'full_name': combinedName},
+            ),
+          );
+        } catch (_) {}
+      }());
     }
 
-    _cachedUser = await _dataSource.fetchUserProfile(uid);
-    if (_cachedUser == null) {
-      try {
-        await _ensureUserRow(
-          uid,
-          authUser?.email ?? '',
-          combinedName.isNotEmpty ? combinedName : (_getName(authUser) ?? ''),
-        );
-        _cachedUser = await _dataSource.fetchUserProfile(uid);
-      } catch (_) {}
-      _cachedUser ??= AppUser(
-        id: uid,
-        email: authUser?.email ?? '',
-        name: _getName(_client.auth.currentUser) ??
-            (combinedName.isNotEmpty ? combinedName : null),
-        followersCount: 0,
+    unawaited(_hydrateAppleUserInBackground(uid, authUser, combinedName));
+  }
+
+  /// Догружает строку в `users` и полный профиль без блокировки экрана входа.
+  Future<void> _hydrateAppleUserInBackground(
+    String uid,
+    User authUser,
+    String combinedName,
+  ) async {
+    try {
+      var profile = await _dataSource.fetchUserProfile(uid);
+      if (profile != null) {
+        if (_client.auth.currentUser?.id == uid) {
+          _cachedUser = profile;
+        }
+        return;
+      }
+      await _ensureUserRow(
+        uid,
+        authUser.email ?? '',
+        combinedName.isNotEmpty ? combinedName : (_getName(authUser) ?? ''),
       );
+      profile = await _dataSource.fetchUserProfile(uid);
+      if (profile != null && _client.auth.currentUser?.id == uid) {
+        _cachedUser = profile;
+      }
+    } catch (_) {
+      // Остаётся сессионный stub из [_signInWithAppleNative].
     }
   }
 }

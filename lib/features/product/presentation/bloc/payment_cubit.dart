@@ -14,6 +14,7 @@ class PaymentUiState {
     this.isOfficialPageActive = false,
     this.cosmeticsLifetimeUnlocked = false,
     this.promotionHistory = const <QarmetPromotionHistoryItem>[],
+    this.purchasingQarmetProductId,
   });
 
   final PaymentUiStatus status;
@@ -24,6 +25,21 @@ class PaymentUiState {
   final bool cosmeticsLifetimeUnlocked;
   final List<QarmetPromotionHistoryItem> promotionHistory;
 
+  /// Покупка пакета Qarmet из магазина (IAP). Пока идёт — блокируем только этот SKU,
+  /// а не все кнопки при [status] == loading.
+  final String? purchasingQarmetProductId;
+
+  /// Полное обновление кошелька / init: глушим все действия с Qarmet.
+  bool get isWalletWideBusy =>
+      status == PaymentUiStatus.loading && purchasingQarmetProductId == null;
+
+  /// Можно нажать «купить» для этого productId (остальные пакеты остаются активными).
+  bool canTapBuyQarmetPackage(String productId) {
+    if (status != PaymentUiStatus.loading) return true;
+    return purchasingQarmetProductId != null &&
+        purchasingQarmetProductId != productId;
+  }
+
   PaymentUiState copyWith({
     PaymentUiStatus? status,
     String? message,
@@ -32,6 +48,8 @@ class PaymentUiState {
     bool? isOfficialPageActive,
     bool? cosmeticsLifetimeUnlocked,
     List<QarmetPromotionHistoryItem>? promotionHistory,
+    String? purchasingQarmetProductId,
+    bool clearPurchasingQarmetProductId = false,
   }) {
     return PaymentUiState(
       status: status ?? this.status,
@@ -42,6 +60,9 @@ class PaymentUiState {
       cosmeticsLifetimeUnlocked:
           cosmeticsLifetimeUnlocked ?? this.cosmeticsLifetimeUnlocked,
       promotionHistory: promotionHistory ?? this.promotionHistory,
+      purchasingQarmetProductId: clearPurchasingQarmetProductId
+          ? null
+          : (purchasingQarmetProductId ?? this.purchasingQarmetProductId),
     );
   }
 }
@@ -51,27 +72,34 @@ class PaymentCubit extends Cubit<PaymentUiState> {
 
   final PaymentService _service;
 
+  void resetForLogout() {
+    _service.clearWalletMemoryCache();
+    emit(const PaymentUiState());
+  }
+
   Future<void> initStore() async {
     try {
       await _service.initStore();
-      final cached = _service.getCachedWalletSnapshot() ??
-          await _service.getPersistentWalletSnapshot();
-      if (cached != null) {
+      final mem = _service.getCachedWalletSnapshot();
+      final disk = mem ?? await _service.getPersistentWalletSnapshot();
+      final hasWarmData = mem != null || disk != null;
+      final snap = mem ?? disk;
+      if (snap != null) {
         emit(
           state.copyWith(
             status: PaymentUiStatus.idle,
             message: null,
-            balance: cached.balance,
-            catalog: cached.catalog,
-            isOfficialPageActive: cached.isOfficialPageActive,
-            cosmeticsLifetimeUnlocked: cached.cosmeticsLifetimeUnlocked,
-            promotionHistory: cached.promotionHistory,
+            balance: snap.balance,
+            catalog: snap.catalog,
+            isOfficialPageActive: snap.isOfficialPageActive,
+            cosmeticsLifetimeUnlocked: snap.cosmeticsLifetimeUnlocked,
+            promotionHistory: snap.promotionHistory,
           ),
         );
       } else {
         emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
       }
-      await refreshWallet(silent: cached != null);
+      await refreshWallet(silent: hasWarmData, forceRefresh: false);
     } catch (e) {
       emit(
         state.copyWith(status: PaymentUiStatus.error, message: e.toString()),
@@ -79,7 +107,10 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     }
   }
 
-  Future<void> refreshWallet({bool silent = false, bool forceRefresh = true}) async {
+  Future<void> refreshWallet({
+    bool silent = false,
+    bool forceRefresh = false,
+  }) async {
     try {
       if (!silent) {
         emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
@@ -96,11 +127,16 @@ class PaymentCubit extends Cubit<PaymentUiState> {
           isOfficialPageActive: snapshot.isOfficialPageActive,
           cosmeticsLifetimeUnlocked: snapshot.cosmeticsLifetimeUnlocked,
           promotionHistory: snapshot.promotionHistory,
+          clearPurchasingQarmetProductId: true,
         ),
       );
     } catch (e) {
       emit(
-        state.copyWith(status: PaymentUiStatus.error, message: e.toString()),
+        state.copyWith(
+          status: PaymentUiStatus.error,
+          message: e.toString(),
+          clearPurchasingQarmetProductId: true,
+        ),
       );
     }
   }
@@ -111,7 +147,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
       final result = await _service.purchaseProfileCosmeticsLifetime();
       switch (result.status) {
         case PaymentResultStatus.success:
-          await refreshWallet();
+          await refreshWallet(silent: true, forceRefresh: true);
           emit(state.copyWith(status: PaymentUiStatus.success));
         case PaymentResultStatus.cancelled:
           emit(
@@ -139,18 +175,30 @@ class PaymentCubit extends Cubit<PaymentUiState> {
   }
 
   Future<void> buyQarmetPackage(String productId) async {
-    emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
+    emit(
+      state.copyWith(
+        status: PaymentUiStatus.loading,
+        message: null,
+        purchasingQarmetProductId: productId,
+      ),
+    );
     try {
       final result = await _service.buyQarmetPackage(productId);
       switch (result.status) {
         case PaymentResultStatus.success:
-          await refreshWallet();
-          emit(state.copyWith(status: PaymentUiStatus.success));
+          await refreshWallet(silent: true, forceRefresh: true);
+          emit(
+            state.copyWith(
+              status: PaymentUiStatus.success,
+              clearPurchasingQarmetProductId: true,
+            ),
+          );
         case PaymentResultStatus.cancelled:
           emit(
             state.copyWith(
               status: PaymentUiStatus.cancelled,
               message: result.message,
+              clearPurchasingQarmetProductId: true,
             ),
           );
         case PaymentResultStatus.error:
@@ -158,6 +206,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
             state.copyWith(
               status: PaymentUiStatus.error,
               message: result.message,
+              clearPurchasingQarmetProductId: true,
             ),
           );
       }
@@ -166,6 +215,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
         state.copyWith(
           status: PaymentUiStatus.error,
           message: 'Не удалось выполнить покупку: $e',
+          clearPurchasingQarmetProductId: true,
         ),
       );
     }
@@ -181,7 +231,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
         productId: productId,
         positions: positions,
       );
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -194,7 +244,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForTopPromotion(productId);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -207,7 +257,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForUrgentPromotion(productId);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -220,7 +270,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForHighlightPromotion(productId);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -233,7 +283,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForAllInOnePromotion(productId);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -246,7 +296,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForPremiumBadge(cost: cost);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -259,7 +309,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForFrame(frameLevel: level, cost: cost);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -272,7 +322,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.spendForBadge(badgeLevel: level, cost: cost);
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(state.copyWith(status: PaymentUiStatus.success));
     } catch (e) {
       emit(
@@ -285,7 +335,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
     emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
     try {
       await _service.restorePurchases();
-      await refreshWallet();
+      await refreshWallet(silent: true, forceRefresh: true);
       emit(
         state.copyWith(
           status: PaymentUiStatus.success,
@@ -301,7 +351,11 @@ class PaymentCubit extends Cubit<PaymentUiState> {
 
   void clearStatus() {
     emit(
-      state.copyWith(status: PaymentUiStatus.idle, message: null),
+      state.copyWith(
+        status: PaymentUiStatus.idle,
+        message: null,
+        clearPurchasingQarmetProductId: true,
+      ),
     );
   }
 }

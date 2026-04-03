@@ -45,6 +45,7 @@ import 'features/product/domain/repositories/product_repository.dart';
 import 'features/product/domain/repositories/product_monetization_repository.dart';
 import 'features/product/data/repositories/product_monetization_repository_impl.dart';
 import 'features/product/data/services/payment_service.dart';
+import 'features/product/presentation/bloc/payment_cubit.dart';
 import 'features/profile/data/repositories/profile_repository_impl.dart';
 import 'features/profile/domain/repositories/profile_repository.dart';
 import 'features/stories/data/repositories/stories_repository_impl.dart';
@@ -277,86 +278,92 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
           _authRepository,
           widget.multiAccountStorage,
         )..add(const AuthCheckRequested()),
-        child: BlocListener<AuthBloc, AuthState>(
-          listenWhen: (prev, curr) {
-            if (curr is! AuthAuthenticated) return false;
-            if (prev is! AuthAuthenticated) return true;
-            return prev.user.id != curr.user.id;
-          },
-          listener: (context, state) async {
-            if (state is AuthAuthenticated) {
-              widget.chatListStorage.setActiveAccountId(state.user.id);
-              widget.chatStoryListStorage.setActiveAccountId(state.user.id);
-              // Лайки/репосты в ленте — общий кэш до пользователя; чаты изолированы по accountId в storage.
-              await widget.localReactionsStorage.clearReactions();
-              if (!context.mounted) return;
-              final session =
-                  supa.Supabase.instance.client.auth.currentSession;
-              final refreshToken = session?.refreshToken;
-              if (refreshToken == null || refreshToken.isEmpty) {
-                return;
+        child: BlocProvider(
+          create: (context) => PaymentCubit(context.read<PaymentService>()),
+          child: BlocListener<AuthBloc, AuthState>(
+            listenWhen: (prev, curr) {
+              if (curr is! AuthAuthenticated) return false;
+              if (prev is! AuthAuthenticated) return true;
+              return prev.user.id != curr.user.id;
+            },
+            listener: (context, state) async {
+              if (state is AuthAuthenticated) {
+                final paymentCubit = context.read<PaymentCubit>();
+                widget.chatListStorage.setActiveAccountId(state.user.id);
+                widget.chatStoryListStorage.setActiveAccountId(state.user.id);
+                // Лайки/репосты в ленте — общий кэш до пользователя; чаты изолированы по accountId в storage.
+                await widget.localReactionsStorage.clearReactions();
+                if (!context.mounted) return;
+                final session =
+                    supa.Supabase.instance.client.auth.currentSession;
+                final refreshToken = session?.refreshToken;
+                if (refreshToken == null || refreshToken.isEmpty) {
+                  return;
+                }
+                final account = AccountModel(
+                  userId: state.user.id,
+                  email: state.user.email,
+                  refreshToken: refreshToken,
+                  accessToken: session?.accessToken,
+                  username: state.user.username,
+                );
+                await context.read<AccountManager>().addOrUpdateAccount(account);
+                if (context.mounted) {
+                  final chatBadge = context.read<ChatUnreadBadgeController>();
+                  final notificationBadge =
+                      context.read<NotificationTabBadgeController>();
+                  await chatBadge.refresh();
+                  await notificationBadge.refresh();
+                  unawaited(paymentCubit.initStore());
+                }
               }
-              final account = AccountModel(
-                userId: state.user.id,
-                email: state.user.email,
-                refreshToken: refreshToken,
-                accessToken: session?.accessToken,
-                username: state.user.username,
-              );
-              await context.read<AccountManager>().addOrUpdateAccount(account);
-              if (context.mounted) {
-                final chatBadge = context.read<ChatUnreadBadgeController>();
-                final notificationBadge =
-                    context.read<NotificationTabBadgeController>();
-                await chatBadge.refresh();
-                await notificationBadge.refresh();
-              }
-            }
-          },
-          child: BlocProvider<NewsBloc>(
-            create: (context) => NewsBloc(context.read<PostRepository>()),
-            child: BlocProvider<FeedBloc>(
-              create: (context) => FeedBloc(
-                _feedRepository,
-                widget.localReactionsStorage,
-              ),
-              child: BlocListener<AuthBloc, AuthState>(
-                listenWhen: (prev, curr) {
-                  if (curr is! AuthAuthenticated) return false;
-                  if (prev is! AuthAuthenticated) return true;
-                  return prev.user.id != curr.user.id;
-                },
-                listener: (context, state) {
-                  if (state is AuthAuthenticated) {
-                    context.read<FeedBloc>().add(
-                          FeedLoaded(currentUserId: state.user.id),
-                        );
-                    context.read<NewsBloc>().add(
-                          NewsLoaded(currentUserId: state.user.id),
-                        );
-                    context.read<ChatUnreadBadgeController>().refresh();
-                    unawaited(
-                      context.read<NotificationTabBadgeController>().refresh(),
-                    );
-                  }
-                },
+            },
+            child: BlocProvider<NewsBloc>(
+              create: (context) => NewsBloc(context.read<PostRepository>()),
+              child: BlocProvider<FeedBloc>(
+                create: (context) => FeedBloc(
+                  _feedRepository,
+                  widget.localReactionsStorage,
+                ),
                 child: BlocListener<AuthBloc, AuthState>(
-                  listenWhen: (prev, curr) =>
-                      curr is AuthUnauthenticated || curr is AuthError,
-                  listener: (context, state) {
-                    widget.chatListStorage.setActiveAccountId(null);
-                    widget.chatStoryListStorage.setActiveAccountId(null);
-                    context.read<ChatUnreadBadgeController>().clear();
-                    context.read<NotificationTabBadgeController>().clear();
-                    context.read<NewsBloc>().add(const NewsCleared());
-                    context.read<FeedRepository>().invalidateFeedCache();
-                    context.read<SearchTabActivationController>().reset();
+                  listenWhen: (prev, curr) {
+                    if (curr is! AuthAuthenticated) return false;
+                    if (prev is! AuthAuthenticated) return true;
+                    return prev.user.id != curr.user.id;
                   },
-                  child: MaterialApp.router(
-                    title: 'tmr_tau',
-                    debugShowCheckedModeBanner: false,
-                    theme: AppTheme.light,
-                    routerConfig: _appRouter.router,
+                  listener: (context, state) {
+                    if (state is AuthAuthenticated) {
+                      context.read<FeedBloc>().add(
+                            FeedLoaded(currentUserId: state.user.id),
+                          );
+                      context.read<NewsBloc>().add(
+                            NewsLoaded(currentUserId: state.user.id),
+                          );
+                      context.read<ChatUnreadBadgeController>().refresh();
+                      unawaited(
+                        context.read<NotificationTabBadgeController>().refresh(),
+                      );
+                    }
+                  },
+                  child: BlocListener<AuthBloc, AuthState>(
+                    listenWhen: (prev, curr) =>
+                        curr is AuthUnauthenticated || curr is AuthError,
+                    listener: (context, state) {
+                      widget.chatListStorage.setActiveAccountId(null);
+                      widget.chatStoryListStorage.setActiveAccountId(null);
+                      context.read<ChatUnreadBadgeController>().clear();
+                      context.read<NotificationTabBadgeController>().clear();
+                      context.read<NewsBloc>().add(const NewsCleared());
+                      context.read<FeedRepository>().invalidateFeedCache();
+                      context.read<SearchTabActivationController>().reset();
+                      context.read<PaymentCubit>().resetForLogout();
+                    },
+                    child: MaterialApp.router(
+                      title: 'tmr_tau',
+                      debugShowCheckedModeBanner: false,
+                      theme: AppTheme.light,
+                      routerConfig: _appRouter.router,
+                    ),
                   ),
                 ),
               ),

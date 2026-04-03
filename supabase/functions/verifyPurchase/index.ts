@@ -38,8 +38,6 @@ serve(async (req) => {
     }
     const officialPageProductIds = new Set([
       "com.bazar.tmrtau.subscription.monthly",
-      "com.yourapp.subscription.monthly", // legacy (плейсхолдер в старых сборках)
-      "qarmet_40", // legacy IAP id (до миграции)
     ]);
     const cosmeticsForeverProductIds = new Set([
       "com.bazar.tmrtau.premium",
@@ -47,6 +45,7 @@ serve(async (req) => {
     ]);
     const isSupportedProduct =
       productId === "boost_post" ||
+      productId === "promote_post" || // Flutter PaymentService.promotePostProductId
       productId === "premium_subscription" ||
       productId === "qarmet_10" ||
       productId === "qarmet_20" ||
@@ -64,24 +63,39 @@ serve(async (req) => {
         ? "subscription"
         : cosmeticsForeverProductIds.has(productId)
           ? "cosmetics_forever"
-          : "boost";
+          : "boost"; // boost_post, promote_post, qarmet_*
 
-    await admin.from("payment_orders").insert({
-      user_id: user.id,
-      provider: "iap",
-      kind: paymentKind,
-      plan_code: productId,
-      amount_minor: 0,
-      currency: "KZT",
-      status: "paid",
-      provider_payment_id: purchaseId,
-      provider_payload: {
-        platform,
-        source,
-        verificationData,
-      },
-      paid_at: new Date().toISOString(),
-    });
+    // Idempotency: skip insert if this purchaseId was already recorded.
+    // StoreKit can re-deliver the same transaction on next launch if completePurchase
+    // was not called (e.g. network drop after insert but before completePurchase).
+    let alreadyRecorded = false;
+    if (purchaseId) {
+      const { data: existing } = await admin
+        .from("payment_orders")
+        .select("id")
+        .eq("provider_payment_id", purchaseId)
+        .maybeSingle();
+      alreadyRecorded = existing != null;
+    }
+
+    if (!alreadyRecorded) {
+      await admin.from("payment_orders").insert({
+        user_id: user.id,
+        provider: "iap",
+        kind: paymentKind,
+        plan_code: productId,
+        amount_minor: 0,
+        currency: "KZT",
+        status: "paid",
+        provider_payment_id: purchaseId,
+        provider_payload: {
+          platform,
+          source,
+          verificationData,
+        },
+        paid_at: new Date().toISOString(),
+      });
+    }
 
     if (cosmeticsForeverProductIds.has(productId)) {
       await admin

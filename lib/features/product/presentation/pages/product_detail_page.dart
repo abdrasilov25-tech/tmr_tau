@@ -20,6 +20,7 @@ import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../orders/domain/repositories/orders_repository.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
+import '../../domain/value_objects/product_price_insight.dart';
 
 class ProductDetailPage extends StatefulWidget {
   const ProductDetailPage({
@@ -48,6 +49,8 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   bool _sending = false;
   bool _isInFavorites = false;
   bool _favoriteToggling = false;
+  ProductPriceInsight? _priceInsight;
+  bool _priceInsightReady = false;
 
   @override
   void initState() {
@@ -56,7 +59,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     _loadComments();
     _loadIsInFavorites();
     // Счётчик просмотров — один запрос после первого кадра (не в build).
-    WidgetsBinding.instance.addPostFrameCallback((_) => _bumpViewCount());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _bumpViewCount();
+      _loadPriceInsight();
+    });
     final mention = widget.mentionPrefix?.trim();
     if (mention != null && mention.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -84,6 +90,30 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         setState(() => _product = refreshed);
       }
     } catch (_) {}
+  }
+
+  Future<void> _loadPriceInsight() async {
+    final repo = widget.productRepository;
+    final cid = _product.categoryId?.trim();
+    if (repo == null || cid == null || cid.isEmpty) {
+      if (mounted) setState(() => _priceInsightReady = true);
+      return;
+    }
+    try {
+      final insight = await repo.getCategoryPriceInsight(
+        excludeProductId: _product.id,
+        categoryId: cid,
+        subjectPrice: _product.price,
+        isGiveaway: _product.isGiveaway,
+      );
+      if (!mounted) return;
+      setState(() {
+        _priceInsight = insight;
+        _priceInsightReady = true;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _priceInsightReady = true);
+    }
   }
 
   Future<void> _refreshAfterPromo() async {
@@ -387,12 +417,38 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     _product.title,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 14),
+                  _SellerHighlightCard(product: _product),
+                  const SizedBox(height: 12),
                   Text(
                     _product.priceFormatted,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
+                          color: _product.isGiveaway
+                              ? Theme.of(context).colorScheme.primary
+                              : const Color(0xFFE31E24),
+                          fontWeight: FontWeight.w900,
                         ),
+                  ),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 320),
+                    switchInCurve: Curves.easeOutCubic,
+                    child: !_priceInsightReady
+                        ? const SizedBox(
+                            key: ValueKey('pi_loading'),
+                            height: 8,
+                          )
+                        : _priceInsight == null
+                            ? const SizedBox(
+                                key: ValueKey('pi_none'),
+                                height: 0,
+                              )
+                            : Padding(
+                                key: ValueKey(_priceInsight!.headline),
+                                padding: const EdgeInsets.only(top: 10),
+                                child: _ProductDetailPriceInsightCard(
+                                  insight: _priceInsight!,
+                                ),
+                              ),
                   ),
                   if (_product.isGiveaway || _product.isNegotiable) ...[
                     const SizedBox(height: 8),
@@ -450,48 +506,6 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 16),
-                  InkWell(
-                    onTap: () => context.push('/profile/${_product.sellerId}'),
-                    borderRadius: BorderRadius.circular(12),
-                    child: Row(
-                      children: [
-                        CachedAvatar(
-                          imageUrl: _product.sellerAvatarUrl,
-                          radius: 24,
-                          fallbackText: _product.sellerName,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    _product.sellerName ?? 'Продавец',
-                                    style:
-                                        Theme.of(context).textTheme.titleMedium,
-                                  ),
-                                  if (_product.sellerIsVerified) ...[
-                                    const SizedBox(width: 6),
-                                    const VerifiedBadge(size: 20),
-                                  ],
-                                ],
-                              ),
-                              Text(
-                                'Перейти в профиль',
-                                style:
-                                    Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                        const Icon(Icons.chevron_right),
-                      ],
-                    ),
-                  ),
                   const SizedBox(height: 24),
                   Text(
                     'Описание',
@@ -765,6 +779,174 @@ class _ProductCommentTile extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(comment.text, style: Theme.of(context).textTheme.bodyMedium),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SellerHighlightCard extends StatelessWidget {
+  const _SellerHighlightCard({required this.product});
+
+  final ProductEntity product;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final name = product.sellerName?.trim().isNotEmpty == true
+        ? product.sellerName!.trim()
+        : 'Продавец';
+    return Material(
+      color: theme.colorScheme.surfaceContainerLowest,
+      elevation: 0,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: () => context.push('/profile/${product.sellerId}'),
+        borderRadius: BorderRadius.circular(16),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.35),
+            ),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                theme.colorScheme.primaryContainer.withValues(alpha: 0.35),
+                theme.colorScheme.surfaceContainerLowest,
+              ],
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            child: Row(
+              children: [
+                CachedAvatar(
+                  imageUrl: product.sellerAvatarUrl,
+                  radius: 26,
+                  fallbackText: name,
+                  enableLightboxOnTap: false,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Продаёт',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          if (product.sellerIsVerified) ...[
+                            const SizedBox(width: 6),
+                            const VerifiedBadge(size: 20),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProductDetailPriceInsightCard extends StatelessWidget {
+  const _ProductDetailPriceInsightCard({required this.insight});
+
+  final ProductPriceInsight insight;
+
+  Color _bg(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return switch (insight.tone) {
+      InsightTone.favorable => const Color(0xFFE8F5E9),
+      InsightTone.neutral => scheme.surfaceContainerHighest,
+      InsightTone.caution => const Color(0xFFFFF3E0),
+    };
+  }
+
+  Color _fg() {
+    return switch (insight.tone) {
+      InsightTone.favorable => const Color(0xFF1B5E20),
+      InsightTone.neutral => const Color(0xFF424242),
+      InsightTone.caution => const Color(0xFFE65100),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = _fg();
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _bg(context),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: fg.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            switch (insight.tone) {
+              InsightTone.favorable => Icons.lightbulb_outline_rounded,
+              InsightTone.caution => Icons.info_outline_rounded,
+              InsightTone.neutral => Icons.insights_outlined,
+            },
+            color: fg,
+            size: 26,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  insight.headline,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: fg,
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                if (insight.detail != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    insight.detail!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: fg.withValues(alpha: 0.9),
+                          height: 1.3,
+                        ),
+                  ),
+                ],
               ],
             ),
           ),

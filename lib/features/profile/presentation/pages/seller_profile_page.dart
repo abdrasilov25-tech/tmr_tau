@@ -20,7 +20,6 @@ import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_grid_engagement_overlay.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../product/domain/entities/product_entity.dart';
-import '../../../product/data/services/payment_service.dart';
 import '../../../product/presentation/bloc/payment_cubit.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -1240,14 +1239,26 @@ class _SellerProfileSocialChip extends StatelessWidget {
   }
 }
 
-class _OwnQarmetProfilePanel extends StatelessWidget {
+class _OwnQarmetProfilePanel extends StatefulWidget {
   const _OwnQarmetProfilePanel();
 
   @override
+  State<_OwnQarmetProfilePanel> createState() => _OwnQarmetProfilePanelState();
+}
+
+class _OwnQarmetProfilePanelState extends State<_OwnQarmetProfilePanel> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<PaymentCubit>().initStore();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => PaymentCubit(context.read<PaymentService>())..initStore(),
-      child: BlocConsumer<PaymentCubit, PaymentUiState>(
+    return BlocConsumer<PaymentCubit, PaymentUiState>(
         listenWhen: (prev, next) =>
             prev.status != next.status && next.status != PaymentUiStatus.loading,
         listener: (context, state) {
@@ -1350,7 +1361,9 @@ class _OwnQarmetProfilePanel extends StatelessWidget {
                         onPressed: loading
                             ? null
                             : () =>
-                                  context.read<PaymentCubit>().refreshWallet(),
+                                  context
+                                      .read<PaymentCubit>()
+                                      .refreshWallet(forceRefresh: true),
                         child: const Text('Обновить'),
                       ),
                     ],
@@ -1360,7 +1373,6 @@ class _OwnQarmetProfilePanel extends StatelessWidget {
             ),
           );
         },
-      ),
     );
   }
 }

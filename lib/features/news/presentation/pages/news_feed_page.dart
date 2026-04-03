@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../../core/media/cached_video_controller.dart';
@@ -18,9 +19,70 @@ import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../bloc/news_bloc.dart';
+import '../widgets/news_city_picker.dart';
 
-class NewsFeedPage extends StatelessWidget {
+class NewsFeedPage extends StatefulWidget {
   const NewsFeedPage({super.key});
+
+  @override
+  State<NewsFeedPage> createState() => _NewsFeedPageState();
+}
+
+class _NewsFeedPageState extends State<NewsFeedPage> {
+  static const _cityPrefKey = 'news_selected_city';
+  String? _selectedCity;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedCity();
+  }
+
+  Future<void> _loadSavedCity() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_cityPrefKey);
+    if (!mounted) return;
+    setState(() => _selectedCity = saved);
+    // Перезагружаем ленту с сохранённым городом
+    final userId = _currentUserId(context);
+    // ignore: use_build_context_synchronously
+    context.read<NewsBloc>().add(
+          NewsLoaded(currentUserId: userId, cityFilter: saved),
+        );
+  }
+
+  String? _currentUserId(BuildContext context) {
+    final authState = context.read<AuthBloc>().state;
+    return authState is AuthAuthenticated
+        ? authState.user.id
+        : context.read<AuthRepository>().currentUser?.id;
+  }
+
+  Future<void> _openCityPicker(BuildContext context) async {
+    final result = await showNewsCityPicker(
+      context: context,
+      currentCity: _selectedCity,
+    );
+    // null → пользователь закрыл шторку без выбора, ничего не меняем
+    if (result == null || !mounted) return;
+
+    final newCity = result.city; // null = «Весь Казахстан»
+    final prefs = await SharedPreferences.getInstance();
+    if (newCity == null) {
+      await prefs.remove(_cityPrefKey);
+    } else {
+      await prefs.setString(_cityPrefKey, newCity);
+    }
+
+    if (!mounted) return;
+    setState(() => _selectedCity = newCity);
+    // ignore: use_build_context_synchronously
+    final userId = _currentUserId(context);
+    // ignore: use_build_context_synchronously
+    context.read<NewsBloc>().add(
+          NewsLoaded(currentUserId: userId, cityFilter: newCity),
+        );
+  }
 
   Future<void> _openAddNews(BuildContext context, String? userId) async {
     if (userId == null) {
@@ -34,7 +96,9 @@ class NewsFeedPage extends StatelessWidget {
     }
     await context.push<PostEntity?>('/add-news');
     if (!context.mounted) return;
-    context.read<NewsBloc>().add(NewsRefresh(currentUserId: userId));
+    context.read<NewsBloc>().add(
+          NewsRefresh(currentUserId: userId, cityFilter: _selectedCity),
+        );
   }
 
   @override
@@ -47,18 +111,17 @@ class NewsFeedPage extends StatelessWidget {
     return Builder(
       builder: (nested) {
         return Scaffold(
-          backgroundColor: Colors.transparent,
+          backgroundColor: const Color(0xFFF4F4F5),
           appBar: _NewsAppBar(
             onNearby: () => context.push('/nearby'),
-          ),
-          floatingActionButton: _QuickPostFab(
-            onTap: () => _openAddNews(nested, userId),
+            selectedCity: _selectedCity,
+            onCityTap: () => _openCityPicker(context),
           ),
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
                 child: _NewsComposer(
                   avatarUrl: authState is AuthAuthenticated
                       ? authState.user.avatarUrl
@@ -67,6 +130,7 @@ class NewsFeedPage extends StatelessWidget {
                       ? (authState.user.name ?? authState.user.email)
                       : null,
                   isLoggedIn: userId != null,
+                  selectedCity: _selectedCity,
                   onTap: () => _openAddNews(nested, userId),
                 ),
               ),
@@ -81,14 +145,20 @@ class NewsFeedPage extends StatelessWidget {
                         message: state.message,
                         onRetry: () => context
                             .read<NewsBloc>()
-                            .add(NewsLoaded(currentUserId: userId)),
+                            .add(NewsLoaded(
+                              currentUserId: userId,
+                              cityFilter: _selectedCity,
+                            )),
                       );
                     }
                     if (state is NewsSuccess) {
                       Future<void> refresh() async {
-                        context
-                            .read<NewsBloc>()
-                            .add(NewsRefresh(currentUserId: userId));
+                        context.read<NewsBloc>().add(
+                              NewsRefresh(
+                                currentUserId: userId,
+                                cityFilter: _selectedCity,
+                              ),
+                            );
                       }
 
                       if (state.posts.isEmpty) {
@@ -104,14 +174,14 @@ class NewsFeedPage extends StatelessWidget {
                         onRefresh: refresh,
                         child: ListView.builder(
                           physics: const AlwaysScrollableScrollPhysics(),
-                          padding: const EdgeInsets.only(bottom: 100),
+                          padding: const EdgeInsets.only(bottom: 28),
                           itemCount:
                               state.posts.length + (state.hasMore ? 1 : 0),
                           itemBuilder: (context, index) {
                             if (index >= state.posts.length) {
-                              context
-                                  .read<NewsBloc>()
-                                  .add(NewsLoadMore());
+                              context.read<NewsBloc>().add(
+                                    NewsLoadMore(currentUserId: userId),
+                                  );
                               return const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 24),
                                 child: Center(
@@ -122,6 +192,17 @@ class NewsFeedPage extends StatelessWidget {
                             return _NewsPostCard(
                               post: post,
                               currentUserId: userId,
+                              onPollVote: userId == null
+                                  ? null
+                                  : (int optionIndex) {
+                                      context.read<NewsBloc>().add(
+                                            NewsVotePoll(
+                                              postId: post.id,
+                                              userId: userId,
+                                              optionIndex: optionIndex,
+                                            ),
+                                          );
+                                    },
                               onLike: () {
                                 if (userId != null) {
                                   context.read<NewsBloc>().add(
@@ -152,7 +233,9 @@ class NewsFeedPage extends StatelessWidget {
                                     context.mounted) {
                                   context.read<NewsBloc>().add(
                                         NewsRefresh(
-                                            currentUserId: userId),
+                                          currentUserId: userId,
+                                          cityFilter: _selectedCity,
+                                        ),
                                       );
                                 }
                               },
@@ -184,7 +267,9 @@ class NewsFeedPage extends StatelessWidget {
                                   if (!context.mounted) return;
                                   context.read<NewsBloc>().add(
                                         NewsRefresh(
-                                            currentUserId: userId),
+                                          currentUserId: userId,
+                                          cityFilter: _selectedCity,
+                                        ),
                                       );
                                   ScaffoldMessenger.of(context)
                                       .showSnackBar(SnackBar(
@@ -211,7 +296,9 @@ class NewsFeedPage extends StatelessWidget {
                                 onRefresh: () =>
                                     context.read<NewsBloc>().add(
                                           NewsRefresh(
-                                              currentUserId: userId),
+                                            currentUserId: userId,
+                                            cityFilter: _selectedCity,
+                                          ),
                                         ),
                               ),
                             );
@@ -266,14 +353,27 @@ class NewsFeedPage extends StatelessWidget {
                       horizontal: 20, vertical: 12),
                   child: Row(
                     children: [
-                      CachedAvatar(
-                        imageUrl: post.userAvatarUrl,
-                        radius: 18,
-                        fallbackText: post.userName ?? 'U',
-                      ),
+                      if (post.isAnonymous)
+                        CircleAvatar(
+                          radius: 18,
+                          backgroundColor: Colors.grey.shade300,
+                          child: Icon(
+                            Icons.visibility_off_outlined,
+                            size: 18,
+                            color: Colors.grey.shade700,
+                          ),
+                        )
+                      else
+                        CachedAvatar(
+                          imageUrl: post.userAvatarUrl,
+                          radius: 18,
+                          fallbackText: post.userName ?? 'U',
+                        ),
                       const SizedBox(width: 10),
                       Text(
-                        post.userName ?? 'Пользователь',
+                        post.isAnonymous
+                            ? 'Анонимно'
+                            : (post.userName ?? 'Пользователь'),
                         style: GoogleFonts.poppins(
                           fontWeight: FontWeight.w600,
                           fontSize: 15,
@@ -537,28 +637,87 @@ class NewsFeedPage extends StatelessWidget {
 // ─────────────────────────────────────────────
 
 class _NewsAppBar extends StatelessWidget implements PreferredSizeWidget {
-  const _NewsAppBar({required this.onNearby});
+  const _NewsAppBar({
+    required this.onNearby,
+    required this.onCityTap,
+    this.selectedCity,
+  });
   final VoidCallback onNearby;
+  final VoidCallback onCityTap;
+  final String? selectedCity;
 
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+  Size get preferredSize => const Size.fromHeight(kToolbarHeight + 1);
 
   @override
   Widget build(BuildContext context) {
+    final cityLabel = selectedCity ?? 'Весь Казахстан';
+
     return AppBar(
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF4F4F5),
       elevation: 0,
-      scrolledUnderElevation: 1,
+      scrolledUnderElevation: 0.5,
       title: Text(
         'Новости',
-        style: GoogleFonts.poppins(
-          fontSize: 20,
-          fontWeight: FontWeight.w700,
-          color: Colors.black87,
+        style: GoogleFonts.inter(
+          fontSize: 22,
+          fontWeight: FontWeight.w800,
+          color: const Color(0xFF0A0A0A),
+          letterSpacing: -0.5,
         ),
       ),
       centerTitle: false,
       actions: [
+        // Кнопка выбора города
+        GestureDetector(
+          onTap: onCityTap,
+          child: Container(
+            margin: const EdgeInsets.only(right: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: selectedCity != null
+                  ? Colors.black87
+                  : Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: selectedCity != null
+                    ? Colors.black87
+                    : Colors.grey.shade300,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.location_on_rounded,
+                  size: 14,
+                  color: selectedCity != null
+                      ? Colors.white
+                      : Colors.grey.shade600,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  cityLabel,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: selectedCity != null
+                        ? Colors.white
+                        : Colors.grey.shade700,
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(
+                  Icons.expand_more_rounded,
+                  size: 14,
+                  color: selectedCity != null
+                      ? Colors.white70
+                      : Colors.grey.shade500,
+                ),
+              ],
+            ),
+          ),
+        ),
         IconButton(
           tooltip: 'Рядом',
           onPressed: onNearby,
@@ -568,41 +727,14 @@ class _NewsAppBar extends StatelessWidget implements PreferredSizeWidget {
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Container(height: 1, color: Colors.grey.shade200),
+        child: Container(height: 1, color: Colors.black.withValues(alpha: 0.06)),
       ),
     );
   }
 }
 
 // ─────────────────────────────────────────────
-// FAB быстрой публикации
-// ─────────────────────────────────────────────
-
-class _QuickPostFab extends StatelessWidget {
-  const _QuickPostFab({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return FloatingActionButton.extended(
-      onPressed: onTap,
-      backgroundColor: Colors.black87,
-      foregroundColor: Colors.white,
-      elevation: 4,
-      icon: const Icon(Icons.edit_rounded, size: 20),
-      label: Text(
-        'Новость',
-        style: GoogleFonts.poppins(
-          fontWeight: FontWeight.w600,
-          fontSize: 14,
-        ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────
-// Composer (как в Threads)
+// Composer — единая точка создания новости
 // ─────────────────────────────────────────────
 
 class _NewsComposer extends StatelessWidget {
@@ -611,12 +743,14 @@ class _NewsComposer extends StatelessWidget {
     required this.displayName,
     required this.isLoggedIn,
     required this.onTap,
+    this.selectedCity,
   });
 
   final String? avatarUrl;
   final String? displayName;
   final bool isLoggedIn;
   final VoidCallback onTap;
+  final String? selectedCity;
 
   @override
   Widget build(BuildContext context) {
@@ -631,62 +765,61 @@ class _NewsComposer extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(22),
         child: Ink(
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.black.withValues(alpha: 0.08)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 20,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
           child: Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
               children: [
                 CachedAvatar(
                   imageUrl: avatarUrl,
-                  radius: 20,
+                  radius: 22,
                   fallbackText: fallback,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
+                        'Новая тема',
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFF0A0A0A),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
                         isLoggedIn
-                            ? 'Что происходит в Темиртау?'
-                            : 'Войдите, чтобы рассказать',
-                        style: GoogleFonts.poppins(
-                          fontSize: 15,
-                          color: Colors.grey.shade500,
+                            ? 'Что нового в ${selectedCity ?? 'Казахстане'}? Текст, фото, опрос или место.'
+                            : 'Войдите, чтобы публиковать',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          height: 1.3,
+                          color: Colors.grey.shade600,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 7),
-                  decoration: BoxDecoration(
-                    color: Colors.black87,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    'Написать',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                Icon(
+                  Icons.edit_note_rounded,
+                  color: Colors.grey.shade700,
+                  size: 28,
                 ),
               ],
             ),
@@ -705,6 +838,7 @@ class _NewsPostCard extends StatelessWidget {
   const _NewsPostCard({
     required this.post,
     required this.currentUserId,
+    this.onPollVote,
     required this.onLike,
     required this.onRepost,
     required this.onComment,
@@ -715,6 +849,7 @@ class _NewsPostCard extends StatelessWidget {
 
   final PostEntity post;
   final String? currentUserId;
+  final void Function(int optionIndex)? onPollVote;
   final VoidCallback onLike;
   final VoidCallback onRepost;
   final VoidCallback onComment;
@@ -724,27 +859,34 @@ class _NewsPostCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final anon = post.isAnonymous;
+    final displayName =
+        anon ? 'Анонимно' : (post.userName ?? 'Житель');
+    final avatarFallback = anon ? '?' : displayName;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 0),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(
-          bottom: BorderSide(color: Colors.grey.shade100, width: 1),
+          bottom: BorderSide(color: Colors.black.withValues(alpha: 0.06), width: 1),
         ),
       ),
       child: InkWell(
         onTap: onComment,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // Left column: avatar + thread line
               _AvatarColumn(
-                avatarUrl: post.userAvatarUrl,
-                userName: post.userName ?? post.userId,
+                avatarUrl: anon ? null : post.userAvatarUrl,
+                userName: avatarFallback,
                 userId: post.userId,
                 commentsCount: post.commentsCount,
+                isAnonymous: anon,
+                openProfile: !anon,
               ),
               const SizedBox(width: 12),
               // Right column: content
@@ -758,19 +900,21 @@ class _NewsPostCard extends StatelessWidget {
                       children: [
                         Expanded(
                           child: GestureDetector(
-                            onTap: () =>
-                                context.push('/profile/${post.userId}'),
+                            onTap: anon
+                                ? null
+                                : () =>
+                                    context.push('/profile/${post.userId}'),
                             child: Row(
                               children: [
                                 Flexible(
                                   child: Text(
-                                    post.userName ?? 'Житель',
+                                    displayName,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: GoogleFonts.poppins(
+                                    style: GoogleFonts.inter(
                                       fontWeight: FontWeight.w700,
-                                      fontSize: 14,
-                                      color: Colors.black87,
+                                      fontSize: 15,
+                                      color: const Color(0xFF0A0A0A),
                                     ),
                                   ),
                                 ),
@@ -797,10 +941,10 @@ class _NewsPostCard extends StatelessWidget {
                                 const SizedBox(width: 8),
                                 Text(
                                   _formatTime(post.createdAt),
-                                  style: GoogleFonts.poppins(
+                                  style: GoogleFonts.inter(
                                     fontSize: 12,
                                     color: Colors.grey.shade500,
-                                    fontWeight: FontWeight.w400,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],
@@ -822,10 +966,41 @@ class _NewsPostCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (post.locationLabel != null &&
+                        post.locationLabel!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.place_outlined,
+                            size: 15,
+                            color: Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              post.locationLabel!.trim(),
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: Colors.grey.shade700,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     // Caption
                     if (post.caption.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       _ExpandableCaption(caption: post.caption),
+                    ],
+                    if (post.hasPoll) ...[
+                      const SizedBox(height: 10),
+                      _NewsPollBlock(
+                        post: post,
+                        onVote: onPollVote,
+                      ),
                     ],
                     // Media
                     if (post.videoUrl != null &&
@@ -912,24 +1087,40 @@ class _AvatarColumn extends StatelessWidget {
     required this.userName,
     required this.userId,
     required this.commentsCount,
+    this.isAnonymous = false,
+    this.openProfile = true,
   });
 
   final String? avatarUrl;
   final String userName;
   final String userId;
   final int commentsCount;
+  final bool isAnonymous;
+  final bool openProfile;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        GestureDetector(
-          onTap: () => context.push('/profile/$userId'),
-          child: CachedAvatar(
+    final avatar = isAnonymous
+        ? CircleAvatar(
+            radius: 20,
+            backgroundColor: Colors.grey.shade300,
+            child: Icon(
+              Icons.visibility_off_outlined,
+              size: 20,
+              color: Colors.grey.shade700,
+            ),
+          )
+        : CachedAvatar(
             imageUrl: avatarUrl,
             radius: 20,
             fallbackText: userName,
-          ),
+          );
+
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: openProfile ? () => context.push('/profile/$userId') : null,
+          child: avatar,
         ),
         if (commentsCount > 0) ...[
           const SizedBox(height: 4),
@@ -943,6 +1134,126 @@ class _AvatarColumn extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Опрос в карточке новости
+// ─────────────────────────────────────────────
+
+class _NewsPollBlock extends StatelessWidget {
+  const _NewsPollBlock({
+    required this.post,
+    this.onVote,
+  });
+
+  final PostEntity post;
+  final void Function(int optionIndex)? onVote;
+
+  @override
+  Widget build(BuildContext context) {
+    final q = post.pollQuestion ?? '';
+    final opts = post.pollOptions;
+    if (opts.length < 2) return const SizedBox.shrink();
+    final counts = post.pollVoteCounts.length == opts.length
+        ? post.pollVoteCounts
+        : List<int>.filled(opts.length, 0, growable: false);
+    final total = counts.fold<int>(0, (a, b) => a + b);
+    final my = post.myPollVoteIndex;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF4F4F5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withValues(alpha: 0.07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            q,
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+              height: 1.25,
+              color: const Color(0xFF0A0A0A),
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (var i = 0; i < opts.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  onTap: onVote == null ? null : () => onVote!(i),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                opts[i],
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                  color: const Color(0xFF0A0A0A),
+                                ),
+                              ),
+                            ),
+                            if (my == i)
+                              Icon(
+                                Icons.check_circle_rounded,
+                                size: 18,
+                                color: Colors.blue.shade700,
+                              ),
+                          ],
+                        ),
+                        if (total > 0) ...[
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: counts[i] / total,
+                              minHeight: 5,
+                              backgroundColor: Colors.grey.shade200,
+                              color: Colors.blue.shade400,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            '${counts[i]} голосов · ${total == 0 ? 0 : ((counts[i] / total) * 100).round()}%',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              color: Colors.grey.shade600,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (onVote == null)
+            Text(
+              'Войдите, чтобы голосовать',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: Colors.grey.shade600,
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -1197,18 +1508,21 @@ class _EmptyView extends StatelessWidget {
         ),
         const SizedBox(height: 28),
         Center(
-          child: FilledButton.icon(
+          child: FilledButton(
             onPressed: onTap,
             style: FilledButton.styleFrom(
-              backgroundColor: Colors.black87,
+              backgroundColor: const Color(0xFF0A0A0A),
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(
-                  horizontal: 24, vertical: 14),
+                  horizontal: 28, vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
             ),
-            icon: const Icon(Icons.edit_rounded, size: 18),
-            label: Text(
-              'Написать новость',
-              style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w600, fontSize: 15),
+            child: Text(
+              'Создать новость',
+              style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700, fontSize: 15),
             ),
           ),
         ),

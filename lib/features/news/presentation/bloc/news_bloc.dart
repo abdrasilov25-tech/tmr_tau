@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../post/domain/entities/post_entity.dart';
@@ -10,6 +12,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
   NewsBloc(this._repository) : super(NewsInitial()) {
     on<NewsLoaded>(_onLoaded);
     on<NewsLoadMore>(_onLoadMore);
+    on<NewsVotePoll>(_onVotePoll);
     on<NewsToggleLike>(_onToggleLike);
     on<NewsToggleRepost>(_onToggleRepost);
     on<NewsRefresh>(_onRefresh);
@@ -28,6 +31,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
       emit,
       currentUserId: event.currentUserId,
       silent: event.silent,
+      cityFilter: event.cityFilter,
     );
   }
 
@@ -35,6 +39,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     Emitter<NewsState> emit, {
     required String? currentUserId,
     required bool silent,
+    String? cityFilter,
   }) async {
     final previous = state;
     if (!silent || previous is! NewsSuccess) {
@@ -45,12 +50,17 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
         limit: _pageSize,
         offset: 0,
         currentUserId: currentUserId,
+        cityFilter: cityFilter,
       );
       final newsOnly = list
           .where((p) => p.kind.trim().toLowerCase() == 'news')
           .toList(growable: false);
       if (!isClosed) {
-        emit(NewsSuccess(newsOnly, hasMore: list.length >= _pageSize));
+        emit(NewsSuccess(
+          newsOnly,
+          hasMore: list.length >= _pageSize,
+          selectedCity: cityFilter,
+        ));
       }
     } catch (e) {
       if (!isClosed) {
@@ -73,7 +83,8 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
       final list = await _repository.getNewsPosts(
         limit: _pageSize,
         offset: offset,
-        currentUserId: null,
+        currentUserId: event.currentUserId,
+        cityFilter: current.selectedCity,
       );
       final newsOnly = list
           .where((p) => p.kind.trim().toLowerCase() == 'news')
@@ -84,10 +95,56 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
           newList,
           hasMore: list.length >= _pageSize,
           isLoadingMore: false,
+          selectedCity: current.selectedCity,
         ));
       }
     } catch (_) {
       if (!isClosed) emit(current.copyWith(isLoadingMore: false));
+    }
+  }
+
+  Future<void> _onVotePoll(NewsVotePoll event, Emitter<NewsState> emit) async {
+    final current = state;
+    if (current is! NewsSuccess) return;
+    final idx =
+        current.posts.indexWhere((p) => p.id == event.postId);
+    if (idx < 0) return;
+    final post = current.posts[idx];
+    if (!post.hasPoll) return;
+    final n = post.pollOptions.length;
+    if (event.optionIndex < 0 || event.optionIndex >= n) return;
+
+    final newCounts = List<int>.from(
+      post.pollVoteCounts.length == n
+          ? post.pollVoteCounts
+          : List<int>.filled(n, 0),
+    );
+    final oldIdx = post.myPollVoteIndex;
+    if (oldIdx != null && oldIdx >= 0 && oldIdx < n) {
+      newCounts[oldIdx] = math.max(0, newCounts[oldIdx] - 1);
+    }
+    newCounts[event.optionIndex] += 1;
+
+    final optimistic = current.posts
+        .map(
+          (p) => p.id == event.postId
+              ? p.copyWith(
+                  pollVoteCounts: newCounts,
+                  myPollVoteIndex: event.optionIndex,
+                )
+              : p,
+        )
+        .toList(growable: false);
+    final previous = current;
+    emit(current.copyWith(posts: optimistic));
+    try {
+      await _repository.voteNewsPoll(
+        postId: event.postId,
+        userId: event.userId,
+        optionIndex: event.optionIndex,
+      );
+    } catch (_) {
+      if (!isClosed) emit(previous);
     }
   }
 
@@ -128,10 +185,13 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
   }
 
   Future<void> _onRefresh(NewsRefresh event, Emitter<NewsState> emit) async {
+    final currentCity = event.cityFilter ??
+        (state is NewsSuccess ? (state as NewsSuccess).selectedCity : null);
     await _fetchFirstPage(
       emit,
       currentUserId: event.currentUserId,
       silent: true,
+      cityFilter: currentCity,
     );
   }
 }

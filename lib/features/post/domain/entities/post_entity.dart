@@ -27,6 +27,13 @@ class PostEntity extends Equatable {
     this.distanceKm,
     this.isPromoted = false,
     this.promotedUntil,
+    this.city,
+    this.isAnonymous = false,
+    this.locationLabel,
+    this.pollQuestion,
+    this.pollOptions = const [],
+    this.pollVoteCounts = const [],
+    this.myPollVoteIndex,
   });
 
   final String id;
@@ -56,6 +63,19 @@ class PostEntity extends Equatable {
   final double? distanceKm;
   final bool isPromoted;
   final DateTime? promotedUntil;
+  final String? city;
+  final bool isAnonymous;
+  final String? locationLabel;
+  final String? pollQuestion;
+  final List<String> pollOptions;
+  /// Длина совпадает с [pollOptions]; для поста без опроса пусто.
+  final List<int> pollVoteCounts;
+  final int? myPollVoteIndex;
+
+  bool get hasPoll =>
+      pollQuestion != null &&
+      pollQuestion!.trim().isNotEmpty &&
+      pollOptions.length >= 2;
 
   /// Все URL фото для карусели (мульти или одно из legacy `image_url`).
   List<String> get displayImageUrls {
@@ -92,6 +112,14 @@ class PostEntity extends Equatable {
     double? distanceKm,
     bool? isPromoted,
     DateTime? promotedUntil,
+    String? city,
+    bool? isAnonymous,
+    String? locationLabel,
+    String? pollQuestion,
+    List<String>? pollOptions,
+    List<int>? pollVoteCounts,
+    int? myPollVoteIndex,
+    bool clearMyPollVote = false,
   }) {
     return PostEntity(
       id: id ?? this.id,
@@ -119,6 +147,15 @@ class PostEntity extends Equatable {
       distanceKm: distanceKm ?? this.distanceKm,
       isPromoted: isPromoted ?? this.isPromoted,
       promotedUntil: promotedUntil ?? this.promotedUntil,
+      city: city ?? this.city,
+      isAnonymous: isAnonymous ?? this.isAnonymous,
+      locationLabel: locationLabel ?? this.locationLabel,
+      pollQuestion: pollQuestion ?? this.pollQuestion,
+      pollOptions: pollOptions ?? this.pollOptions,
+      pollVoteCounts: pollVoteCounts ?? this.pollVoteCounts,
+      myPollVoteIndex: clearMyPollVote
+          ? null
+          : (myPollVoteIndex ?? this.myPollVoteIndex),
     );
   }
 
@@ -149,5 +186,12 @@ class PostEntity extends Equatable {
         distanceKm,
         isPromoted,
         promotedUntil,
+        city,
+        isAnonymous,
+        locationLabel,
+        pollQuestion,
+        pollOptions,
+        pollVoteCounts,
+        myPollVoteIndex,
       ];
 }

@@ -7,6 +7,7 @@ import '../../../../core/models/search_filters.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/entities/seller_listing_policy.dart';
 import '../../domain/repositories/product_repository.dart';
+import '../../domain/value_objects/product_price_insight.dart';
 import '../models/product_model.dart';
 
 class ProductRepositoryImpl implements ProductRepository {
@@ -45,6 +46,38 @@ class ProductRepositoryImpl implements ProductRepository {
       maxActiveProducts: maxActiveProducts,
       activeProducts: (activeRows as List).length,
     );
+  }
+
+  @override
+  Future<ProductPriceInsight?> getCategoryPriceInsight({
+    required String excludeProductId,
+    required String categoryId,
+    required double subjectPrice,
+    required bool isGiveaway,
+  }) async {
+    if (isGiveaway || subjectPrice <= 0 || categoryId.trim().isEmpty) {
+      return null;
+    }
+    try {
+      final res = await _client
+          .from(SupabaseConstants.productsTable)
+          .select('price,is_giveaway')
+          .eq('category_id', categoryId.trim())
+          .neq('id', excludeProductId)
+          .limit(120);
+      final prices = (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .where((m) => m['is_giveaway'] != true)
+          .map((m) => (m['price'] as num?)?.toDouble() ?? 0)
+          .where((p) => p > 0)
+          .toList();
+      return ProductPriceInsight.fromComparablePrices(
+        subjectPrice: subjectPrice,
+        peerPrices: prices,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   ProductRepositoryImpl(this._client);

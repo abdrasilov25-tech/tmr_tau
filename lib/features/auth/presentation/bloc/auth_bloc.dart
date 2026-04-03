@@ -16,6 +16,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthSignInRequested>(_onSignInRequested);
     on<AuthSignInWithGoogleRequested>(_onSignInWithGoogleRequested);
     on<AuthSignInWithAppleRequested>(_onSignInWithAppleRequested);
+    on<AuthProfileHydrateAfterApple>(_onProfileHydrateAfterApple);
     on<AuthSignInWithSmsOtpRequested>(_onSignInWithSmsOtpRequested);
     on<AuthVerifySmsOtpRequested>(_onVerifySmsOtpRequested);
     on<AuthSignUpRequested>(_onSignUpRequested);
@@ -132,6 +133,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           ),
         );
         if (!isClosed) emit(AuthAuthenticated(user));
+        add(AuthProfileHydrateAfterApple(uid: user.id));
         return;
       }
       if (!isClosed) {
@@ -262,6 +264,32 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         s.contains('cancelled') ||
         s.contains('aborted') ||
         s.contains('access_denied');
+  }
+
+  Future<void> _onProfileHydrateAfterApple(
+    AuthProfileHydrateAfterApple event,
+    Emitter<AuthState> emit,
+  ) async {
+    const delays = <Duration>[
+      Duration(milliseconds: 300),
+      Duration(milliseconds: 900),
+      Duration(milliseconds: 2000),
+    ];
+    for (final d in delays) {
+      await Future<void>.delayed(d);
+      if (isClosed) return;
+      if (_authRepository.userFromCurrentSession()?.id != event.uid) return;
+      try {
+        final full = await _authRepository.fetchUserProfileFromRemote(event.uid);
+        if (full != null && !isClosed) {
+          final still = _authRepository.userFromCurrentSession();
+          if (still?.id == event.uid) {
+            emit(AuthAuthenticated(full));
+          }
+          return;
+        }
+      } catch (_) {}
+    }
   }
 
   Future<void> _onSignOutRequested(AuthSignOutRequested event, Emitter<AuthState> emit) async {

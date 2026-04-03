@@ -1,5 +1,6 @@
 import '../entities/product_entity.dart';
 import '../entities/seller_listing_policy.dart';
+import '../value_objects/product_price_insight.dart';
 import '../../../../core/models/search_filters.dart';
 
 abstract class ProductRepository {
@@ -80,4 +81,12 @@ abstract class ProductRepository {
 
   /// Политика лимитов продавца на активные объявления.
   Future<SellerListingPolicy> getSellerListingPolicy(String sellerId);
+
+  /// Подсказка по цене относительно других товаров в той же категории (лёгкий select).
+  Future<ProductPriceInsight?> getCategoryPriceInsight({
+    required String excludeProductId,
+    required String categoryId,
+    required double subjectPrice,
+    required bool isGiveaway,
+  });
 }

@@ -8,7 +8,7 @@ import '../../domain/entities/product_entity.dart';
 import '../../domain/entities/qarmet_product.dart';
 import '../bloc/payment_cubit.dart';
 
-class ProductPromotionSheet extends StatelessWidget {
+class ProductPromotionSheet extends StatefulWidget {
   const ProductPromotionSheet({
     super.key,
     required this.product,
@@ -35,20 +35,35 @@ class ProductPromotionSheet extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final auth = context.watch<AuthBloc>().state;
-    final isOwner =
-        auth is AuthAuthenticated && auth.user.id == product.sellerId;
+  State<ProductPromotionSheet> createState() => _ProductPromotionSheetState();
+}
 
-    return BlocProvider(
-      create: (_) => PaymentCubit(context.read<PaymentService>())..initStore(),
-      child: BlocConsumer<PaymentCubit, PaymentUiState>(
+class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<PaymentCubit>().initStore();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isOwner = context.select<AuthBloc, bool>(
+      (bloc) {
+        final s = bloc.state;
+        return s is AuthAuthenticated && s.user.id == widget.product.sellerId;
+      },
+    );
+
+    return BlocConsumer<PaymentCubit, PaymentUiState>(
         listener: (context, state) {
           if (state.status == PaymentUiStatus.success) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Операция с Qarmet выполнена')),
             );
-            onPromotionActivated?.call();
+            widget.onPromotionActivated?.call();
           } else if (state.status == PaymentUiStatus.error ||
               state.status == PaymentUiStatus.cancelled) {
             final message = state.message ?? 'Операция не выполнена';
@@ -111,11 +126,11 @@ class ProductPromotionSheet extends StatelessWidget {
                             ),
                             trailing: IconButton(
                               icon: const Icon(Icons.refresh),
-                              onPressed: loading
+                              onPressed: state.isWalletWideBusy
                                   ? null
-                                  : () => context
-                                        .read<PaymentCubit>()
-                                        .refreshWallet(),
+                                  : () => context.read<PaymentCubit>().refreshWallet(
+                                        forceRefresh: true,
+                                      ),
                             ),
                           ),
                         ),
@@ -139,11 +154,11 @@ class ProductPromotionSheet extends StatelessWidget {
                               subtitle: Text(
                                 '${pack.priceKzt} тг, ~${pack.pricePerQarmet.toStringAsFixed(2)} тг/Qarmet',
                               ),
-                              onTap: loading
-                                  ? null
-                                  : () => context
-                                        .read<PaymentCubit>()
-                                        .buyQarmetPackage(pack.productId),
+                              onTap: state.canTapBuyQarmetPackage(pack.productId)
+                                  ? () => context
+                                      .read<PaymentCubit>()
+                                      .buyQarmetPackage(pack.productId)
+                                  : null,
                             ),
                           ),
                         ),
@@ -162,7 +177,7 @@ class ProductPromotionSheet extends StatelessWidget {
                                 ? null
                                 : () => context
                                       .read<PaymentCubit>()
-                                      .spendTopPromotion(product.id),
+                                      .spendTopPromotion(widget.product.id),
                           ),
                         ),
                         Card(
@@ -174,7 +189,7 @@ class ProductPromotionSheet extends StatelessWidget {
                                 ? null
                                 : () => context
                                       .read<PaymentCubit>()
-                                      .spendUrgentPromotion(product.id),
+                                      .spendUrgentPromotion(widget.product.id),
                           ),
                         ),
                         Card(
@@ -186,7 +201,7 @@ class ProductPromotionSheet extends StatelessWidget {
                                 ? null
                                 : () => context
                                       .read<PaymentCubit>()
-                                      .spendHighlightPromotion(product.id),
+                                      .spendHighlightPromotion(widget.product.id),
                           ),
                         ),
                         Card(
@@ -201,7 +216,7 @@ class ProductPromotionSheet extends StatelessWidget {
                                 ? null
                                 : () => context
                                       .read<PaymentCubit>()
-                                      .spendAllInOnePromotion(product.id),
+                                      .spendAllInOnePromotion(widget.product.id),
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -226,7 +241,6 @@ class ProductPromotionSheet extends StatelessWidget {
             },
           );
         },
-      ),
     );
   }
 }

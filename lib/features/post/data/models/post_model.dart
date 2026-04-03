@@ -27,6 +27,13 @@ class PostModel extends PostEntity {
     super.distanceKm,
     super.isPromoted = false,
     super.promotedUntil,
+    super.city,
+    super.isAnonymous = false,
+    super.locationLabel,
+    super.pollQuestion,
+    super.pollOptions = const [],
+    super.pollVoteCounts = const [],
+    super.myPollVoteIndex,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
@@ -42,6 +49,15 @@ class PostModel extends PostEntity {
           .where((s) => s.isNotEmpty)
           .toList();
     }
+    List<String> pollOpts = const [];
+    final rawPoll = json['poll_options'];
+    if (rawPoll is List) {
+      pollOpts = rawPoll
+          .map((e) => e == null ? '' : e.toString().trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    }
+    final pq = (json['poll_question'] as String?)?.trim();
     return PostModel(
       id: json['id'] as String,
       userId: json['user_id'] as String,
@@ -68,6 +84,13 @@ class PostModel extends PostEntity {
       distanceKm: (json['distance_km'] as num?)?.toDouble(),
       isPromoted: (json['is_promoted'] as bool?) ?? false,
       promotedUntil: DateTime.tryParse((json['promoted_until'] ?? '').toString()),
+      city: json['city'] as String?,
+      isAnonymous: (json['is_anonymous'] as bool?) ?? false,
+      locationLabel: json['location_label'] as String?,
+      pollQuestion: pq != null && pq.isNotEmpty ? pq : null,
+      pollOptions: pollOpts,
+      pollVoteCounts: List<int>.filled(pollOpts.length, 0, growable: false),
+      myPollVoteIndex: null,
     );
   }
 }

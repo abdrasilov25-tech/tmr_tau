@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
@@ -39,6 +40,17 @@ class _AddPostPageState extends State<AddPostPage> {
   bool _loading = false;
   int _previewPage = 0;
 
+  /// Только для kind == news
+  bool _newsAnonymous = false;
+  bool _newsAttachLocation = false;
+  final _newsLocationLabel = TextEditingController();
+  bool _newsHasPoll = false;
+  final _newsPollQuestion = TextEditingController();
+  late final List<TextEditingController> _newsPollOptions = [
+    TextEditingController(),
+    TextEditingController(),
+  ];
+
   static const int _maxNewsPhotos = 10;
 
   /// Публикации — как раньше; новости — до 5 мин, как в Threads.
@@ -69,6 +81,11 @@ class _AddPostPageState extends State<AddPostPage> {
   @override
   void dispose() {
     _captionController.dispose();
+    _newsLocationLabel.dispose();
+    _newsPollQuestion.dispose();
+    for (final c in _newsPollOptions) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -419,17 +436,41 @@ class _AddPostPageState extends State<AddPostPage> {
       );
       return;
     }
-    if (_images.isEmpty && _video == null) {
+    final caption = _captionController.text.trim();
+    if (_isPublication && _images.isEmpty && _video == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Добавьте фото или видео')),
       );
       return;
     }
+    if (!_isPublication &&
+        _images.isEmpty &&
+        _video == null &&
+        caption.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Напишите текст или добавьте фото/видео')),
+      );
+      return;
+    }
+    if (!_isPublication && _newsHasPoll) {
+      final pq = _newsPollQuestion.text.trim();
+      final opts = _newsPollOptions
+          .map((c) => c.text.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (pq.isEmpty || opts.length < 2) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Опрос: укажите вопрос и минимум 2 варианта'),
+          ),
+        );
+        return;
+      }
+    }
 
     final postRepository = context.read<PostRepository>();
     final geoService = context.read<GeoService>();
     final userId = authState.user.id;
-    final caption = _captionController.text.trim();
     GeoPoint? location;
 
     setState(() => _loading = true);
@@ -453,11 +494,25 @@ class _AddPostPageState extends State<AddPostPage> {
         await controller.dispose();
       }
       try {
-        location = await geoService.getCurrentLocation();
+        if (_isPublication || _newsAttachLocation) {
+          location = await geoService.getCurrentLocation();
+        }
       } catch (_) {
         location = null;
       }
 
+      String? city;
+      if (widget.kind == 'news') {
+        final prefs = await SharedPreferences.getInstance();
+        city = prefs.getString('news_selected_city');
+      }
+      final pollOpts = !_isPublication && _newsHasPoll
+          ? _newsPollOptions
+              .map((c) => c.text.trim())
+              .where((s) => s.isNotEmpty)
+              .take(8)
+              .toList()
+          : const <String>[];
       final createdPost = await postRepository.createPost(
         userId: userId,
         imageUrl: imageUrl,
@@ -466,8 +521,24 @@ class _AddPostPageState extends State<AddPostPage> {
         videoUrl: videoUrl,
         videoDurationSeconds: videoDurationSeconds,
         kind: widget.kind,
-        latitude: location?.latitude,
-        longitude: location?.longitude,
+        latitude: (!_isPublication && _newsAttachLocation)
+            ? location?.latitude
+            : (_isPublication ? location?.latitude : null),
+        longitude: (!_isPublication && _newsAttachLocation)
+            ? location?.longitude
+            : (_isPublication ? location?.longitude : null),
+        city: city,
+        isAnonymous: !_isPublication && _newsAnonymous,
+        locationLabel: (!_isPublication && _newsAttachLocation)
+            ? (_newsLocationLabel.text.trim().isNotEmpty
+                ? _newsLocationLabel.text.trim()
+                : null)
+            : null,
+        pollQuestion:
+            !_isPublication && _newsHasPoll && pollOpts.length >= 2
+                ? _newsPollQuestion.text.trim()
+                : null,
+        pollOptions: pollOpts,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -503,14 +574,18 @@ class _AddPostPageState extends State<AddPostPage> {
 
   bool get _hasMedia => _images.isNotEmpty || _video != null;
 
+  bool get _canPublishNews => _hasMedia || _captionController.text.trim().isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
+      backgroundColor:
+          _isPublication ? const Color(0xFFF1F5F9) : const Color(0xFFF4F4F5),
       appBar: AppBar(
-        backgroundColor: Colors.white,
+        backgroundColor:
+            _isPublication ? Colors.white : const Color(0xFFF4F4F5),
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         shadowColor: Colors.black.withValues(alpha: 0.06),
@@ -531,7 +606,10 @@ class _AddPostPageState extends State<AddPostPage> {
           Padding(
             padding: const EdgeInsets.only(right: 12),
             child: FilledButton(
-              onPressed: _loading || !_hasMedia ? null : _publish,
+              onPressed: _loading ||
+                      (_isPublication ? !_hasMedia : !_canPublishNews)
+                  ? null
+                  : _publish,
               style: FilledButton.styleFrom(
                 elevation: 0,
                 backgroundColor: cs.primary,
@@ -573,27 +651,55 @@ class _AddPostPageState extends State<AddPostPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 14, 16, 28),
           children: [
+            if (!_isPublication) ...[
+              TextField(
+                controller: _captionController,
+                onChanged: (_) => setState(() {}),
+                maxLines: 8,
+                style: const TextStyle(
+                  fontSize: 18,
+                  height: 1.35,
+                  fontWeight: FontWeight.w500,
+                  color: Color(0xFF0A0A0A),
+                ),
+                decoration: InputDecoration(
+                  hintText: 'О чём хотите рассказать?',
+                  hintStyle: TextStyle(
+                    color: Colors.grey.shade500,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  border: InputBorder.none,
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
             GestureDetector(
               onTap: _loading ? null : _showPickMediaSheet,
-              child: _MediaPickerCard(
-                loading: _loading,
-                images: List<File>.unmodifiable(_images),
-                video: _video,
-                previewPage: _previewPage,
-                onPreviewPageChanged: (i) => setState(() => _previewPage = i),
-                onRemoveImageAt: (i) {
-                  setState(() {
-                    _images.removeAt(i);
-                    _previewPage = _images.isEmpty
-                        ? 0
-                        : _previewPage.clamp(0, _images.length - 1);
-                  });
-                },
-                onImageTapZoom: (i) => openLocalPhotoZoom(context, _images, i),
-                maxVideoBadge: 'Видео до ${_maxVideoSeconds ~/ 60} мин',
-                emptyPrimaryText: _isPublication
-                    ? 'Фото (макс. качество) или видео до ${_maxVideoSeconds ~/ 60} мин'
-                    : 'До $_maxNewsPhotos фото или видео до ${_maxVideoSeconds ~/ 60} мин',
+              child: SizedBox(
+                height: _isPublication ? 340 : 240,
+                child: _MediaPickerCard(
+                  cardHeight: _isPublication ? 340 : 240,
+                  loading: _loading,
+                  images: List<File>.unmodifiable(_images),
+                  video: _video,
+                  previewPage: _previewPage,
+                  onPreviewPageChanged: (i) => setState(() => _previewPage = i),
+                  onRemoveImageAt: (i) {
+                    setState(() {
+                      _images.removeAt(i);
+                      _previewPage = _images.isEmpty
+                          ? 0
+                          : _previewPage.clamp(0, _images.length - 1);
+                    });
+                  },
+                  onImageTapZoom: (i) => openLocalPhotoZoom(context, _images, i),
+                  maxVideoBadge: 'Видео до ${_maxVideoSeconds ~/ 60} мин',
+                  emptyPrimaryText: _isPublication
+                      ? 'Фото (макс. качество) или видео до ${_maxVideoSeconds ~/ 60} мин'
+                      : 'Фото или видео — по желанию',
+                ),
               ),
             ),
             if (_video != null) ...[
@@ -607,11 +713,38 @@ class _AddPostPageState extends State<AddPostPage> {
                 ),
               ),
             ],
-            const SizedBox(height: 18),
-            _CaptionField(
-              controller: _captionController,
-              hintText: _captionHint,
-            ),
+            if (_isPublication) ...[
+              const SizedBox(height: 18),
+              _CaptionField(
+                controller: _captionController,
+                hintText: _captionHint,
+              ),
+            ],
+            if (!_isPublication) ...[
+              const SizedBox(height: 20),
+              _NewsThreadsOptions(
+                anonymous: _newsAnonymous,
+                onAnonymousChanged: (v) => setState(() => _newsAnonymous = v),
+                attachLocation: _newsAttachLocation,
+                onAttachLocationChanged: (v) =>
+                    setState(() => _newsAttachLocation = v),
+                locationLabelController: _newsLocationLabel,
+                hasPoll: _newsHasPoll,
+                onHasPollChanged: (v) => setState(() => _newsHasPoll = v),
+                pollQuestionController: _newsPollQuestion,
+                pollOptionControllers: _newsPollOptions,
+                onAddPollOption: () {
+                  if (_newsPollOptions.length >= 4) return;
+                  setState(() => _newsPollOptions.add(TextEditingController()));
+                },
+                onRemovePollOption: (i) {
+                  if (_newsPollOptions.length <= 2) return;
+                  setState(() {
+                    _newsPollOptions.removeAt(i).dispose();
+                  });
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -619,9 +752,152 @@ class _AddPostPageState extends State<AddPostPage> {
   }
 }
 
+/// Панель опций новости в духе Threads: анонимно, место, опрос.
+class _NewsThreadsOptions extends StatelessWidget {
+  const _NewsThreadsOptions({
+    required this.anonymous,
+    required this.onAnonymousChanged,
+    required this.attachLocation,
+    required this.onAttachLocationChanged,
+    required this.locationLabelController,
+    required this.hasPoll,
+    required this.onHasPollChanged,
+    required this.pollQuestionController,
+    required this.pollOptionControllers,
+    required this.onAddPollOption,
+    required this.onRemovePollOption,
+  });
+
+  final bool anonymous;
+  final ValueChanged<bool> onAnonymousChanged;
+  final bool attachLocation;
+  final ValueChanged<bool> onAttachLocationChanged;
+  final TextEditingController locationLabelController;
+  final bool hasPoll;
+  final ValueChanged<bool> onHasPollChanged;
+  final TextEditingController pollQuestionController;
+  final List<TextEditingController> pollOptionControllers;
+  final VoidCallback onAddPollOption;
+  final ValueChanged<int> onRemovePollOption;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Настройки',
+          style: TextStyle(
+            fontWeight: FontWeight.w800,
+            fontSize: 13,
+            color: Colors.grey.shade800,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(height: 8),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Анонимно'),
+          subtitle: const Text(
+            'Имя и аватар скрыты для других (аккаунт виден модераторам).',
+            style: TextStyle(fontSize: 12),
+          ),
+          value: anonymous,
+          onChanged: onAnonymousChanged,
+        ),
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Местоположение'),
+          subtitle: const Text(
+            'Прикрепить координаты и подпись к посту',
+            style: TextStyle(fontSize: 12),
+          ),
+          value: attachLocation,
+          onChanged: onAttachLocationChanged,
+        ),
+        if (attachLocation) ...[
+          const SizedBox(height: 6),
+          TextField(
+            controller: locationLabelController,
+            decoration: InputDecoration(
+              hintText: 'Подпись: район, заведение, адрес…',
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+            ),
+          ),
+        ],
+        SwitchListTile.adaptive(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Опрос'),
+          subtitle: const Text(
+            'До 4 вариантов ответа',
+            style: TextStyle(fontSize: 12),
+          ),
+          value: hasPoll,
+          onChanged: onHasPollChanged,
+        ),
+        if (hasPoll) ...[
+          const SizedBox(height: 6),
+          TextField(
+            controller: pollQuestionController,
+            decoration: InputDecoration(
+              hintText: 'Вопрос опроса',
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: Colors.grey.shade300),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          for (var i = 0; i < pollOptionControllers.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: pollOptionControllers[i],
+                      decoration: InputDecoration(
+                        hintText: 'Вариант ${i + 1}',
+                        filled: true,
+                        fillColor: Colors.white,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(color: Colors.grey.shade300),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (pollOptionControllers.length > 2)
+                    IconButton(
+                      onPressed: () => onRemovePollOption(i),
+                      icon: const Icon(Icons.remove_circle_outline_rounded),
+                    ),
+                ],
+              ),
+            ),
+          if (pollOptionControllers.length < 4)
+            TextButton.icon(
+              onPressed: onAddPollOption,
+              icon: const Icon(Icons.add_rounded, size: 20),
+              label: const Text('Добавить вариант'),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
 /// Карточка выбора медиа — светлый стиль для новостей и публикаций.
 class _MediaPickerCard extends StatefulWidget {
   const _MediaPickerCard({
+    required this.cardHeight,
     required this.loading,
     required this.images,
     required this.video,
@@ -633,6 +909,7 @@ class _MediaPickerCard extends StatefulWidget {
     required this.emptyPrimaryText,
   });
 
+  final double cardHeight;
   final bool loading;
   final List<File> images;
   final File? video;
@@ -701,7 +978,7 @@ class _MediaPickerCardState extends State<_MediaPickerCard> {
     final pc = _pageController;
 
     return Container(
-      height: 340,
+      height: widget.cardHeight,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(22),
         color: Colors.white,

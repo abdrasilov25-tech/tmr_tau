@@ -660,7 +660,7 @@ class _MapBranchHostState extends State<_MapBranchHost>
   }
 }
 
-class _MainShell extends StatelessWidget {
+class _MainShell extends StatefulWidget {
   const _MainShell({
     required this.navigationShell,
     required this.searchTabActivation,
@@ -668,6 +668,38 @@ class _MainShell extends StatelessWidget {
 
   final StatefulNavigationShell navigationShell;
   final SearchTabActivationController searchTabActivation;
+
+  @override
+  State<_MainShell> createState() => _MainShellState();
+}
+
+class _MainShellState extends State<_MainShell>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _branchAnim;
+
+  @override
+  void initState() {
+    super.initState();
+    _branchAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    )..value = 1;
+  }
+
+  @override
+  void didUpdateWidget(covariant _MainShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.navigationShell.currentIndex !=
+        widget.navigationShell.currentIndex) {
+      _branchAnim.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _branchAnim.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -688,13 +720,26 @@ class _MainShell extends StatelessWidget {
         final chatsBadge = chatUnread.badgeShortLabel;
         final publicationsBadge = notificationTabs.publicationsBadgeLabel;
         final newsBadge = notificationTabs.newsBadgeLabel;
+        final fade = CurvedAnimation(
+          parent: _branchAnim,
+          curve: Curves.easeOutCubic,
+        );
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: Stack(
             fit: StackFit.expand,
             children: [
               Container(decoration: decoration),
-              navigationShell,
+              FadeTransition(
+                opacity: fade,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.012),
+                    end: Offset.zero,
+                  ).animate(fade),
+                  child: widget.navigationShell,
+                ),
+              ),
             ],
           ),
           bottomNavigationBar: Container(
@@ -703,13 +748,13 @@ class _MainShell extends StatelessWidget {
               border: Border(top: BorderSide(color: Colors.grey.shade200)),
             ),
             child: NavigationBar(
-              selectedIndex: navigationShell.currentIndex,
+              selectedIndex: widget.navigationShell.currentIndex,
               labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
               height: 56,
               onDestinationSelected: (index) {
-                navigationShell.goBranch(index);
+                widget.navigationShell.goBranch(index);
                 if (index == 1) {
-                  searchTabActivation.markSearchTabSelected();
+                  widget.searchTabActivation.markSearchTabSelected();
                 }
                 if (index == 0) {
                   context

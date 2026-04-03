@@ -37,7 +37,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   Future<AppUser?> fetchUserProfile(String uid) async {
     final res = await _client
         .from(SupabaseConstants.usersTable)
-        .select()
+        .select(
+          'id,email,name,username,avatar,bio,followers_count',
+        )
         .eq('id', uid)
         .maybeSingle();
     if (res == null) return null;

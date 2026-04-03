@@ -26,6 +26,14 @@ final class AuthSignInWithAppleRequested extends AuthEvent {
   const AuthSignInWithAppleRequested();
 }
 
+/// Догрузка профиля из БД после быстрого входа Apple (не блокирует кнопку).
+final class AuthProfileHydrateAfterApple extends AuthEvent {
+  const AuthProfileHydrateAfterApple({required this.uid});
+  final String uid;
+  @override
+  List<Object?> get props => [uid];
+}
+
 final class AuthSignInWithSmsOtpRequested extends AuthEvent {
   const AuthSignInWithSmsOtpRequested({required this.phone});
   final String phone;

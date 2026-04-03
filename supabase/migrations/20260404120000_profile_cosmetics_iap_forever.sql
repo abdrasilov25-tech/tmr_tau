@@ -3,4 +3,4 @@ alter table public.users
   add column if not exists profile_cosmetics_iap_forever boolean not null default false;
 
 comment on column public.users.profile_cosmetics_iap_forever is
-  'Разовая покупка IAP (com.yourapp.premium): оформление профиля и стикеры без списания Qarmet.';
+  'Разовая покупка IAP (com.bazar.tmrtau.premium): оформление профиля и стикеры без списания Qarmet.';

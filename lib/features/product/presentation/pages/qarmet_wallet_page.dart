@@ -16,6 +16,15 @@ class QarmetWalletPage extends StatefulWidget {
 class _QarmetWalletPageState extends State<QarmetWalletPage> {
   _HistoryFilter _historyFilter = _HistoryFilter.all;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<PaymentCubit>().initStore();
+    });
+  }
+
   List<QarmetPromotionHistoryItem> _filterHistory(
     List<QarmetPromotionHistoryItem> items,
   ) {
@@ -31,9 +40,7 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
 
   @override
   Widget build(BuildContext context) {
-    return BlocProvider(
-      create: (_) => PaymentCubit(context.read<PaymentService>())..initStore(),
-      child: Scaffold(
+    return Scaffold(
         appBar: AppBar(
           title: const Text('Qarmet кошелек'),
         ),
@@ -42,11 +49,18 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
             final dataChanged = prev.balance != next.balance ||
                 prev.catalog != next.catalog ||
                 prev.isOfficialPageActive != next.isOfficialPageActive ||
+                prev.cosmeticsLifetimeUnlocked !=
+                    next.cosmeticsLifetimeUnlocked ||
                 prev.promotionHistory != next.promotionHistory;
             final loadingChanged =
                 (prev.status == PaymentUiStatus.loading) !=
                     (next.status == PaymentUiStatus.loading);
-            return dataChanged || loadingChanged;
+            final purchaseTargetChanged =
+                prev.purchasingQarmetProductId !=
+                    next.purchasingQarmetProductId;
+            return dataChanged ||
+                loadingChanged ||
+                purchaseTargetChanged;
           },
           listener: (context, state) {
             if (state.status == PaymentUiStatus.error ||
@@ -70,12 +84,27 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
                 : state.catalog
                     .map((e) => e.pricePerQarmet)
                     .reduce((a, b) => a < b ? a : b);
+            // Одна карточка «лучшая цена» при равенстве KZT/Qarmet у нескольких пакетов.
+            String? bestDealProductId;
+            if (bestPricePerQarmet != null) {
+              for (final p in state.catalog) {
+                if ((p.pricePerQarmet - bestPricePerQarmet).abs() < 0.0001) {
+                  bestDealProductId = p.productId;
+                  break;
+                }
+              }
+            }
             return RefreshIndicator(
-              onRefresh: () => context.read<PaymentCubit>().refreshWallet(),
+              onRefresh: () => context
+                  .read<PaymentCubit>()
+                  .refreshWallet(forceRefresh: true),
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                 children: [
-                  _BalanceCard(state: state, loading: loading),
+                  _BalanceCard(
+                    state: state,
+                    showWalletProgress: state.isWalletWideBusy,
+                  ),
                   const SizedBox(height: 14),
                   const _QarmetCoinNominalCard(),
                   const SizedBox(height: 10),
@@ -96,8 +125,10 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
                     ...state.catalog.map(
                       (pack) => _QarmetPackageCard(
                         pack: pack,
-                        loading: loading,
-                        bestPricePerQarmet: bestPricePerQarmet,
+                        isPurchasingThisPack:
+                            state.purchasingQarmetProductId == pack.productId,
+                        canTapBuy: state.canTapBuyQarmetPackage(pack.productId),
+                        isBestPricePackage: bestDealProductId == pack.productId,
                         onBuy: () => context
                             .read<PaymentCubit>()
                             .buyQarmetPackage(pack.productId),
@@ -171,7 +202,6 @@ class _QarmetWalletPageState extends State<QarmetWalletPage> {
             );
           },
         ),
-      ),
     );
   }
 }
@@ -365,10 +395,13 @@ class _PromotionHistoryCard extends StatelessWidget {
 }
 
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.state, required this.loading});
+  const _BalanceCard({
+    required this.state,
+    required this.showWalletProgress,
+  });
 
   final PaymentUiState state;
-  final bool loading;
+  final bool showWalletProgress;
 
   @override
   Widget build(BuildContext context) {
@@ -409,7 +442,7 @@ class _BalanceCard extends StatelessWidget {
                 : 'Подписка official_page неактивна',
             style: const TextStyle(color: Colors.white, fontSize: 13),
           ),
-          if (loading) ...[
+          if (showWalletProgress) ...[
             const SizedBox(height: 10),
             const LinearProgressIndicator(
               minHeight: 3,
@@ -592,14 +625,16 @@ class _CatalogLoadingPlaceholder extends StatelessWidget {
 class _QarmetPackageCard extends StatelessWidget {
   const _QarmetPackageCard({
     required this.pack,
-    required this.loading,
-    required this.bestPricePerQarmet,
+    required this.isPurchasingThisPack,
+    required this.canTapBuy,
+    required this.isBestPricePackage,
     required this.onBuy,
   });
 
   final QarmetProduct pack;
-  final bool loading;
-  final double? bestPricePerQarmet;
+  final bool isPurchasingThisPack;
+  final bool canTapBuy;
+  final bool isBestPricePackage;
   final VoidCallback onBuy;
 
   String get _packTitle {
@@ -664,16 +699,16 @@ class _QarmetPackageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isBest = bestPricePerQarmet != null &&
-        (pack.pricePerQarmet - bestPricePerQarmet!).abs() < 0.0001;
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
-          color: isBest ? const Color(0xFF2563EB) : Colors.grey.shade300,
-          width: isBest ? 1.4 : 1,
+          color: isBestPricePackage
+              ? const Color(0xFF2563EB)
+              : Colors.grey.shade300,
+          width: isBestPricePackage ? 1.4 : 1,
         ),
       ),
       child: Padding(
@@ -720,7 +755,7 @@ class _QarmetPackageCard extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (isBest)
+                if (isBestPricePackage)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -773,12 +808,18 @@ class _QarmetPackageCard extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton(
-                onPressed: loading ? null : onBuy,
-                child: Text(
-                  pack.isSubscription
-                      ? 'Подключить подписку'
-                      : 'Купить за ${pack.priceKzt} KZT',
-                ),
+                onPressed: canTapBuy ? onBuy : null,
+                child: isPurchasingThisPack
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Text(
+                        pack.isSubscription
+                            ? 'Подключить подписку'
+                            : 'Купить за ${pack.priceKzt} KZT',
+                      ),
               ),
             ),
           ],

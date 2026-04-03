@@ -7,18 +7,37 @@ sealed class NewsEvent extends Equatable {
 }
 
 final class NewsLoaded extends NewsEvent {
-  const NewsLoaded({this.currentUserId, this.silent = false});
+  const NewsLoaded({this.currentUserId, this.silent = false, this.cityFilter});
 
   final String? currentUserId;
+  final String? cityFilter;
 
   /// Без полноэкранного [NewsLoading] — для pull-to-refresh и фоновой подгрузки.
   final bool silent;
 
   @override
-  List<Object?> get props => [currentUserId, silent];
+  List<Object?> get props => [currentUserId, silent, cityFilter];
 }
 
-final class NewsLoadMore extends NewsEvent {}
+final class NewsLoadMore extends NewsEvent {
+  const NewsLoadMore({this.currentUserId});
+  final String? currentUserId;
+  @override
+  List<Object?> get props => [currentUserId];
+}
+
+final class NewsVotePoll extends NewsEvent {
+  const NewsVotePoll({
+    required this.postId,
+    required this.userId,
+    required this.optionIndex,
+  });
+  final String postId;
+  final String userId;
+  final int optionIndex;
+  @override
+  List<Object?> get props => [postId, userId, optionIndex];
+}
 
 final class NewsToggleLike extends NewsEvent {
   const NewsToggleLike({required this.postId, required this.userId});
@@ -33,8 +52,9 @@ final class NewsToggleRepost extends NewsEvent {
 }
 
 final class NewsRefresh extends NewsEvent {
-  const NewsRefresh({this.currentUserId});
+  const NewsRefresh({this.currentUserId, this.cityFilter});
   final String? currentUserId;
+  final String? cityFilter;
 }
 
 final class NewsCleared extends NewsEvent {

@@ -14,16 +14,29 @@ import '../../../../core/data/kazakhstan_regions.dart';
 import '../../../../core/models/search_filters.dart';
 import '../../../../core/models/search_view_mode.dart';
 import '../../../../core/storage/search_preferences_storage.dart';
+import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/cached_product_image.dart';
+import '../../../../core/widgets/verified_badge.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../product/domain/entities/category_entity.dart';
 import '../../../product/domain/entities/product_entity.dart';
+import '../../../product/domain/value_objects/product_price_insight.dart';
 import '../../../product/domain/repositories/categories_repository.dart';
 import '../../../product/domain/repositories/product_repository.dart';
 import '../../../settings/domain/repositories/settings_repository.dart';
 import '../../../product/presentation/widgets/product_promo_badges.dart';
 import '../controllers/search_paging_controller.dart';
 import '../widgets/kazakhstan_location_sheet.dart';
+
+/// Акцент цены в стиле крупных маркетплейсов.
+const Color _kKaspiStylePriceColor = Color(0xFFE31E24);
+
+List<ProductEntity> _productsFromSearchItems(List<SearchResultItem> items) {
+  return items
+      .whereType<SearchProductResultItem>()
+      .map((e) => e.product)
+      .toList(growable: false);
+}
 
 class SearchPage extends StatefulWidget {
   const SearchPage({
@@ -184,24 +197,30 @@ class _SearchPageState extends State<SearchPage> {
     final picked = await showModalBottomSheet<CategoryEntity?>(
       context: context,
       showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: ListView(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.all_inclusive_rounded),
-              title: const Text('Все категории'),
-              onTap: () => Navigator.pop(ctx, null),
+      builder: (ctx) {
+        final maxH = MediaQuery.sizeOf(ctx).height * 0.75;
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxH),
+            child: ListView(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.all_inclusive_rounded),
+                  title: const Text('Все категории'),
+                  onTap: () => Navigator.pop(ctx, null),
+                ),
+                const Divider(height: 1),
+                ..._categories.map(
+                  (c) => ListTile(
+                    title: Text(c.name),
+                    onTap: () => Navigator.pop(ctx, c),
+                  ),
+                ),
+              ],
             ),
-            const Divider(height: 1),
-            ..._categories.map(
-              (c) => ListTile(
-                title: Text(c.name),
-                onTap: () => Navigator.pop(ctx, c),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
     if (!mounted) return;
     final f = _pagingController.filters;
@@ -569,6 +588,7 @@ class _SearchPageState extends State<SearchPage> {
             items: items,
             filters: filters,
             showBottomLoader: showBottomLoader,
+            listingProducts: _productsFromSearchItems(items),
           ),
         ),
       ],
@@ -579,11 +599,60 @@ class _SearchPageState extends State<SearchPage> {
     required List<SearchResultItem> items,
     required SearchFilters filters,
     required bool showBottomLoader,
+    required List<ProductEntity> listingProducts,
+  }) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.topCenter,
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          ...previousChildren,
+          ?currentChild,
+        ],
+      ),
+      transitionBuilder: (child, animation) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return FadeTransition(
+          opacity: curved,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.028),
+              end: Offset.zero,
+            ).animate(curved),
+            child: child,
+          ),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey<SearchViewMode>(_viewMode),
+        child: _resultsBodyForViewMode(
+          items: items,
+          filters: filters,
+          showBottomLoader: showBottomLoader,
+          listingProducts: listingProducts,
+        ),
+      ),
+    );
+  }
+
+  Widget _resultsBodyForViewMode({
+    required List<SearchResultItem> items,
+    required SearchFilters filters,
+    required bool showBottomLoader,
+    required List<ProductEntity> listingProducts,
   }) {
     switch (_viewMode) {
       case SearchViewMode.list:
         return ListView.builder(
           controller: _scrollController,
+          padding: const EdgeInsets.only(bottom: 8),
           itemCount: items.length + (showBottomLoader ? 1 : 0),
           itemBuilder: (context, index) {
             if (index >= items.length) {
@@ -591,8 +660,13 @@ class _SearchPageState extends State<SearchPage> {
             }
             final item = items[index];
             if (item is SearchProductResultItem) {
+              final insight = ProductPriceInsight.fromSearchPeers(
+                item.product,
+                listingProducts,
+              );
               return _ProductSearchListCompact(
                 product: item.product,
+                priceInsight: insight,
                 centerLatitude: filters.centerLatitude,
                 centerLongitude: filters.centerLongitude,
               );
@@ -603,6 +677,7 @@ class _SearchPageState extends State<SearchPage> {
       case SearchViewMode.gallery:
         return ListView.builder(
           controller: _scrollController,
+          padding: const EdgeInsets.only(bottom: 8),
           itemCount: items.length + (showBottomLoader ? 1 : 0),
           itemBuilder: (context, index) {
             if (index >= items.length) {
@@ -613,8 +688,13 @@ class _SearchPageState extends State<SearchPage> {
             }
             final item = items[index];
             if (item is SearchProductResultItem) {
+              final insight = ProductPriceInsight.fromSearchPeers(
+                item.product,
+                listingProducts,
+              );
               return _ProductSearchGalleryCard(
                 product: item.product,
+                priceInsight: insight,
                 centerLatitude: filters.centerLatitude,
                 centerLongitude: filters.centerLongitude,
               );
@@ -628,7 +708,7 @@ class _SearchPageState extends State<SearchPage> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            childAspectRatio: 0.68,
+            childAspectRatio: 0.7,
             crossAxisSpacing: 10,
             mainAxisSpacing: 10,
           ),
@@ -644,8 +724,13 @@ class _SearchPageState extends State<SearchPage> {
             }
             final item = items[index];
             if (item is SearchProductResultItem) {
+              final insight = ProductPriceInsight.fromSearchPeers(
+                item.product,
+                listingProducts,
+              );
               return _ProductSearchGridTile(
                 product: item.product,
+                priceInsight: insight,
                 centerLatitude: filters.centerLatitude,
                 centerLongitude: filters.centerLongitude,
               );
@@ -739,8 +824,12 @@ class _OlxSearchFilterBar extends StatelessWidget {
       visualDensity: VisualDensity.compact,
     );
 
-    return Material(
-      color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      color: theme.colorScheme.surfaceContainerHighest.withValues(
+        alpha: hasFilters ? 0.5 : 0.35,
+      ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(2, 2, 2, 4),
         child: SingleChildScrollView(
@@ -844,10 +933,30 @@ class _OlxSearchFilterBar extends StatelessWidget {
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Icon(
-                    _searchViewModeIcon(viewMode),
-                    size: 24,
-                    color: theme.colorScheme.onSurface,
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    switchInCurve: Curves.easeOutBack,
+                    switchOutCurve: Curves.easeIn,
+                    transitionBuilder: (child, anim) {
+                      return FadeTransition(
+                        opacity: anim,
+                        child: ScaleTransition(
+                          scale: Tween<double>(begin: 0.85, end: 1).animate(
+                            CurvedAnimation(
+                              parent: anim,
+                              curve: Curves.easeOutCubic,
+                            ),
+                          ),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Icon(
+                      key: ValueKey<SearchViewMode>(viewMode),
+                      _searchViewModeIcon(viewMode),
+                      size: 24,
+                      color: theme.colorScheme.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -859,14 +968,148 @@ class _OlxSearchFilterBar extends StatelessWidget {
   }
 }
 
+Color _insightBackground(InsightTone tone, ColorScheme scheme) {
+  return switch (tone) {
+    InsightTone.favorable => const Color(0xFFE8F5E9),
+    InsightTone.neutral => scheme.surfaceContainerHighest.withValues(alpha: 0.9),
+    InsightTone.caution => const Color(0xFFFFF3E0),
+  };
+}
+
+Color _insightForeground(InsightTone tone) {
+  return switch (tone) {
+    InsightTone.favorable => const Color(0xFF1B5E20),
+    InsightTone.neutral => const Color(0xFF424242),
+    InsightTone.caution => const Color(0xFFE65100),
+  };
+}
+
+class _SearchSellerStrip extends StatelessWidget {
+  const _SearchSellerStrip({
+    required this.product,
+    this.compact = false,
+    this.onSellerTap,
+  });
+
+  final ProductEntity product;
+  final bool compact;
+  final VoidCallback? onSellerTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final r = compact ? 10.0 : 12.0;
+    final name = product.sellerName?.trim().isNotEmpty == true
+        ? product.sellerName!.trim()
+        : 'Продавец';
+    final row = Row(
+      children: [
+        CachedAvatar(
+          imageUrl: product.sellerAvatarUrl,
+          radius: r,
+          fallbackText: name,
+          enableLightboxOnTap: false,
+        ),
+        SizedBox(width: compact ? 6 : 8),
+        Expanded(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: (compact ? theme.textTheme.labelMedium : theme.textTheme.labelLarge)
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+        ),
+        if (product.sellerIsVerified) ...[
+          const SizedBox(width: 4),
+          VerifiedBadge(size: compact ? 14 : 17),
+        ],
+        if (onSellerTap != null) ...[
+          const SizedBox(width: 2),
+          Icon(
+            Icons.chevron_right_rounded,
+            size: compact ? 16 : 20,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ],
+      ],
+    );
+    if (onSellerTap == null) return row;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onSellerTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: row,
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchPriceInsightChip extends StatelessWidget {
+  const _SearchPriceInsightChip({required this.insight, this.compact = false});
+
+  final ProductPriceInsight insight;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final bg = _insightBackground(insight.tone, scheme);
+    final fg = _insightForeground(insight.tone);
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 6 : 8,
+        vertical: compact ? 3 : 4,
+      ),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            switch (insight.tone) {
+              InsightTone.favorable => Icons.trending_down_rounded,
+              InsightTone.caution => Icons.trending_up_rounded,
+              InsightTone.neutral => Icons.balance_rounded,
+            },
+            size: compact ? 13 : 15,
+            color: fg,
+          ),
+          SizedBox(width: compact ? 3 : 4),
+          Flexible(
+            child: Text(
+              insight.headline,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: fg,
+                fontSize: compact ? 10.5 : 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ProductSearchListCompact extends StatelessWidget {
   const _ProductSearchListCompact({
     required this.product,
+    this.priceInsight,
     this.centerLatitude,
     this.centerLongitude,
   });
 
   final ProductEntity product;
+  final ProductPriceInsight? priceInsight;
   final double? centerLatitude;
   final double? centerLongitude;
 
@@ -881,86 +1124,134 @@ class _ProductSearchListCompact extends StatelessWidget {
     final city = product.city?.trim().isNotEmpty == true
         ? product.city!
         : 'Город не указан';
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        onTap: () => context.push('/product/${product.id}', extra: product),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: SizedBox(
-                  width: 96,
-                  height: 96,
-                  child: product.imageUrl.isNotEmpty
-                      ? CachedProductImage(
-                          imageUrl: product.imageUrl,
-                          fit: BoxFit.cover,
-                        )
-                      : ColoredBox(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          child: const Center(
-                            child: Icon(Icons.shopping_bag_outlined, size: 40),
-                          ),
-                        ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      child: Material(
+        color: Colors.white,
+        elevation: 0,
+        shadowColor: Colors.black26,
+        surfaceTintColor: Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => context.push('/product/${product.id}', extra: product),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: product.showHighlightBadge
+                  ? Border.all(color: const Color(0xFFFFC107), width: 1.5)
+                  : Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.07),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(11),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: SizedBox(
+                      width: 104,
+                      height: 104,
+                      child: product.imageUrl.isNotEmpty
+                          ? CachedProductImage(
+                              imageUrl: product.imageUrl,
+                              fit: BoxFit.cover,
+                            )
+                          : ColoredBox(
+                              color: theme.colorScheme.surfaceContainerHighest,
+                              child: const Center(
+                                child: Icon(
+                                  Icons.shopping_bag_outlined,
+                                  size: 40,
+                                ),
+                              ),
+                            ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      product.priceFormatted,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      dist != null ? '$city  •  $dist' : city,
-                      style: theme.textTheme.bodySmall,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          Icons.visibility_outlined,
-                          size: 16,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${product.viewCount}',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
+                        _SearchSellerStrip(
+                          product: product,
+                          onSellerTap: () => context.push(
+                            '/profile/${product.sellerId}',
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          product.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            height: 1.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          product.priceFormatted,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            color: product.isGiveaway
+                                ? theme.colorScheme.primary
+                                : _kKaspiStylePriceColor,
+                            fontWeight: FontWeight.w900,
+                            fontSize: 18,
+                          ),
+                        ),
+                        if (priceInsight != null) ...[
+                          const SizedBox(height: 6),
+                          _SearchPriceInsightChip(insight: priceInsight!),
+                        ],
+                        const SizedBox(height: 6),
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          runSpacing: 4,
+                          children: [
+                            ProductPromoBadges(product: product),
+                            Text(
+                              dist != null ? '$city · $dist' : city,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.visibility_outlined,
+                              size: 15,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '${product.viewCount} просмотров',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -971,11 +1262,13 @@ class _ProductSearchListCompact extends StatelessWidget {
 class _ProductSearchGalleryCard extends StatelessWidget {
   const _ProductSearchGalleryCard({
     required this.product,
+    this.priceInsight,
     this.centerLatitude,
     this.centerLongitude,
   });
 
   final ProductEntity product;
+  final ProductPriceInsight? priceInsight;
   final double? centerLatitude;
   final double? centerLongitude;
 
@@ -990,123 +1283,215 @@ class _ProductSearchGalleryCard extends StatelessWidget {
     final city = product.city?.trim().isNotEmpty == true
         ? product.city!
         : 'Город не указан';
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: product.showHighlightBadge
-            ? const BorderSide(color: Color(0xFFFFC107), width: 2)
-            : BorderSide.none,
-      ),
-      child: InkWell(
-        onTap: () => context.push('/product/${product.id}', extra: product),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            SizedBox(
-              height: 260,
-              width: double.infinity,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  Positioned.fill(
-                    child: product.imageUrl.isNotEmpty
-                        ? CachedProductImage(
-                            imageUrl: product.imageUrl,
-                            fit: BoxFit.cover,
-                          )
-                        : ColoredBox(
-                            color: theme.colorScheme.surfaceContainerHighest,
-                            child: const Center(
-                              child: Icon(
-                                Icons.shopping_bag_outlined,
-                                size: 64,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Material(
+        color: Colors.white,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => context.push('/product/${product.id}', extra: product),
+          child: Ink(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: product.showHighlightBadge
+                  ? Border.all(color: const Color(0xFFFFC107), width: 2)
+                  : Border.all(color: Colors.black.withValues(alpha: 0.06)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(
+                  height: 248,
+                  width: double.infinity,
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(19),
+                    ),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned.fill(
+                          child: product.imageUrl.isNotEmpty
+                              ? CachedProductImage(
+                                  imageUrl: product.imageUrl,
+                                  fit: BoxFit.cover,
+                                )
+                              : ColoredBox(
+                                  color:
+                                      theme.colorScheme.surfaceContainerHighest,
+                                  child: const Center(
+                                    child: Icon(
+                                      Icons.shopping_bag_outlined,
+                                      size: 64,
+                                    ),
+                                  ),
+                                ),
+                        ),
+                        Positioned(
+                          top: 10,
+                          left: 10,
+                          child: ProductPromoBadges(product: product),
+                        ),
+                        if (priceInsight != null)
+                          Positioned(
+                            top: 10,
+                            right: 10,
+                            child: Material(
+                              color: _insightBackground(
+                                priceInsight!.tone,
+                                theme.colorScheme,
+                              ).withValues(alpha: 0.95),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 5,
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      switch (priceInsight!.tone) {
+                                        InsightTone.favorable =>
+                                          Icons.trending_down_rounded,
+                                        InsightTone.caution =>
+                                          Icons.trending_up_rounded,
+                                        InsightTone.neutral =>
+                                          Icons.balance_rounded,
+                                      },
+                                      size: 16,
+                                      color: _insightForeground(
+                                        priceInsight!.tone,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      priceInsight!.headline,
+                                      style: TextStyle(
+                                        color: _insightForeground(
+                                          priceInsight!.tone,
+                                        ),
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(12, 28, 12, 12),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.bottomCenter,
+                                end: Alignment.topCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.82),
+                                  Colors.transparent,
+                                ],
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  product.title,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 16,
+                                    height: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  product.priceFormatted,
+                                  style: TextStyle(
+                                    color: product.isGiveaway
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.98),
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 22,
+                                    shadows: product.isGiveaway
+                                        ? null
+                                        : [
+                                            Shadow(
+                                              color: _kKaspiStylePriceColor
+                                                  .withValues(alpha: 0.85),
+                                              blurRadius: 12,
+                                            ),
+                                          ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  Positioned(
-                    top: 10,
-                    left: 10,
-                    child: ProductPromoBadges(product: product),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                  child: _SearchSellerStrip(
+                    product: product,
+                    compact: true,
+                    onSellerTap: () =>
+                        context.push('/profile/${product.sellerId}'),
                   ),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(12, 24, 12, 12),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.75),
-                            Colors.transparent,
-                          ],
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                  child: Text(
+                    dist != null ? '$city · $dist' : city,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.visibility_outlined,
+                        size: 16,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${product.viewCount} просмотров',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            product.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            product.priceFormatted,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 20,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-              child: Text(
-                dist != null ? '$city  •  $dist' : city,
-                style: theme.textTheme.bodySmall,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.visibility_outlined,
-                    size: 16,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${product.viewCount}',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -1116,11 +1501,13 @@ class _ProductSearchGalleryCard extends StatelessWidget {
 class _ProductSearchGridTile extends StatelessWidget {
   const _ProductSearchGridTile({
     required this.product,
+    this.priceInsight,
     this.centerLatitude,
     this.centerLongitude,
   });
 
   final ProductEntity product;
+  final ProductPriceInsight? priceInsight;
   final double? centerLatitude;
   final double? centerLongitude;
 
@@ -1133,80 +1520,140 @@ class _ProductSearchGridTile extends StatelessWidget {
       centerLongitude,
     );
     final city = product.city?.trim().isNotEmpty == true ? product.city! : '';
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    return Material(
+      color: Colors.white,
+      elevation: 0,
+      surfaceTintColor: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
       child: InkWell(
+        borderRadius: BorderRadius.circular(16),
         onTap: () => context.push('/product/${product.id}', extra: product),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: product.imageUrl.isNotEmpty
-                  ? CachedProductImage(
-                      imageUrl: product.imageUrl,
-                      fit: BoxFit.cover,
-                    )
-                  : ColoredBox(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: const Center(
-                        child: Icon(Icons.shopping_bag_outlined, size: 48),
-                      ),
-                    ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    product.priceFormatted,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.w800,
-                    ),
+        child: Ink(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: product.showHighlightBadge
+                ? Border.all(color: const Color(0xFFFFC107), width: 1.5)
+                : Border.all(color: Colors.black.withValues(alpha: 0.06)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(15),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    product.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  if (city.isNotEmpty || dist != null) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      [if (city.isNotEmpty) city, ?dist].join(' • '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 4),
-                  Row(
+                  child: Stack(
+                    fit: StackFit.expand,
                     children: [
-                      Icon(
-                        Icons.visibility_outlined,
-                        size: 14,
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${product.viewCount}',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                          fontWeight: FontWeight.w700,
-                        ),
+                      product.imageUrl.isNotEmpty
+                          ? CachedProductImage(
+                              imageUrl: product.imageUrl,
+                              fit: BoxFit.cover,
+                            )
+                          : ColoredBox(
+                              color: theme.colorScheme.surfaceContainerHighest,
+                              child: const Center(
+                                child: Icon(
+                                  Icons.shopping_bag_outlined,
+                                  size: 48,
+                                ),
+                              ),
+                            ),
+                      Positioned(
+                        top: 6,
+                        left: 6,
+                        child: ProductPromoBadges(product: product),
                       ),
                     ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+                child: _SearchSellerStrip(
+                  product: product,
+                  compact: true,
+                  onSellerTap: () =>
+                      context.push('/profile/${product.sellerId}'),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  product.priceFormatted,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: product.isGiveaway
+                        ? theme.colorScheme.primary
+                        : _kKaspiStylePriceColor,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              if (priceInsight != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                  child: _SearchPriceInsightChip(
+                    insight: priceInsight!,
+                    compact: true,
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
+                child: Text(
+                  product.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+              if (city.isNotEmpty || dist != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+                  child: Text(
+                    [
+                      if (city.isNotEmpty) city,
+                      ?dist,
+                    ].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.visibility_outlined,
+                      size: 13,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '${product.viewCount}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1824,6 +2271,7 @@ class _BottomSkeletonLoader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: List.generate(
         3,
         (_) => Padding(

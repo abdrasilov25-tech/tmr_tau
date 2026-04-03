@@ -101,7 +101,7 @@ void main() {
           () => mockRepo.getNewsPosts(
             limit: 20,
             offset: 20,
-            currentUserId: null,
+            currentUserId: 'u',
           ),
         ).thenThrow(Exception('fail'));
         return NewsBloc(mockRepo);
@@ -109,7 +109,7 @@ void main() {
       act: (b) async {
         b.add(const NewsLoaded(currentUserId: 'u'));
         await b.stream.firstWhere((s) => s is NewsSuccess);
-        b.add(NewsLoadMore());
+        b.add(const NewsLoadMore(currentUserId: 'u'));
       },
       expect: () => [
         isA<NewsLoading>(),

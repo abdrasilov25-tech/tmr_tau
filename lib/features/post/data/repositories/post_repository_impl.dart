@@ -97,6 +97,13 @@ class PostRepositoryImpl implements PostRepository {
             distanceKm: p.distanceKm,
             isPromoted: p.isPromoted,
             promotedUntil: p.promotedUntil,
+            city: p.city,
+            isAnonymous: p.isAnonymous,
+            locationLabel: p.locationLabel,
+            pollQuestion: p.pollQuestion,
+            pollOptions: p.pollOptions,
+            pollVoteCounts: p.pollVoteCounts,
+            myPollVoteIndex: p.myPollVoteIndex,
           ),
         )
         .toList();
@@ -473,6 +480,7 @@ class PostRepositoryImpl implements PostRepository {
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    String? cityFilter,
   }) async {
     final safeLimit = limit <= 0 ? 20 : limit;
     final safeOffset = offset < 0 ? 0 : offset;
@@ -480,20 +488,28 @@ class PostRepositoryImpl implements PostRepository {
     final fetchFrom = math.max(safeOffset * 3, 0);
     final fetchTo = fetchFrom + fetchWindow - 1;
 
-    var res = await _client
+    var query = _client
         .from(SupabaseConstants.postsTable)
         .select('*, users!user_id(name, avatar)')
-        .eq('kind', 'news')
+        .eq('kind', 'news');
+    if (cityFilter != null && cityFilter.isNotEmpty) {
+      query = query.eq('city', cityFilter);
+    }
+    var res = await query
         .order('created_at', ascending: false)
         .range(fetchFrom, fetchTo);
     var list = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
         .toList(growable: false);
     if (list.isEmpty) {
-      final plainRes = await _client
+      var plainQuery = _client
           .from(SupabaseConstants.postsTable)
           .select()
-          .eq('kind', 'news')
+          .eq('kind', 'news');
+      if (cityFilter != null && cityFilter.isNotEmpty) {
+        plainQuery = plainQuery.eq('city', cityFilter);
+      }
+      final plainRes = await plainQuery
           .order('created_at', ascending: false)
           .range(fetchFrom, fetchTo);
       list = (plainRes as List)
@@ -503,6 +519,7 @@ class PostRepositoryImpl implements PostRepository {
     if (list.isEmpty) return list;
     if (currentUserId == null) {
       list = _applySmartNewsRanking(list).take(safeLimit).toList(growable: false);
+      list = await _attachPollStats(list, null);
       return list;
     }
     list = await _applyPersonalizedSmartNewsRanking(
@@ -510,6 +527,7 @@ class PostRepositoryImpl implements PostRepository {
       currentUserId: currentUserId,
       limit: safeLimit,
     );
+    list = await _attachPollStats(list, currentUserId);
 
     final ids = list.map((e) => e.id).toList(growable: false);
     final likes = await _client
@@ -563,6 +581,13 @@ class PostRepositoryImpl implements PostRepository {
             distanceKm: p.distanceKm,
             isPromoted: p.isPromoted,
             promotedUntil: p.promotedUntil,
+            city: p.city,
+            isAnonymous: p.isAnonymous,
+            locationLabel: p.locationLabel,
+            pollQuestion: p.pollQuestion,
+            pollOptions: p.pollOptions,
+            pollVoteCounts: p.pollVoteCounts,
+            myPollVoteIndex: p.myPollVoteIndex,
           ),
         )
         .toList(growable: false);
@@ -808,6 +833,69 @@ class PostRepositoryImpl implements PostRepository {
     return PostModel.fromJson(row);
   }
 
+  Future<List<PostEntity>> _attachPollStats(
+    List<PostEntity> posts,
+    String? currentUserId,
+  ) async {
+    final pollPostIds = posts
+        .where((p) => p.pollOptions.length >= 2)
+        .map((p) => p.id)
+        .toList(growable: false);
+    if (pollPostIds.isEmpty) return posts;
+
+    try {
+      final res = await _client
+          .from('post_poll_votes')
+          .select('post_id, user_id, option_index')
+          .inFilter('post_id', pollPostIds);
+      final rows = res as List<dynamic>;
+      final counts = <String, List<int>>{};
+      final myVote = <String, int>{};
+      for (final id in pollPostIds) {
+        final post = posts.firstWhere((x) => x.id == id);
+        counts[id] = List<int>.filled(post.pollOptions.length, 0);
+      }
+      for (final raw in rows) {
+        final m = Map<String, dynamic>.from(raw as Map);
+        final pid = m['post_id'] as String;
+        final uid = m['user_id'] as String;
+        final idx = (m['option_index'] as num).toInt();
+        final c = counts[pid];
+        if (c != null && idx >= 0 && idx < c.length) {
+          c[idx] += 1;
+        }
+        if (currentUserId != null && uid == currentUserId) {
+          myVote[pid] = idx;
+        }
+      }
+      return posts
+          .map((p) {
+            final c = counts[p.id];
+            if (c == null) return p;
+            return p.copyWith(
+              pollVoteCounts: c,
+              myPollVoteIndex: myVote[p.id],
+            );
+          })
+          .toList(growable: false);
+    } catch (_) {
+      return posts;
+    }
+  }
+
+  @override
+  Future<void> voteNewsPoll({
+    required String postId,
+    required String userId,
+    required int optionIndex,
+  }) async {
+    await _client.from('post_poll_votes').upsert({
+      'post_id': postId,
+      'user_id': userId,
+      'option_index': optionIndex,
+    });
+  }
+
   @override
   Future<PostEntity> createPost({
     required String userId,
@@ -819,6 +907,11 @@ class PostRepositoryImpl implements PostRepository {
     String kind = 'news',
     double? latitude,
     double? longitude,
+    String? city,
+    bool isAnonymous = false,
+    String? locationLabel,
+    String? pollQuestion,
+    List<String> pollOptions = const [],
   }) async {
     final normalizedKind = kind.trim().toLowerCase() == 'news'
         ? 'news'
@@ -833,6 +926,7 @@ class PostRepositoryImpl implements PostRepository {
       'caption': caption,
       'kind': normalizedKind,
       'image_urls': urls.length > 1 ? urls : <String>[],
+      'is_anonymous': isAnonymous,
     };
     if (videoUrl != null && videoUrl.isNotEmpty) {
       data['video_url'] = videoUrl;
@@ -841,6 +935,26 @@ class PostRepositoryImpl implements PostRepository {
     if (latitude != null && longitude != null) {
       data['latitude'] = latitude;
       data['longitude'] = longitude;
+    }
+    if (city != null && city.isNotEmpty) {
+      data['city'] = city;
+    }
+    final loc = locationLabel?.trim();
+    if (loc != null && loc.isNotEmpty) {
+      data['location_label'] = loc;
+    }
+    final pq = pollQuestion?.trim();
+    final cleanPollOpts = pollOptions
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .take(8)
+        .toList();
+    if (pq != null &&
+        pq.isNotEmpty &&
+        cleanPollOpts.length >= 2 &&
+        normalizedKind == 'news') {
+      data['poll_question'] = pq;
+      data['poll_options'] = cleanPollOpts;
     }
     final res = await _client
         .from(SupabaseConstants.postsTable)

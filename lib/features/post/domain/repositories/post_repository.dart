@@ -38,6 +38,7 @@ abstract class PostRepository {
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    String? cityFilter,
   });
   Future<List<PostEntity>> getPostsByUser(String userId, {String? currentUserId});
   Future<PostEntity> createPost({
@@ -50,6 +51,18 @@ abstract class PostRepository {
     String kind = 'news',
     double? latitude,
     double? longitude,
+    String? city,
+    bool isAnonymous = false,
+    String? locationLabel,
+    String? pollQuestion,
+    List<String> pollOptions = const [],
+  });
+
+  /// Голос в опросе новости (один голос на пользователя, можно сменить вариант).
+  Future<void> voteNewsPoll({
+    required String postId,
+    required String userId,
+    required int optionIndex,
   });
   Future<List<PostEntity>> getPostsNearby({
     required double userLatitude,

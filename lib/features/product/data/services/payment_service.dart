@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -46,10 +47,14 @@ class PaymentService {
   static const String promotionStartProductId = 'qarmet_10';
   static const String promotionPremiumProductId = 'qarmet_20';
   static const String promotionBusinessProductId = 'qarmet_30';
-  /// App Store Connect: auto-renewable subscription (Official Page / карта).
-  /// Должен **посимвольно** совпадать с Product ID в ASC для приложения `com.bazar.tmr-tau`.
-  static const String officialPageProductId =
+
+  /// Единственный Product ID авто-подписки Official Page (ASC, Sandbox, StoreKit config).
+  /// Дубликатов и legacy ID для этой подписки нет.
+  static const String monthlySubscriptionProductId =
       'com.bazar.tmrtau.subscription.monthly';
+
+  /// Алиас к [monthlySubscriptionProductId] (совместимость с остальным кодом).
+  static const String officialPageProductId = monthlySubscriptionProductId;
   static const String premiumSubscriptionProductId = 'premium_subscription';
   static const String promotePostProductId = 'promote_post';
   /// Non-consumable: оформление профиля (рамки, бейджи, галочка) + стикеры на карте.
@@ -66,9 +71,20 @@ class PaymentService {
   List<ProductDetails> _products = const <ProductDetails>[];
   bool _storeAvailable = false;
   String? _storeInitError;
+  bool _storeCatalogLoaded = false;
+
+  /// Параллельные [initStore] (несколько Cubit’ов / экранов) ломают StoreKit 2:
+  /// одновременные [queryProductDetails] часто дают пустой ответ.
+  Future<void>? _initStoreFuture;
+
+  /// Сброс кэша баланса при смене аккаунта (каталог IAP общий, не трогаем).
+  void clearWalletMemoryCache() {
+    _walletCache = null;
+  }
   WalletSnapshot? _walletCache;
   DateTime? _lastMonthlyCreditCheckAt;
   static const String _walletCachePrefix = 'qarmet_wallet_snapshot_v1_';
+  static const String _premiumIapLocalPrefix = 'premium_iap_unlocked_v1_';
 
   static const Map<String, QarmetProduct> _qarmetCatalog = {
     // LIVE-battle mapping: qarmet_10 -> 100.
@@ -96,8 +112,8 @@ class PaymentService {
       priceKzt: 1299,
     ),
     // Месячная подписка Official Page (Store); ежемесячные Qarmet — RPC credit_official_page_monthly_qarmet.
-    officialPageProductId: QarmetProduct(
-      productId: officialPageProductId,
+    monthlySubscriptionProductId: QarmetProduct(
+      productId: monthlySubscriptionProductId,
       title: 'Official Page',
       baseQarmet: 700,
       bonusQarmet: 0,
@@ -117,28 +133,281 @@ class PaymentService {
 
   String? get storeInitError => _storeInitError;
 
-  Future<void> initStore() async {
+  /// Плагин iOS отдаёт [IAPError] `storekit_no_response`, если нативный ответ пустой
+  /// (часто гонка сразу после cold start, не «нет сети»).
+  bool _isTransientStoreKitQueryError(IAPError? e) {
+    if (e == null) return false;
+    final code = e.code.toLowerCase();
+    final msg = e.message.toLowerCase();
+    return code == 'storekit_no_response' ||
+        msg.contains('failed to get response from platform');
+  }
+
+  void _logProductQueryResult(
+    String tag,
+    ProductDetailsResponse response,
+    Set<String> requestedIds,
+  ) {
+    final found = response.productDetails.map((p) => p.id).toList()..sort();
+    final nf = List<String>.from(response.notFoundIDs)..sort();
+    final err = response.error;
+    debugPrint(
+      'IAP[$tag] requested=${requestedIds.length} [${requestedIds.join(",")}] '
+      '-> found=${found.length} [$found] notFound=[$nf] '
+      'error=${err?.code ?? "-"} ${err?.message ?? ""}',
+    );
+    for (final p in response.productDetails) {
+      debugPrint('IAP[$tag]   id=${p.id} title=${p.title} price=${p.price}');
+    }
+    if (err != null && response.productDetails.isNotEmpty) {
+      debugPrint(
+        'IAP[$tag] warning: IAPError present while productDetails non-empty',
+      );
+    }
+  }
+
+  Future<ProductDetailsResponse> _queryProductDetailsOnceWithTransientRetries(
+    Set<String> productIds,
+  ) async {
+    var response = await _iap.queryProductDetails(productIds);
+    const maxRetries = 5;
+    for (var i = 0;
+        i < maxRetries &&
+            response.error != null &&
+            _isTransientStoreKitQueryError(response.error);
+        i++) {
+      final ms = 450 * (i + 1);
+      debugPrint(
+        'IAP queryProductDetails transient error (${response.error!.code}), '
+        'retry in ${ms}ms (${i + 1}/$maxRetries)',
+      );
+      await Future<void>.delayed(Duration(milliseconds: ms));
+      response = await _iap.queryProductDetails(productIds);
+    }
+    return response;
+  }
+
+  Future<ProductDetailsResponse> _queryProductDetailsWithRetry(
+    Set<String> productIds,
+  ) async {
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    var response = await _queryProductDetailsOnceWithTransientRetries(productIds);
+    // Пустой список при отсутствии жёсткой ошибки — типично для симулятора / гонки после старта.
+    if (productIds.isNotEmpty && response.productDetails.isEmpty) {
+      const emptyMax = 3;
+      for (var j = 0; j < emptyMax; j++) {
+        if (response.productDetails.isNotEmpty) break;
+        if (response.error != null &&
+            !_isTransientStoreKitQueryError(response.error)) {
+          break;
+        }
+        final ms = 380 * (j + 1);
+        debugPrint(
+          'IAP queryProductDetails empty (err=${response.error?.code}), '
+          'retry in ${ms}ms (${j + 1}/$emptyMax)',
+        );
+        await Future<void>.delayed(Duration(milliseconds: ms));
+        response = await _queryProductDetailsOnceWithTransientRetries(productIds);
+      }
+    }
+    _logProductQueryResult('queryProductDetails', response, productIds);
+    return response;
+  }
+
+  void _mergeProductDetailsIntoCache(Iterable<ProductDetails> incoming) {
+    final byId = <String, ProductDetails>{
+      for (final p in _products) p.id: p,
+    };
+    for (final p in incoming) {
+      byId[p.id] = p;
+    }
+    _products = byId.values.toList(growable: false);
+  }
+
+  /// Целевой запрос подписки Official Page, если её не было в общем каталоге.
+  Future<bool> _ensureMonthlySubscriptionProductDetails() async {
+    if (_productDetailsById(monthlySubscriptionProductId) != null) {
+      return true;
+    }
+    if (!_storeAvailable) return false;
+    debugPrint(
+      'IAP: targeted query for monthly subscription '
+      '($monthlySubscriptionProductId)',
+    );
+    final r = await _queryProductDetailsWithRetry({monthlySubscriptionProductId});
+    if (r.productDetails.isEmpty) {
+      if (r.error != null) {
+        debugPrint(
+          'IAP targeted subscription: empty products, error=${r.error}',
+        );
+      }
+      return false;
+    }
+    _mergeProductDetailsIntoCache(r.productDetails);
+    return _productDetailsById(monthlySubscriptionProductId) != null;
+  }
+
+  /// StoreKit 2 иногда возвращает пустой список на большой [queryProductDetails] —
+  /// порционные запросы обходят это при локальном .storekit и на симуляторе.
+  Future<ProductDetailsResponse> _queryProductDetailsInChunks(
+    Set<String> productIds, {
+    int chunkSize = 4,
+  }) async {
+    final list = productIds.toList()..sort();
+    final merged = <ProductDetails>[];
+    IAPError? firstHardError;
+
+    for (var i = 0; i < list.length; i += chunkSize) {
+      final end = i + chunkSize > list.length ? list.length : i + chunkSize;
+      final chunk = list.sublist(i, end).toSet();
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      final r = await _queryProductDetailsWithRetry(chunk);
+      if (r.error != null && r.productDetails.isEmpty && firstHardError == null) {
+        firstHardError = r.error;
+      }
+      merged.addAll(r.productDetails);
+    }
+
+    final found = merged.map((e) => e.id).toSet();
+    final missing = productIds.where((id) => !found.contains(id)).toList();
+
+    return ProductDetailsResponse(
+      productDetails: merged,
+      notFoundIDs: missing,
+      error: merged.isEmpty ? firstHardError : null,
+    );
+  }
+
+  /// Последний fallback: по одному ID (с ретраями на каждый).
+  Future<ProductDetailsResponse> _queryProductDetailsSequentialIds(
+    Set<String> productIds,
+  ) async {
+    final merged = <ProductDetails>[];
+    IAPError? lastErr;
+    final sorted = productIds.toList()..sort();
+    for (final id in sorted) {
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+      final r = await _queryProductDetailsWithRetry({id});
+      if (r.error != null && r.productDetails.isEmpty && lastErr == null) {
+        lastErr = r.error;
+      }
+      merged.addAll(r.productDetails);
+    }
+    final found = merged.map((e) => e.id).toSet();
+    final missing = productIds.where((id) => !found.contains(id)).toList();
+    return ProductDetailsResponse(
+      productDetails: merged,
+      notFoundIDs: missing,
+      error: merged.isEmpty ? lastErr : null,
+    );
+  }
+
+  Future<void> _warmUpStoreKitProductQuery() async {
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS) {
+      return;
+    }
     try {
+      // Minimal delay — just enough to let the StoreKit channel initialise after cold start.
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      await _iap.queryProductDetails({promotionStartProductId});
+    } catch (e, st) {
+      debugPrint('IAP warm-up query ignored: $e\n$st');
+    }
+  }
+
+  Future<void> initStore({bool forceCatalogRefresh = false}) {
+    if (!forceCatalogRefresh &&
+        _storeCatalogLoaded &&
+        _products.isNotEmpty &&
+        _storeAvailable) {
+      return Future<void>.value();
+    }
+    final existing = _initStoreFuture;
+    if (existing != null) return existing;
+    _initStoreFuture =
+        _initStoreOnce(forceCatalogRefresh: forceCatalogRefresh).whenComplete(() {
+      _initStoreFuture = null;
+    });
+    return _initStoreFuture!;
+  }
+
+  Future<void> _initStoreOnce({required bool forceCatalogRefresh}) async {
+    if (!forceCatalogRefresh &&
+        _storeCatalogLoaded &&
+        _products.isNotEmpty &&
+        _storeAvailable) {
+      return;
+    }
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      await Future<void>.delayed(const Duration(milliseconds: 60));
+
       final available = await _iap.isAvailable();
       _storeAvailable = available;
       if (!available) {
         _products = const <ProductDetails>[];
+        _storeCatalogLoaded = false;
         _storeInitError = 'Магазин покупок недоступен на устройстве';
         debugPrint('IAP init: store unavailable');
         return;
       }
 
-      final response = await _iap.queryProductDetails(
-        {..._qarmetCatalog.keys, ..._extraIapProductIds},
-      );
-      if (response.error != null) {
+      final allIds = {..._qarmetCatalog.keys, ..._extraIapProductIds};
+
+      await _warmUpStoreKitProductQuery();
+
+      var response = await _queryProductDetailsWithRetry(allIds);
+      if (response.productDetails.isEmpty && allIds.length > 1) {
+        debugPrint(
+          'IAP init: пустой список продуктов (error=${response.error?.code}), '
+          'пробуем порционный queryProductDetails',
+        );
+        response = await _queryProductDetailsInChunks(allIds);
+      }
+      if (response.productDetails.isEmpty && allIds.isNotEmpty) {
+        debugPrint(
+          'IAP init: порционный запрос без продуктов, пробуем по одному Product ID',
+        );
+        response = await _queryProductDetailsSequentialIds(allIds);
+      }
+
+      if (response.productDetails.isEmpty) {
         _products = const <ProductDetails>[];
-        _storeInitError =
-            _friendlyIapUserMessage(response.error!.message);
-        debugPrint('IAP init queryProductDetails error: ${response.error}');
+        _storeCatalogLoaded = false;
+        if (response.error != null) {
+          _storeInitError =
+              _friendlyIapUserMessage(response.error!.message);
+          debugPrint('IAP init queryProductDetails error: ${response.error}');
+        } else {
+          _storeInitError =
+              'Не удалось получить товары из App Store. Проверьте StoreKit Configuration '
+              'в схеме Xcode и Product ID в App Store Connect.';
+        }
         return;
       }
+
       _products = response.productDetails;
+      _storeCatalogLoaded = true;
+      debugPrint(
+        'IAP catalog loaded: count=${_products.length} '
+        'ids=[${_products.map((e) => e.id).join(",")}]',
+      );
+      if (_productDetailsById(monthlySubscriptionProductId) == null &&
+          _products.isNotEmpty) {
+        debugPrint(
+          'IAP init: monthly subscription missing from batch; targeted query',
+        );
+        final subR =
+            await _queryProductDetailsWithRetry({monthlySubscriptionProductId});
+        _logProductQueryResult('init-monthly-topup', subR, {
+          monthlySubscriptionProductId,
+        });
+        if (subR.productDetails.isNotEmpty) {
+          _mergeProductDetailsIntoCache(subR.productDetails);
+        }
+      }
       final notFound = response.notFoundIDs;
       if (notFound.isNotEmpty) {
         debugPrint('IAP notFoundIDs (нет в ASC или неверный id): $notFound');
@@ -153,6 +422,7 @@ class PaymentService {
       }
     } catch (e, st) {
       _products = const <ProductDetails>[];
+      _storeCatalogLoaded = false;
       _storeAvailable = false;
       _storeInitError = e is PlatformException
           ? _friendlyStoreError(e)
@@ -179,7 +449,71 @@ class PaymentService {
   }
 
   Future<void> restorePurchases() async {
-    await _iap.restorePurchases();
+    final auth = _client.auth.currentUser;
+    if (auth == null) {
+      await _iap.restorePurchases();
+      return;
+    }
+
+    final completer = Completer<void>();
+    late final StreamSubscription<List<PurchaseDetails>> sub;
+    sub = _iap.purchaseStream.listen(
+      (purchases) async {
+        for (final purchase in purchases) {
+          debugPrint(
+            'IAP restore stream: product=${purchase.productID} '
+            'status=${purchase.status.name} pendingComplete='
+            '${purchase.pendingCompletePurchase} error=${purchase.error}',
+          );
+          if (purchase.productID != profileCosmeticsLifetimeProductId) {
+            continue;
+          }
+          if (purchase.status == PurchaseStatus.pending) {
+            debugPrint('IAP restore: pending (cosmetics)');
+            continue;
+          }
+          if (purchase.status == PurchaseStatus.error) {
+            final err = purchase.error;
+            debugPrint(
+              'IAP restore: error code=${err?.code} message=${err?.message}',
+            );
+            continue;
+          }
+          if (purchase.status != PurchaseStatus.purchased &&
+              purchase.status != PurchaseStatus.restored) {
+            continue;
+          }
+          try {
+            await _verifyPurchase(purchase, profileCosmeticsLifetimeProductId);
+            await _setPremiumIapLocalUnlocked(true, userId: auth.id);
+            if (purchase.pendingCompletePurchase) {
+              await _iap.completePurchase(purchase);
+            }
+          } catch (e, st) {
+            debugPrint('IAP restore processing error: $e\n$st');
+          }
+        }
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      },
+      onError: (e, st) {
+        debugPrint('IAP restore stream error: $e\n$st');
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      },
+    );
+
+    try {
+      await _iap.restorePurchases();
+      await completer.future.timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {},
+      );
+    } finally {
+      await sub.cancel();
+    }
   }
 
   Future<bool> isPremiumActive() async {
@@ -240,6 +574,8 @@ class PaymentService {
       storeProductId: profileCosmeticsLifetimeProductId,
       onVerified: (purchase) async {
         await _verifyPurchase(purchase, profileCosmeticsLifetimeProductId);
+        final auth = _requireAuthUser();
+        await _setPremiumIapLocalUnlocked(true, userId: auth.id);
       },
     );
   }
@@ -270,12 +606,18 @@ class PaymentService {
   Future<bool> getCosmeticsLifetimeUnlocked() async {
     final auth = _client.auth.currentUser;
     if (auth == null) return false;
+    final localUnlocked = await _getPremiumIapLocalUnlocked(userId: auth.id);
+    if (localUnlocked) return true;
     final row = await _client
         .from('users')
         .select('profile_cosmetics_iap_forever')
         .eq('id', auth.id)
         .maybeSingle();
-    return row?['profile_cosmetics_iap_forever'] as bool? ?? false;
+    final serverUnlocked = row?['profile_cosmetics_iap_forever'] as bool? ?? false;
+    if (serverUnlocked) {
+      await _setPremiumIapLocalUnlocked(true, userId: auth.id);
+    }
+    return serverUnlocked;
   }
 
   Future<void> ensureMonthlySubscriptionCredit() async {
@@ -368,25 +710,61 @@ class PaymentService {
     if (!forceRefresh) {
       final cached = getCachedWalletSnapshot();
       if (cached != null) return cached;
+      final disk = await getPersistentWalletSnapshot();
+      if (disk != null) {
+        _walletCache = disk;
+        return disk;
+      }
     }
-    await ensureMonthlySubscriptionCredit();
+    // Kick off monthly credit check in background — don't block wallet load.
+    unawaited(ensureMonthlySubscriptionCredit());
+
+    // Combine 3 separate user-row queries into one to avoid 3× round trips.
     final results = await Future.wait<Object>([
-      getQarmetBalance(),
-      isOfficialPageActive(),
-      getCosmeticsLifetimeUnlocked(),
+      _getUserWalletFields(),
       getMyPromotionHistory(),
     ]);
+    final fields = results[0] as _UserWalletFields;
+    // Sync cosmetics local flag if server says unlocked (background, non-blocking).
+    if (fields.cosmeticsUnlocked) {
+      final auth = _client.auth.currentUser;
+      if (auth != null) unawaited(_setPremiumIapLocalUnlocked(true, userId: auth.id));
+    }
     final snapshot = WalletSnapshot(
-      balance: results[0] as int,
-      isOfficialPageActive: results[1] as bool,
-      cosmeticsLifetimeUnlocked: results[2] as bool,
-      promotionHistory: results[3] as List<QarmetPromotionHistoryItem>,
+      balance: fields.balance,
+      isOfficialPageActive: fields.officialPageActive,
+      cosmeticsLifetimeUnlocked: fields.cosmeticsUnlocked,
+      promotionHistory: results[1] as List<QarmetPromotionHistoryItem>,
       catalog: catalog,
       fetchedAt: DateTime.now().toUtc(),
     );
     _walletCache = snapshot;
-    await _savePersistentWalletSnapshot(snapshot);
+    unawaited(_savePersistentWalletSnapshot(snapshot));
     return snapshot;
+  }
+
+  /// Single DB round-trip replacing getQarmetBalance + isOfficialPageActive + getCosmeticsLifetimeUnlocked.
+  Future<_UserWalletFields> _getUserWalletFields() async {
+    final auth = _client.auth.currentUser;
+    if (auth == null) return const _UserWalletFields();
+    try {
+      // Check local flag first (avoids DB call if already confirmed locally).
+      final localUnlocked = await _getPremiumIapLocalUnlocked(userId: auth.id);
+      final row = await _client
+          .from('users')
+          .select('qarmet_balance, official_page_active, profile_cosmetics_iap_forever')
+          .eq('id', auth.id)
+          .maybeSingle();
+      if (row == null) return _UserWalletFields(cosmeticsUnlocked: localUnlocked);
+      final serverCosmetics = row['profile_cosmetics_iap_forever'] as bool? ?? false;
+      return _UserWalletFields(
+        balance: row['qarmet_balance'] as int? ?? 0,
+        officialPageActive: row['official_page_active'] as bool? ?? false,
+        cosmeticsUnlocked: localUnlocked || serverCosmetics,
+      );
+    } catch (_) {
+      return const _UserWalletFields();
+    }
   }
 
   Future<void> _savePersistentWalletSnapshot(WalletSnapshot snapshot) async {
@@ -484,7 +862,8 @@ class PaymentService {
           'id,title,is_top,is_urgent,promo_top_until,promo_urgent_until,promo_highlight_until',
         )
         .eq('seller_id', auth.id)
-        .order('created_at', ascending: false);
+        .order('created_at', ascending: false)
+        .limit(50);
     final now = DateTime.now().toUtc();
     final list = <QarmetPromotionHistoryItem>[];
     for (final raw in (rows as List<dynamic>)) {
@@ -612,14 +991,25 @@ class PaymentService {
             'Магазин покупок временно недоступен. Попробуйте позже.',
       );
     }
+    final acceptedStoreIds = <String>{storeProductId};
     ProductDetails? product;
     for (final p in _products) {
-      if (p.id == storeProductId) {
+      if (acceptedStoreIds.contains(p.id)) {
         product = p;
         break;
       }
     }
+    if (product == null && storeProductId == monthlySubscriptionProductId) {
+      final ok = await _ensureMonthlySubscriptionProductDetails();
+      if (ok) {
+        product = _productDetailsById(storeProductId);
+      }
+    }
     if (product == null) {
+      debugPrint(
+        'IAP _purchase: product not in cache storeProductId=$storeProductId '
+        'cachedIds=[${_products.map((e) => e.id).join(",")}]',
+      );
       return PaymentResult(
         status: PaymentResultStatus.error,
         message: 'Продукт $storeProductId не найден в магазине',
@@ -631,14 +1021,25 @@ class PaymentService {
     sub = _iap.purchaseStream.listen(
       (purchases) async {
         for (final purchase in purchases) {
-          if (purchase.productID != storeProductId) continue;
+          if (!acceptedStoreIds.contains(purchase.productID)) continue;
+
+          debugPrint(
+            'IAP purchase stream: id=${purchase.productID} '
+            'status=${purchase.status.name} '
+            'pendingComplete=${purchase.pendingCompletePurchase} '
+            'error=${purchase.error}',
+          );
 
           try {
             switch (purchase.status) {
               case PurchaseStatus.pending:
+                debugPrint('IAP purchase stream: pending (awaiting StoreKit)');
                 break;
               case PurchaseStatus.purchased:
               case PurchaseStatus.restored:
+                debugPrint(
+                  'IAP purchase stream: ${purchase.status.name} -> verify',
+                );
                 await onVerified(purchase);
                 if (purchase.pendingCompletePurchase) {
                   await _iap.completePurchase(purchase);
@@ -650,6 +1051,7 @@ class PaymentService {
                 }
                 break;
               case PurchaseStatus.canceled:
+                debugPrint('IAP purchase stream: canceled');
                 if (!completer.isCompleted) {
                   completer.complete(
                     const PaymentResult(
@@ -660,11 +1062,16 @@ class PaymentService {
                 }
                 break;
               case PurchaseStatus.error:
+                final iapErr = purchase.error;
+                debugPrint(
+                  'IAP purchase stream: error code=${iapErr?.code} '
+                  'message=${iapErr?.message} details=${iapErr?.details}',
+                );
                 if (!completer.isCompleted) {
                   completer.complete(
                     PaymentResult(
                       status: PaymentResultStatus.error,
-                      message: _friendlyIapUserMessage(purchase.error?.message),
+                      message: _friendlyIapUserMessage(iapErr?.message),
                     ),
                   );
                 }
@@ -704,7 +1111,7 @@ class PaymentService {
       final ok = await _startPurchaseWithRetry(
         product: product,
         nonConsumable: nonConsumable,
-        storeProductId: storeProductId,
+        storeProductIds: acceptedStoreIds,
       );
       if (!ok && !completer.isCompleted) {
         completer.complete(
@@ -737,11 +1144,9 @@ class PaymentService {
   }
 
   bool _isStoreKitNoResponseError(PlatformException e) {
-    final code = (e.code).toLowerCase();
     final blob = '${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
-    return code.contains('storekit') ||
-        code.contains('platform') ||
-        blob.contains('failed to get response from platform');
+    // Только известный сбой platform channel; code часто содержит "storekit2_*" при обычных IAP-ошибках.
+    return blob.contains('failed to get response from platform');
   }
 
   ProductDetails? _productDetailsById(String storeProductId) {
@@ -762,7 +1167,7 @@ class PaymentService {
   Future<bool> _startPurchaseWithRetry({
     required ProductDetails product,
     required bool nonConsumable,
-    required String storeProductId,
+    required Set<String> storeProductIds,
   }) async {
     Future<bool> startBuy(ProductDetails p) async {
       final param = PurchaseParam(productDetails: p);
@@ -773,16 +1178,16 @@ class PaymentService {
 
     for (var attempt = 0; attempt < 3; attempt++) {
       if (attempt == 1) {
-        await Future<void>.delayed(const Duration(milliseconds: 520));
-        await initStore();
+        await Future<void>.delayed(const Duration(milliseconds: 280));
+        await initStore(forceCatalogRefresh: true);
       } else if (attempt == 2) {
-        await Future<void>.delayed(const Duration(milliseconds: 1200));
-        await initStore();
+        await Future<void>.delayed(const Duration(milliseconds: 650));
+        await initStore(forceCatalogRefresh: true);
       }
 
       final details = attempt == 0
           ? product
-          : _productDetailsById(storeProductId);
+          : _productFromAcceptedIds(storeProductIds);
       if (details == null) {
         continue;
       }
@@ -797,20 +1202,35 @@ class PaymentService {
     return false;
   }
 
-  /// Убираем сырой текст «StoreKit: Failed to get response…» из UI.
+  ProductDetails? _productFromAcceptedIds(Set<String> storeProductIds) {
+    for (final id in storeProductIds) {
+      final details = _productDetailsById(id);
+      if (details != null) return details;
+    }
+    return null;
+  }
+
+  /// Сообщение для пользователя; не подменяем любую ошибку со словом «storekit» —
+  /// при StoreKit Testing в тексте почти всегда есть storekit/storekit2, иначе UI врёт про «App Store».
   String _friendlyIapUserMessage(String? raw) {
     if (raw == null || raw.isEmpty) return 'Ошибка покупки';
     final lower = raw.toLowerCase();
-    if (lower.contains('failed to get response from platform') ||
-        lower.contains('storekit')) {
-      return 'Не удалось связаться с App Store. Подождите несколько секунд, '
-          'закройте и снова откройте экран оплаты. Для теста нужен Sandbox Apple ID '
-          'и включённые In-App Purchase для приложения.';
+    if (lower.contains('failed to get response from platform')) {
+      return 'Не удалось получить ответ от StoreKit. Подождите несколько секунд, '
+          'закройте экран оплаты и откройте снова или перезапустите приложение. '
+          'При тесте через Xcode: Run → Options → StoreKit Configuration = storekit.storekit. '
+          'На устройстве без этого файла нужен Sandbox Apple ID и товары в App Store Connect.';
     }
     return raw;
   }
 
   String _friendlyStoreError(PlatformException e) {
+    final code = e.code.toLowerCase();
+    if (code.contains('failed_to_fetch_product') ||
+        code == 'storekit2_products_error') {
+      return 'Товар не найден в StoreKit. Сверьте Product ID с ios/storekit.storekit и '
+          'PaymentService; в схеме Runner должен быть подключён StoreKit Configuration.';
+    }
     return _friendlyIapUserMessage(
       '${e.code} ${e.message ?? ''} ${e.details ?? ''}',
     );
@@ -912,17 +1332,84 @@ class PaymentService {
     final auth = _client.auth.currentUser;
     if (auth == null) throw Exception('Пользователь не авторизован');
 
-    await _client.functions.invoke(
-      'verifyPurchase',
-      body: <String, dynamic>{
-        'userId': auth.id,
-        'productId': productId,
-        'purchaseId': purchase.purchaseID,
-        'transactionDate': purchase.transactionDate,
-        'verificationData': purchase.verificationData.serverVerificationData,
-        'source': purchase.verificationData.source,
-        'platform': defaultTargetPlatform.name,
-      },
-    );
+    Future<void> invokeWithToken(String accessToken) async {
+      final response = await _client.functions.invoke(
+        'verifyPurchase',
+        headers: <String, String>{
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: <String, dynamic>{
+          'userId': auth.id,
+          'productId': productId,
+          'purchaseId': purchase.purchaseID,
+          'transactionDate': purchase.transactionDate,
+          'verificationData': purchase.verificationData.serverVerificationData,
+          'source': purchase.verificationData.source,
+          'platform': defaultTargetPlatform.name,
+        },
+      );
+      final data = response.data;
+      if (data is Map && data['verified'] != true) {
+        final errMsg = data['error']?.toString() ?? 'Сервер не подтвердил покупку';
+        throw Exception('verifyPurchase: $errMsg');
+      }
+    }
+
+    Session? session = _client.auth.currentSession;
+    if (session == null) {
+      throw Exception('Пользователь не авторизован');
+    }
+
+    try {
+      await invokeWithToken(session.accessToken);
+    } catch (e) {
+      final msg = e.toString();
+      final looksLikeAuth =
+          msg.contains('401') ||
+          msg.contains('Invalid JWT') ||
+          msg.contains('Unauthorized');
+      if (!looksLikeAuth) rethrow;
+
+      final refreshed = await _client.auth.refreshSession();
+      session = refreshed.session ?? _client.auth.currentSession;
+      if (session == null) {
+        throw Exception(
+          'Сессия истекла. Войдите снова и повторите покупку.',
+        );
+      }
+      await invokeWithToken(session.accessToken);
+    }
   }
+
+  Future<void> _setPremiumIapLocalUnlocked(
+    bool unlocked, {
+    required String userId,
+  }) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('$_premiumIapLocalPrefix$userId', unlocked);
+    } catch (_) {
+      // Non-critical cache path.
+    }
+  }
+
+  Future<bool> _getPremiumIapLocalUnlocked({required String userId}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool('$_premiumIapLocalPrefix$userId') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+class _UserWalletFields {
+  const _UserWalletFields({
+    this.balance = 0,
+    this.officialPageActive = false,
+    this.cosmeticsUnlocked = false,
+  });
+  final int balance;
+  final bool officialPageActive;
+  final bool cosmeticsUnlocked;
 }

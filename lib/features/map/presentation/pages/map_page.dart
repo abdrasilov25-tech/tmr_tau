@@ -417,6 +417,9 @@ class _MapPageState extends State<MapPage> {
       });
       if (hasAccess) {
         unawaited(_loadFriendsLocations());
+      } else {
+        // Подгружаем каталог StoreKit заранее — «Подключить за 1 тап» не ждёт холодный initStore.
+        unawaited(context.read<PaymentService>().initStore());
       }
       if (mounted) {
         context.read<MapBloc>().add(const MapLocationRequested());
@@ -434,86 +437,39 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _showOfficialPageRequiredSheet() {
+    unawaited(context.read<PaymentService>().initStore());
+    final mapContext = context;
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.workspace_premium_outlined,
-                size: 48,
-                color: Color(0xFF2563EB),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Нужна подписка Official Page',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Карту можно смотреть бесплатно. Чтобы открывать объявления, '
-                'менять радиус поиска, видеть друзей и инструменты бизнеса — '
-                'подключите подписку в Qarmet Wallet.',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.grey.shade700,
-                    ),
-              ),
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _businessActionLoading
-                      ? null
-                      : () {
-                          Navigator.pop(ctx);
-                          _buyBusinessSubscriptionQuick();
-                        },
-                  icon: _businessActionLoading
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : const Icon(Icons.flash_on_rounded),
-                  label: const Text('Подключить за 1 тап'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () {
-                    Navigator.pop(ctx);
-                    context.push('/qarmet-wallet');
-                  },
-                  icon: const Icon(Icons.account_balance_wallet_outlined),
-                  label: const Text('Подробнее по тарифам'),
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  _checkOfficialPageAccess();
-                },
-                child: const Text('Я уже оплатил, проверить снова'),
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => _OfficialPageSubscriptionSheet(
+        mapContext: mapContext,
+        onPurchaseCompleted: _onOfficialPagePurchaseResult,
+        onRecheckAccess: _checkOfficialPageAccess,
       ),
     );
+  }
+
+  void _onOfficialPagePurchaseResult(PaymentResult result) {
+    if (!mounted) return;
+    switch (result.status) {
+      case PaymentResultStatus.success:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Бизнес-подписка активирована')),
+        );
+        unawaited(_checkOfficialPageAccess());
+      case PaymentResultStatus.cancelled:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Покупка отменена')),
+        );
+      case PaymentResultStatus.error:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result.message ?? 'Не удалось выполнить покупку'),
+          ),
+        );
+    }
   }
 
   bool _ensureOfficialPageAccess() {
@@ -524,25 +480,15 @@ class _MapPageState extends State<MapPage> {
 
   Future<void> _buyBusinessSubscriptionQuick() async {
     if (_businessActionLoading) return;
-    final payment = context.read<PaymentService>();
     setState(() => _businessActionLoading = true);
     try {
-      final result = await payment.buyQarmetPackage(PaymentService.officialPageProductId);
+      await context.read<PaymentService>().initStore();
       if (!mounted) return;
-      if (result.status == PaymentResultStatus.success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Бизнес-подписка активирована')),
-        );
-        await _checkOfficialPageAccess();
-      } else if (result.status == PaymentResultStatus.cancelled) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Покупка отменена')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(result.message ?? 'Не удалось выполнить покупку')),
-        );
-      }
+      final result = await context
+          .read<PaymentService>()
+          .buyQarmetPackage(PaymentService.officialPageProductId);
+      if (!mounted) return;
+      _onOfficialPagePurchaseResult(result);
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1230,6 +1176,125 @@ class _MapPageState extends State<MapPage> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _OfficialPageSubscriptionSheet extends StatefulWidget {
+  const _OfficialPageSubscriptionSheet({
+    required this.mapContext,
+    required this.onPurchaseCompleted,
+    required this.onRecheckAccess,
+  });
+
+  final BuildContext mapContext;
+  final void Function(PaymentResult result) onPurchaseCompleted;
+  final Future<void> Function() onRecheckAccess;
+
+  @override
+  State<_OfficialPageSubscriptionSheet> createState() =>
+      _OfficialPageSubscriptionSheetState();
+}
+
+class _OfficialPageSubscriptionSheetState
+    extends State<_OfficialPageSubscriptionSheet> {
+  bool _buying = false;
+
+  Future<void> _onBuyTap() async {
+    if (_buying) return;
+    setState(() => _buying = true);
+    try {
+      await context.read<PaymentService>().initStore();
+      if (!mounted) return;
+      final result = await context.read<PaymentService>().buyQarmetPackage(
+            PaymentService.officialPageProductId,
+          );
+      if (!mounted) return;
+      if (result.status == PaymentResultStatus.success) {
+        Navigator.of(context).pop();
+      }
+      widget.onPurchaseCompleted(result);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ошибка покупки, попробуйте позже')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _buying = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final titleStyle = Theme.of(widget.mapContext).textTheme.titleLarge;
+    final bodyStyle = Theme.of(widget.mapContext).textTheme.bodyMedium;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.workspace_premium_outlined,
+              size: 48,
+              color: Color(0xFF2563EB),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Нужна подписка Official Page',
+              textAlign: TextAlign.center,
+              style: titleStyle?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Карту можно смотреть бесплатно. Чтобы открывать объявления, '
+              'менять радиус поиска, видеть друзей и инструменты бизнеса — '
+              'подключите подписку в Qarmet Wallet.',
+              textAlign: TextAlign.center,
+              style: bodyStyle?.copyWith(color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _buying ? null : _onBuyTap,
+                icon: _buying
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.flash_on_rounded),
+                label: const Text('Подключить за 1 тап'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  widget.mapContext.push('/qarmet-wallet');
+                },
+                icon: const Icon(Icons.account_balance_wallet_outlined),
+                label: const Text('Подробнее по тарифам'),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context);
+                unawaited(widget.onRecheckAccess());
+              },
+              child: const Text('Я уже оплатил, проверить снова'),
+            ),
+          ],
+        ),
       ),
     );
   }
