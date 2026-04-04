@@ -1,95 +1,109 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../../core/constants/legal_urls.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 
-class PrivacyPolicyPage extends StatefulWidget {
+/// Документ открывается по кнопке — без экрана «вечной» загрузки и лишних перестроений.
+class PrivacyPolicyPage extends StatelessWidget {
   const PrivacyPolicyPage({super.key});
 
-  /// Лендинг: папка `site/` → GitHub Actions → Pages (корень сайта без `/site/`).
-  /// Репозиторий: `github.com/abdrasilov25-tech/tmr_tau`
-  static const String privacyPolicyUrl =
-      'https://abdrasilov25-tech.github.io/tmr_tau/';
+  static Uri get policyUri => Uri.parse(LegalUrls.site);
 
-  @override
-  State<PrivacyPolicyPage> createState() => _PrivacyPolicyPageState();
-}
-
-class _PrivacyPolicyPageState extends State<PrivacyPolicyPage> {
-  bool _launchFailed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _openPolicy());
-  }
-
-  Future<void> _openPolicy() async {
-    final uri = Uri.tryParse(PrivacyPolicyPage.privacyPolicyUrl);
-    if (uri == null) return;
-
+  Future<void> _openExternal(BuildContext context) async {
     final ok = await launchUrl(
-      uri,
-      mode: LaunchMode.inAppWebView,
+      policyUri,
+      mode: LaunchMode.externalApplication,
     );
-
-    if (!mounted) return;
+    if (!context.mounted) return;
     if (!ok) {
-      setState(() => _launchFailed = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть браузер')),
+      );
     }
   }
 
-  Future<void> _openExternal() async {
-    final uri = Uri.tryParse(PrivacyPolicyPage.privacyPolicyUrl);
-    if (uri == null) return;
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  Future<void> _openInApp(BuildContext context) async {
+    final ok = await launchUrl(
+      policyUri,
+      mode: LaunchMode.inAppWebView,
+    );
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Встроенный просмотр недоступен — откройте во внешнем браузере'),
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
     return Scaffold(
       backgroundColor: ThemedContentSurface.scaffold,
       appBar: AppBar(
         title: const Text('Политика конфиденциальности'),
         centerTitle: true,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(12),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 180),
-          child: _launchFailed
-              ? SingleChildScrollView(
-                  key: const ValueKey('failed'),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Не удалось открыть документ во встроенном просмотрщике.',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                      ),
-                      const SizedBox(height: 12),
-                      FilledButton(
-                        onPressed: _openExternal,
-                        child: const Text('Открыть в браузере'),
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        PrivacyPolicyPage.privacyPolicyUrl,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(color: Colors.white70),
-                      ),
-                    ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Документы размещены на официальном сайте приложения.',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: ThemedContentSurface.profileTextPrimary,
                   ),
-                )
-              : const Center(
-                  key: ValueKey('loading'),
-                  child: CircularProgressIndicator(),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Выберите способ открытия. Сайт: ${LegalUrls.site}',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: ThemedContentSurface.profileTextSecondary,
+                    height: 1.45,
+                  ),
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: () => _openExternal(context),
+              icon: const Icon(Icons.open_in_browser_rounded),
+              label: const Text('Открыть в браузере'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () => _openInApp(context),
+              icon: const Icon(Icons.web_rounded),
+              label: const Text('Открыть в приложении'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: scheme.primary,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 28),
+            SelectableText(
+              LegalUrls.site,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
-

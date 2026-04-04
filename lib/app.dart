@@ -365,11 +365,20 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                       context.read<SearchTabActivationController>().reset();
                       context.read<PaymentCubit>().resetForLogout();
                     },
-                    child: MaterialApp.router(
-                      title: 'tmr_tau',
-                      debugShowCheckedModeBanner: false,
-                      theme: AppTheme.light,
-                      routerConfig: _appRouter.router,
+                    child: BlocListener<AuthBloc, AuthState>(
+                      listenWhen: (prev, curr) =>
+                          curr is AuthUnauthenticated &&
+                          prev is AuthAuthenticated,
+                      listener: (context, state) {
+                        // Сразу экран входа, без заглушки на вкладке «Профиль».
+                        _appRouter.router.go('/login');
+                      },
+                      child: MaterialApp.router(
+                        title: 'tmr_tau',
+                        debugShowCheckedModeBanner: false,
+                        theme: AppTheme.light,
+                        routerConfig: _appRouter.router,
+                      ),
                     ),
                   ),
                 ),

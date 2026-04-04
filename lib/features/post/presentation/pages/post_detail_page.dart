@@ -45,17 +45,72 @@ class _PostDetailPageState extends State<PostDetailPage> {
   bool _sending = false;
   PostCommentEntity? _replyingToComment;
 
+  bool? _isFollowing;
+  bool _followLoading = false;
+
   String? get _currentUserId {
     final auth = context.read<AuthBloc>().state;
     if (auth is! AuthAuthenticated) return null;
     return auth.user.id;
   }
 
+  bool get _isOwnPost => _currentUserId == _post.userId;
+
   @override
   void initState() {
     super.initState();
     _post = widget.post;
     _loadComments();
+    _loadFollowState();
+  }
+
+  Future<void> _loadFollowState() async {
+    final uid = _currentUserId;
+    if (uid == null || uid == _post.userId) return;
+    try {
+      final client = Supabase.instance.client;
+      final row = await client
+          .from('followers')
+          .select('follower_id')
+          .eq('follower_id', uid)
+          .eq('following_id', _post.userId)
+          .maybeSingle();
+      if (mounted) setState(() => _isFollowing = row != null);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleFollow() async {
+    final uid = _currentUserId;
+    if (uid == null || _followLoading) return;
+    setState(() => _followLoading = true);
+    try {
+      final client = Supabase.instance.client;
+      final wasFollowing = _isFollowing ?? false;
+      if (wasFollowing) {
+        await client
+            .from('followers')
+            .delete()
+            .eq('follower_id', uid)
+            .eq('following_id', _post.userId);
+      } else {
+        await client.from('followers').insert({
+          'follower_id': uid,
+          'following_id': _post.userId,
+        });
+        // Уведомление автору
+        await client.from('notifications').insert({
+          'user_id': _post.userId,
+          'actor_id': uid,
+          'type': 'follow',
+          'title': 'Новый подписчик',
+          'body': 'Подписался на вас',
+        });
+      }
+      if (mounted) setState(() => _isFollowing = !wasFollowing);
+    } catch (_) {
+    } finally {
+      if (mounted) setState(() => _followLoading = false);
+    }
   }
 
   @override
@@ -385,6 +440,52 @@ class _PostDetailPageState extends State<PostDetailPage> {
                           ],
                         ),
                       ),
+                      if (!_isOwnPost && _isFollowing != null) ...[
+                        const SizedBox(width: 8),
+                        _followLoading
+                            ? const SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : GestureDetector(
+                                onTap: _toggleFollow,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: (_isFollowing ?? false)
+                                        ? const Color(0xFF22C55E)
+                                        : const Color(0xFFEF4444),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        (_isFollowing ?? false)
+                                            ? Icons.check_rounded
+                                            : Icons.person_add_rounded,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        (_isFollowing ?? false)
+                                            ? 'Подписан'
+                                            : 'Подписаться',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                      ],
                     ],
                   ),
                   if (_post.caption.isNotEmpty) ...[

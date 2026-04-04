@@ -369,6 +369,16 @@ class ProfileRepositoryImpl implements ProfileRepository {
           'follower_id': followerId,
           'following_id': followingId,
         });
+        // Уведомление автору профиля о новом подписчике
+        try {
+          await _client.from('notifications').insert({
+            'user_id': followingId,
+            'actor_id': followerId,
+            'type': 'follow',
+            'title': 'Новый подписчик',
+            'body': 'Подписался на вас',
+          });
+        } catch (_) {}
       }
     } on PostgrestException catch (e) {
       if (e.code != '23505') {

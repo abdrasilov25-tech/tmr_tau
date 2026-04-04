@@ -812,8 +812,12 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                       Row(
                         children: [
                           Expanded(
-                            child: (profile.isFollowingByMe
-                                ? OutlinedButton(
+                            child: profile.isFollowingByMe
+                                ? FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFF22C55E),
+                                      foregroundColor: Colors.white,
+                                    ),
                                     onPressed: () async {
                                       final uid =
                                           (context.read<AuthBloc>().state
@@ -832,13 +836,18 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                       if (!mounted) return;
                                       await _loadFollowState();
                                     },
-                                    child: Text(
+                                    icon: const Icon(Icons.check_rounded, size: 18),
+                                    label: Text(
                                       _isMutualFollow
                                           ? 'Вы подписаны'
                                           : 'Отписаться',
                                     ),
                                   )
-                                : FilledButton(
+                                : FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      backgroundColor: const Color(0xFFEF4444),
+                                      foregroundColor: Colors.white,
+                                    ),
                                     onPressed: () async {
                                       final uid =
                                           (context.read<AuthBloc>().state
@@ -857,12 +866,13 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                       if (!mounted) return;
                                       await _loadFollowState();
                                     },
-                                    child: Text(
+                                    icon: const Icon(Icons.person_add_rounded, size: 18),
+                                    label: Text(
                                       _peerFollowsMe
                                           ? 'Подписаться в ответ'
                                           : 'Подписаться',
                                     ),
-                                  )),
+                                  ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(

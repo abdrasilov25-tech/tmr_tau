@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
@@ -11,20 +12,49 @@ import '../widgets/settings_item_tile.dart';
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
-  static const String _supportEmail = 'beksultanbekmurzaev75@gmail.com';
+  static const String _supportEmail = 'Omirk82@gmail.com';
+  static const String _whatsAppDisplay = '87084185801';
+  /// 8… → международный 7… для wa.me
+  static final Uri _whatsAppUri = Uri.parse('https://wa.me/77084185801');
+  static final Uri _instagramUri = Uri.parse(
+    'https://www.instagram.com/bekmurzaevbeksultan_?igsh=MTVzejdrYnVkbHUzdw==',
+  );
+
+  static const Color _whatsAppGreen = Color(0xFF25D366);
+  static const Color _instagramPink = Color(0xFFE4405F);
+
+  Future<void> _launchUri(BuildContext context, Uri uri) async {
+    final ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!context.mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Не удалось открыть ссылку')),
+      );
+    }
+  }
 
   Future<void> _showContactsDialog(BuildContext context) async {
+    final scheme = Theme.of(context).colorScheme;
     await showDialog<void>(
       context: context,
       builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: const Text('Контакты'),
-        content: Text(_supportEmail),
+        content: SelectableText(
+          _supportEmail,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+            color: scheme.primary,
+          ),
+        ),
+        actionsAlignment: MainAxisAlignment.end,
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dCtx).pop(),
             child: const Text('Закрыть'),
           ),
-          FilledButton(
+          FilledButton.tonal(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: _supportEmail));
               if (!context.mounted) return;
@@ -35,7 +65,7 @@ class SettingsPage extends StatelessWidget {
             },
             child: const Text('Скопировать'),
           ),
-          FilledButton.tonal(
+          FilledButton(
             onPressed: () async {
               final uri = Uri.parse('mailto:$_supportEmail');
               await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -179,27 +209,42 @@ class SettingsPage extends StatelessWidget {
               SettingsItemTile(
                 title: 'Условия сервиса',
                 icon: Icons.article_outlined,
+                subtitle: 'Пользовательское соглашение на сайте',
                 onTap: () => context.push('/profile/settings/terms'),
               ),
               SettingsItemTile(
-                // Политика и контакты — добавляем в этот же блок,
-                // чтобы остальные пункты настроек не менялись.
                 title: 'Политика конфиденциальности',
                 icon: Icons.privacy_tip,
-                subtitle: 'Открыть документ',
+                subtitle: 'Сайт temirtauapp09.atoms.world',
                 onTap: () => context.push('/profile/settings/privacy-policy'),
               ),
               SettingsItemTile(
-                title: 'Пользовательское соглашение',
-                icon: Icons.article_outlined,
-                subtitle: 'Открыть условия',
-                onTap: () => context.push('/profile/settings/terms'),
-              ),
-              SettingsItemTile(
-                title: 'Контакты',
+                title: 'Email',
                 icon: Icons.mail_outline_rounded,
                 subtitle: _supportEmail,
                 onTap: () => _showContactsDialog(context),
+              ),
+              SettingsItemTile(
+                title: 'WhatsApp',
+                icon: Icons.chat_rounded,
+                subtitle: _whatsAppDisplay,
+                customIcon: const FaIcon(
+                  FontAwesomeIcons.whatsapp,
+                  size: 24,
+                  color: _whatsAppGreen,
+                ),
+                onTap: () => _launchUri(context, _whatsAppUri),
+              ),
+              SettingsItemTile(
+                title: 'Instagram',
+                icon: Icons.camera_alt_outlined,
+                subtitle: '@bekmurzaevbeksultan_',
+                customIcon: const FaIcon(
+                  FontAwesomeIcons.instagram,
+                  size: 24,
+                  color: _instagramPink,
+                ),
+                onTap: () => _launchUri(context, _instagramUri),
               ),
             ],
           ),

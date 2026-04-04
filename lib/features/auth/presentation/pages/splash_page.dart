@@ -15,7 +15,8 @@ class SplashPage extends StatefulWidget {
 
 class _SplashPageState extends State<SplashPage>
     with SingleTickerProviderStateMixin {
-  static const _minSplash = Duration(milliseconds: 4200);
+  /// Только для успешной авторизации: короткий брендинг. На логин не задерживаем.
+  static const _minSplashAuthenticated = Duration(milliseconds: 1400);
 
   late final DateTime _splashStartedAt;
   late AnimationController _fadeOutController;
@@ -42,9 +43,17 @@ class _SplashPageState extends State<SplashPage>
     final state = context.read<AuthBloc>().state;
     if (state is AuthLoading) return;
 
+    // Сразу на экран входа — без искусственного ожидания (раньше было ~4.2 с).
+    if (state is AuthUnauthenticated || state is AuthError) {
+      _navigateFromSplash();
+      return;
+    }
+
+    if (state is! AuthAuthenticated) return;
+
     final elapsed = DateTime.now().difference(_splashStartedAt);
-    if (elapsed < _minSplash) {
-      Future<void>.delayed(_minSplash - elapsed, () {
+    if (elapsed < _minSplashAuthenticated) {
+      Future<void>.delayed(_minSplashAuthenticated - elapsed, () {
         if (mounted) _scheduleNavigateFromAuth();
       });
       return;
