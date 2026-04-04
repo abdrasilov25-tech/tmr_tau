@@ -64,6 +64,12 @@ abstract class PostRepository {
     required String userId,
     required int optionIndex,
   });
+
+  /// Список проголосовавших за конкретный вариант опроса.
+  Future<List<({String userId, String name, String? avatarUrl})>> fetchPollVoters({
+    required String postId,
+    required int optionIndex,
+  });
   Future<List<PostEntity>> getPostsNearby({
     required double userLatitude,
     required double userLongitude,

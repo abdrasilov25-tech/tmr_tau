@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../product/data/models/product_model.dart';
+import '../../domain/entities/creator_monthly_stats.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
 
@@ -141,6 +142,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       instagramUrl: userMap['instagram_url'] as String?,
       telegramUsername: userMap['telegram_username'] as String?,
       websiteUrl: userMap['website_url'] as String?,
+      officialPageActive: userMap['official_page_active'] as bool? ?? false,
     );
   }
 
@@ -171,6 +173,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           isFollowingByMe: false,
           products: const [],
           isVerified: resolvedVerified,
+          officialPageActive: m['official_page_active'] as bool? ?? false,
         );
       }).toList();
     } on PostgrestException catch (_) {
@@ -214,6 +217,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
           isFollowingByMe: false,
           products: const [],
           isVerified: resolvedVerified,
+          officialPageActive: m['official_page_active'] as bool? ?? false,
         );
       }).toList();
     } on PostgrestException catch (e) {
@@ -259,6 +263,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
         isFollowingByMe: true,
         products: const [],
         isVerified: resolvedVerified,
+        officialPageActive: m['official_page_active'] as bool? ?? false,
       );
     }).toList();
   }
@@ -310,8 +315,38 @@ class ProfileRepositoryImpl implements ProfileRepository {
         isFollowingByMe: myFollowingIds.contains(id),
         products: const [],
         isVerified: resolvedVerified,
+        officialPageActive: m['official_page_active'] as bool? ?? false,
       );
     }).toList();
+  }
+
+  @override
+  Future<CreatorMonthlyStats> getCreatorMonthlyStats() async {
+    try {
+      final raw = await _client.rpc<dynamic>('get_creator_monthly_stats');
+      if (raw is! Map) {
+        return const CreatorMonthlyStats(eligible: false);
+      }
+      final m = Map<String, dynamic>.from(raw);
+      final eligible = m['eligible'] == true;
+      final periodDays = (m['period_days'] as num?)?.toInt() ?? 30;
+      if (!eligible) {
+        return CreatorMonthlyStats(
+          eligible: false,
+          periodDays: periodDays,
+        );
+      }
+      return CreatorMonthlyStats(
+        eligible: true,
+        periodDays: periodDays,
+        profileViews: (m['profile_views'] as num?)?.toInt() ?? 0,
+        interactions: (m['interactions'] as num?)?.toInt() ?? 0,
+        newFollowers: (m['new_followers'] as num?)?.toInt() ?? 0,
+        sharedPosts: (m['shared_posts'] as num?)?.toInt() ?? 0,
+      );
+    } catch (_) {
+      return const CreatorMonthlyStats(eligible: false);
+    }
   }
 
   @override

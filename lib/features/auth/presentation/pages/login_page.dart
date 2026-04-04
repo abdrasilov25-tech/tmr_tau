@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
@@ -807,12 +808,39 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       currentIndex: themeNotifier.value,
       onSelect: (index) => themeNotifier.setIndex(index),
       onAddCustom: () async {
-        final picker = ImagePicker();
-        final xFile = await picker.pickImage(source: ImageSource.gallery);
-        if (xFile == null || !mounted) return;
-        final bytes = await xFile.readAsBytes();
-        if (!mounted) return;
-        await themeNotifier.setCustomThemeFromImageBytes(bytes);
+        try {
+          final picker = ImagePicker();
+          final xFile = await picker.pickImage(source: ImageSource.gallery);
+          if (xFile == null || !mounted) return;
+          final bytes = await xFile.readAsBytes();
+          if (!mounted) return;
+          await themeNotifier.setCustomThemeFromImageBytes(bytes);
+        } on PlatformException catch (e, st) {
+          debugPrint('LoginPage custom theme pick: $e\n$st');
+          if (!mounted) return;
+          final msg = (e.message ?? '').toLowerCase();
+          final denied = e.code == 'photo_access_denied' ||
+              e.code == 'camera_access_denied' ||
+              msg.contains('permission') ||
+              msg.contains('denied');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                denied
+                    ? 'Нет доступа к фото. Разрешите доступ в настройках устройства.'
+                    : 'Не удалось выбрать изображение.',
+              ),
+            ),
+          );
+        } catch (e, st) {
+          debugPrint('LoginPage custom theme pick: $e\n$st');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Не удалось выбрать изображение для темы.'),
+            ),
+          );
+        }
       },
     );
   }

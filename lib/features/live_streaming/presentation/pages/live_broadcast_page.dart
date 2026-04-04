@@ -143,10 +143,20 @@ class _LiveBroadcastPageState extends State<LiveBroadcastPage>
       _error = null;
     });
 
+    // Сначала убираем фокус с поля — иначе на части устройств последний ввод
+    // не попадает в TextEditingController до нажатия кнопки.
+    FocusManager.instance.primaryFocus?.unfocus();
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    if (!mounted) return;
+
+    final trimmedTitle = _titleCtrl.text.trim();
+    final titleForRoom =
+        trimmedTitle.isEmpty ? 'Прямой эфир' : trimmedTitle;
+
     LiveRoomEntity? created;
 
     try {
-      created = await repo.createLiveRoom(title: _titleCtrl.text);
+      created = await repo.createLiveRoom(title: titleForRoom);
 
       final engine = createAgoraRtcEngine();
       await engine.initialize(

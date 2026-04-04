@@ -13,6 +13,7 @@ import 'package:tmr_tau/features/notifications/presentation/notification_activit
 import 'package:tmr_tau/features/post/domain/entities/post_entity.dart';
 import 'package:tmr_tau/features/post/domain/entities/publication_feed_page_result.dart';
 import 'package:tmr_tau/features/post/domain/repositories/post_repository.dart';
+import 'package:tmr_tau/features/profile/domain/entities/creator_monthly_stats.dart';
 import 'package:tmr_tau/features/profile/domain/repositories/profile_repository.dart';
 import 'package:tmr_tau/features/stories/domain/entities/story_group_entity.dart';
 import 'package:tmr_tau/features/stories/domain/repositories/stories_repository.dart';
@@ -66,6 +67,10 @@ void main() {
 
     when(() => profileRepo.getFollowingUsers(any()))
         .thenAnswer((_) async => []);
+
+    when(() => profileRepo.getCreatorMonthlyStats()).thenAnswer(
+      (_) async => const CreatorMonthlyStats(eligible: false),
+    );
 
     when(() => authRepo.userFromCurrentSession()).thenReturn(null);
     when(() => authRepo.fetchUserProfileFromRemote(any()))

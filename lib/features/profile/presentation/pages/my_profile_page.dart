@@ -26,6 +26,7 @@ import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../widgets/account_switcher_sheet.dart';
 import '../widgets/account_switcher_token_sheet.dart';
+import '../widgets/creator_monthly_stats_sheet.dart';
 import '../../../auth/domain/entities/app_user.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../auth/presentation/pages/login_result.dart';
@@ -392,6 +393,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   telegramUsername: profile.telegramUsername,
                   websiteUrl: profile.websiteUrl,
                   totalReceivedPostLikes: profile.totalReceivedPostLikes,
+                  officialPageActive: profile.officialPageActive,
                 );
           _selfVerified = (profile?.isVerified ?? false) || verifiedFlag;
           _newsPosts = newsPosts;
@@ -912,6 +914,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
               onAvatarTap: _changeAvatar,
               updatingAvatar: _updatingAvatar,
               ownStoryGroup: ownGroup,
+              officialPageActive: _profile?.officialPageActive ?? false,
+              onOpenCreatorStats: () => showCreatorMonthlyStatsSheet(context),
               myStoryNote: _myStoryNote,
               onCreateNews: _openCreateNewsAndRefresh,
               onCreatePublication: () =>
@@ -1440,6 +1444,8 @@ class _ProfileContent extends StatelessWidget {
     required this.onAvatarTap,
     required this.updatingAvatar,
     required this.ownStoryGroup,
+    required this.officialPageActive,
+    required this.onOpenCreatorStats,
     required this.myStoryNote,
     required this.onCreateNews,
     required this.onCreatePublication,
@@ -1465,6 +1471,8 @@ class _ProfileContent extends StatelessWidget {
   final VoidCallback onAvatarTap;
   final bool updatingAvatar;
   final StoryGroupEntity? ownStoryGroup;
+  final bool officialPageActive;
+  final VoidCallback onOpenCreatorStats;
   final String myStoryNote;
   final Future<void> Function() onCreateNews;
   final Future<void> Function() onCreatePublication;
@@ -1569,24 +1577,50 @@ class _ProfileContent extends StatelessWidget {
                                       ],
                                     ),
                                     child: Container(
-                                      padding: const EdgeInsets.all(3),
+                                      padding: EdgeInsets.all(
+                                        officialPageActive ? 3.5 : 3,
+                                      ),
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        gradient: ownStoryGroup != null
+                                        gradient: officialPageActive
                                             ? const LinearGradient(
                                                 begin: Alignment.topLeft,
                                                 end: Alignment.bottomRight,
                                                 colors: [
-                                                  Color(0xFFFEDA75),
-                                                  Color(0xFFFA7E1E),
-                                                  Color(0xFFD62976),
-                                                  Color(0xFF962FBF),
-                                                  Color(0xFF4F5BD5),
+                                                  Color(0xFFFFF8E1),
+                                                  Color(0xFFFFE082),
+                                                  Color(0xFFFFC107),
+                                                  Color(0xFFFFA000),
+                                                  Color(0xFFFF8F00),
                                                 ],
                                               )
-                                            : null,
-                                        color: ownStoryGroup == null
+                                            : (ownStoryGroup != null
+                                                ? const LinearGradient(
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                    colors: [
+                                                      Color(0xFFFEDA75),
+                                                      Color(0xFFFA7E1E),
+                                                      Color(0xFFD62976),
+                                                      Color(0xFF962FBF),
+                                                      Color(0xFF4F5BD5),
+                                                    ],
+                                                  )
+                                                : null),
+                                        color: (!officialPageActive &&
+                                                ownStoryGroup == null)
                                             ? Colors.white
+                                            : null,
+                                        boxShadow: officialPageActive
+                                            ? [
+                                                BoxShadow(
+                                                  color: const Color(0xFFFFB300)
+                                                      .withValues(alpha: 0.35),
+                                                  blurRadius: 14,
+                                                  spreadRadius: 0,
+                                                  offset: const Offset(0, 4),
+                                                ),
+                                              ]
                                             : null,
                                       ),
                                       child: GestureDetector(
@@ -1724,6 +1758,115 @@ class _ProfileContent extends StatelessWidget {
                                         color: Colors.white,
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (officialPageActive) ...[
+                                const SizedBox(height: 12),
+                                Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () {
+                                      HapticFeedback.lightImpact();
+                                      onOpenCreatorStats();
+                                    },
+                                    borderRadius: BorderRadius.circular(18),
+                                    child: Ink(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(18),
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            const Color(0xFFFFF8E1)
+                                                .withValues(alpha: 0.9),
+                                            const Color(0xFFFFECB3)
+                                                .withValues(alpha: 0.65),
+                                          ],
+                                        ),
+                                        border: Border.all(
+                                          color: const Color(0xFFD4AF37)
+                                              .withValues(alpha: 0.55),
+                                          width: 1.2,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: const Color(0xFFFFB300)
+                                                .withValues(alpha: 0.18),
+                                            blurRadius: 12,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 12,
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.all(8),
+                                              decoration: BoxDecoration(
+                                                shape: BoxShape.circle,
+                                                gradient: LinearGradient(
+                                                  colors: [
+                                                    const Color(0xFFFFD54F),
+                                                    const Color(0xFFFFA000)
+                                                        .withValues(alpha: 0.9),
+                                                  ],
+                                                ),
+                                              ),
+                                              child: const Icon(
+                                                Icons.insights_rounded,
+                                                size: 22,
+                                                color: Color(0xFF3E2723),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 12),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment:
+                                                    CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    'Статистика профиля',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .titleSmall
+                                                        ?.copyWith(
+                                                          fontWeight:
+                                                              FontWeight.w800,
+                                                          color: const Color(
+                                                            0xFF3E2723,
+                                                          ),
+                                                        ),
+                                                  ),
+                                                  const SizedBox(height: 2),
+                                                  Text(
+                                                    'Просмотры, взаимодействия, подписчики и контент за 30 дней',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .bodySmall
+                                                        ?.copyWith(
+                                                          color: const Color(
+                                                            0xFF5D4037,
+                                                          ).withValues(
+                                                            alpha: 0.85,
+                                                          ),
+                                                          height: 1.25,
+                                                        ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            Icon(
+                                              Icons.chevron_right_rounded,
+                                              color: const Color(0xFF795548)
+                                                  .withValues(alpha: 0.7),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ),

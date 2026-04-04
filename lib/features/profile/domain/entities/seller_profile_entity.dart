@@ -17,6 +17,8 @@ class SellerProfileEntity extends Equatable {
     this.instagramUrl,
     this.telegramUsername,
     this.websiteUrl,
+    /// Подписка Official Page (IAP): витрина, график «Профессиональная» и т.п.
+    this.officialPageActive = false,
   });
 
   final String id;
@@ -32,6 +34,7 @@ class SellerProfileEntity extends Equatable {
   final String? instagramUrl;
   final String? telegramUsername;
   final String? websiteUrl;
+  final bool officialPageActive;
 
   SellerProfileEntity copyWith({
     String? id,
@@ -47,6 +50,7 @@ class SellerProfileEntity extends Equatable {
     String? instagramUrl,
     String? telegramUsername,
     String? websiteUrl,
+    bool? officialPageActive,
   }) {
     return SellerProfileEntity(
       id: id ?? this.id,
@@ -63,6 +67,7 @@ class SellerProfileEntity extends Equatable {
       instagramUrl: instagramUrl ?? this.instagramUrl,
       telegramUsername: telegramUsername ?? this.telegramUsername,
       websiteUrl: websiteUrl ?? this.websiteUrl,
+      officialPageActive: officialPageActive ?? this.officialPageActive,
     );
   }
 
@@ -81,5 +86,6 @@ class SellerProfileEntity extends Equatable {
         instagramUrl,
         telegramUsername,
         websiteUrl,
+        officialPageActive,
       ];
 }

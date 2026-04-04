@@ -1,3 +1,4 @@
+import '../entities/creator_monthly_stats.dart';
 import '../entities/seller_profile_entity.dart';
 
 abstract class ProfileRepository {
@@ -14,6 +15,9 @@ abstract class ProfileRepository {
   /// Users that are following the given user.
   Future<List<SellerProfileEntity>> getFollowersUsers(String followingId);
   Future<void> toggleFollow(String followerId, String followingId);
+  /// Статистика профиля за последние ~30 дней (только при активной подписке Official Page).
+  Future<CreatorMonthlyStats> getCreatorMonthlyStats();
+
   Future<void> updateProfile({
     required String userId,
     String? name,

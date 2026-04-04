@@ -2036,16 +2036,60 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   // ── Круглые видео ──────────────────────────────────────────
 
+  static String _videoContentTypeForPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.mov')) return 'video/quicktime';
+    if (lower.endsWith('.webm')) return 'video/webm';
+    if (lower.endsWith('.3gp')) return 'video/3gpp';
+    return 'video/mp4';
+  }
+
   Future<void> _pickAndSendRoundVideo() async {
+    final uid = _me();
+    if (uid == null || !mounted) return;
+
     final camStatus = await Permission.camera.request();
     final micStatus = await Permission.microphone.request();
-    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) return;
+    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Нужны разрешения камеры и микрофона для видеокружка'),
+          ),
+        );
+      }
+      return;
+    }
 
-    final picker = ImagePicker();
-    final xFile = await picker.pickVideo(
-      source: ImageSource.camera,
-      maxDuration: const Duration(seconds: 60),
-    );
+    XFile? xFile;
+    try {
+      final picker = ImagePicker();
+      xFile = await picker.pickVideo(
+        source: ImageSource.camera,
+        maxDuration: const Duration(seconds: 60),
+      );
+    } on PlatformException catch (e, st) {
+      debugPrint('pickVideo camera: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.message?.isNotEmpty == true
+                ? 'Камера: ${e.message}'
+                : 'Не удалось открыть камеру для записи',
+          ),
+        ),
+      );
+      return;
+    } catch (e, st) {
+      debugPrint('pickVideo: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось записать видео: $e')),
+      );
+      return;
+    }
+
     if (xFile == null || !mounted) return;
 
     final file = File(xFile.path);
@@ -2057,21 +2101,28 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       await ctrl.dispose();
     } catch (_) {}
 
+    final ext = () {
+      final p = xFile!.path;
+      final i = p.lastIndexOf('.');
+      if (i <= 0 || i >= p.length - 1) return 'mp4';
+      return p.substring(i + 1).toLowerCase();
+    }();
+    final mime = _videoContentTypeForPath(xFile.path);
+
     setState(() => _sending = true);
     try {
       final bytes = await file.readAsBytes();
       final uploadPath =
-          '${_me()}/${DateTime.now().millisecondsSinceEpoch}.mp4';
+          '$uid/${DateTime.now().millisecondsSinceEpoch}.$ext';
       await _client.storage.from('chat_media').uploadBinary(
         uploadPath,
         bytes,
-        fileOptions:
-            const FileOptions(contentType: 'video/mp4', upsert: false),
+        fileOptions: FileOptions(contentType: mime, upsert: false),
       );
       final url =
           _client.storage.from('chat_media').getPublicUrl(uploadPath);
       await _client.from(SupabaseConstants.messagesTable).insert({
-        'sender_id': _me(),
+        'sender_id': uid,
         'receiver_id': widget.peerId,
         'text': '',
         'message_type': 'video_circle',
@@ -2120,6 +2171,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         onCamera: () {
           Navigator.pop(sheetCtx);
           _pickAndSendPhoto(ImageSource.camera);
+        },
+        onVoice: () {
+          Navigator.pop(sheetCtx);
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Удерживайте кнопку микрофона справа от поля ввода, чтобы записать голосовое.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        },
+        onRoundVideo: () {
+          Navigator.pop(sheetCtx);
+          unawaited(_pickAndSendRoundVideo());
         },
         onLocation: () {
           Navigator.pop(sheetCtx);
@@ -2863,10 +2930,12 @@ class _VoiceMicButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
-    return GestureDetector(
-      onLongPressStart: (_) => onHoldStart(),
-      onLongPressEnd: (_) => onHoldEnd(),
-      onLongPressCancel: onHoldCancel,
+    // Удержание пальцем (как в мессенджерах), без задержки long-press.
+    return Listener(
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) => onHoldStart(),
+      onPointerUp: (_) => onHoldEnd(),
+      onPointerCancel: (_) => onHoldCancel(),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         width: isRecording ? 90 : 48,
@@ -3241,6 +3310,8 @@ class _AttachmentSheet extends StatelessWidget {
   const _AttachmentSheet({
     required this.onPhoto,
     required this.onCamera,
+    required this.onVoice,
+    required this.onRoundVideo,
     required this.onLocation,
     required this.onContact,
     required this.onDocument,
@@ -3250,6 +3321,8 @@ class _AttachmentSheet extends StatelessWidget {
 
   final VoidCallback onPhoto;
   final VoidCallback onCamera;
+  final VoidCallback onVoice;
+  final VoidCallback onRoundVideo;
   final VoidCallback onLocation;
   final VoidCallback onContact;
   final VoidCallback onDocument;
@@ -3261,6 +3334,8 @@ class _AttachmentSheet extends StatelessWidget {
     final items = [
       _AttachItem(Icons.photo_library_rounded, 'Фото', const Color(0xFF8B5CF6), onPhoto),
       _AttachItem(Icons.camera_alt_rounded, 'Камера', const Color(0xFFEC4899), onCamera),
+      _AttachItem(Icons.mic_rounded, 'Голосовое', const Color(0xFF6366F1), onVoice),
+      _AttachItem(Icons.videocam_rounded, 'Видео\nкружок', const Color(0xFFF97316), onRoundVideo),
       _AttachItem(Icons.location_on_rounded, 'Местополо-жение', const Color(0xFF10B981), onLocation),
       _AttachItem(Icons.person_rounded, 'Контакт', const Color(0xFF3B82F6), onContact),
       _AttachItem(Icons.insert_drive_file_rounded, 'Документ', const Color(0xFFF59E0B), onDocument),
@@ -3499,21 +3574,8 @@ class _EmojiPanelState extends State<_EmojiPanel>
                   ],
                 ),
                 // ── GIF ──
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('🎬', style: TextStyle(fontSize: 48)),
-                      const SizedBox(height: 12),
-                      Text(
-                        'GIF — скоро',
-                        style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 15),
-                      ),
-                    ],
-                  ),
-                ),
+                _GifCatalogTab(onGifSelected: widget.onGifSelected),
+
                 // ── Стикеры ──
                 Center(
                   child: Column(
@@ -3535,6 +3597,203 @@ class _EmojiPanelState extends State<_EmojiPanel>
           ),
         ],
       ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// _GifCatalogTab — каталог GIF как в Telegram
+// ══════════════════════════════════════════════════════════════
+
+class _GifCatalogTab extends StatefulWidget {
+  const _GifCatalogTab({required this.onGifSelected});
+  final ValueChanged<String> onGifSelected;
+
+  @override
+  State<_GifCatalogTab> createState() => _GifCatalogTabState();
+}
+
+class _GifCatalogTabState extends State<_GifCatalogTab> {
+  final _searchController = TextEditingController();
+  String _query = '';
+  int _categoryIndex = 0;
+
+  static const _categories = [
+    'Реакции', 'Привет', 'Смех', 'Любовь', 'Грусть', 'Огонь',
+  ];
+
+  static const _catalog = <String, List<Map<String, String>>>{
+    'Реакции': [
+      {'url': 'https://media.giphy.com/media/3oz8xLd9DJq2l2VFtu/giphy.gif', 'label': 'Танец'},
+      {'url': 'https://media.giphy.com/media/xUA7bdpLxQhsSQkFug/giphy.gif', 'label': 'Да!'},
+      {'url': 'https://media.giphy.com/media/3og0IFOzC2UFCVThUQ/giphy.gif', 'label': 'Нет'},
+      {'url': 'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif', 'label': 'ОМГ'},
+      {'url': 'https://media.giphy.com/media/26BRrSl9M5N8D5ygM/giphy.gif', 'label': 'Хм'},
+      {'url': 'https://media.giphy.com/media/3ofT5sMBZImpHzH1FO/giphy.gif', 'label': 'Ура'},
+    ],
+    'Привет': [
+      {'url': 'https://media.giphy.com/media/xT9IgG50Lg7rusyxxB/giphy.gif', 'label': 'Привет'},
+      {'url': 'https://media.giphy.com/media/ASd0Ukj0y3qMM/giphy.gif', 'label': 'Пока'},
+      {'url': 'https://media.giphy.com/media/IThjAlJnD9WNO/giphy.gif', 'label': 'Вау'},
+      {'url': 'https://media.giphy.com/media/l0MYGb1LuZ3n7dRnO/giphy.gif', 'label': 'Йоу'},
+    ],
+    'Смех': [
+      {'url': 'https://media.giphy.com/media/GRkmel8wEIoTe/giphy.gif', 'label': 'Смех'},
+      {'url': 'https://media.giphy.com/media/5C0a8IItAWRebylDRX/giphy.gif', 'label': 'Ха-ха'},
+      {'url': 'https://media.giphy.com/media/l3diU7InEOZLELEco/giphy.gif', 'label': 'LOL'},
+      {'url': 'https://media.giphy.com/media/ZqlvCTNHpqrio/giphy.gif', 'label': 'Кека'},
+    ],
+    'Любовь': [
+      {'url': 'https://media.giphy.com/media/26BRrSl9M5N8D5ygM/giphy.gif', 'label': 'Сердце'},
+      {'url': 'https://media.giphy.com/media/l0MYGb1LuZ3n7dRnO/giphy.gif', 'label': 'Обнимашки'},
+      {'url': 'https://media.giphy.com/media/26BRv0ThflsHhWp9O/giphy.gif', 'label': 'Люблю'},
+      {'url': 'https://media.giphy.com/media/3oz8xAFtqoOUUrsh7W/giphy.gif', 'label': 'Kiss'},
+    ],
+    'Грусть': [
+      {'url': 'https://media.giphy.com/media/3d3woRW2bSbDjBy2HD/giphy.gif', 'label': 'Плач'},
+      {'url': 'https://media.giphy.com/media/OPU6wzx8JrHna/giphy.gif', 'label': 'Ой'},
+      {'url': 'https://media.giphy.com/media/2vA33ikUb0Qz6/giphy.gif', 'label': 'Грустно'},
+    ],
+    'Огонь': [
+      {'url': 'https://media.giphy.com/media/l1J9FEYgASQxjRLLO/giphy.gif', 'label': 'Огонь'},
+      {'url': 'https://media.giphy.com/media/xUA7bdwsRuAstb8L7q/giphy.gif', 'label': 'Взрыв'},
+      {'url': 'https://media.giphy.com/media/3oriNZoNvn73MZaFYk/giphy.gif', 'label': 'Топ'},
+      {'url': 'https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif', 'label': 'Круто'},
+    ],
+  };
+
+  List<Map<String, String>> get _currentGifs {
+    final cat = _categories[_categoryIndex];
+    final all = _catalog[cat] ?? [];
+    if (_query.isEmpty) return all;
+    final q = _query.toLowerCase();
+    return all.where((g) => (g['label'] ?? '').toLowerCase().contains(q)).toList();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gifs = _currentGifs;
+    return Column(
+      children: [
+        // Поиск
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
+          child: TextField(
+            controller: _searchController,
+            onChanged: (v) => setState(() => _query = v),
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Поиск GIF...',
+              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+              prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey.shade400),
+              filled: true,
+              fillColor: Colors.grey.shade100,
+              contentPadding: const EdgeInsets.symmetric(vertical: 6),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(20),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+        ),
+        // Категории
+        SizedBox(
+          height: 36,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            itemCount: _categories.length,
+            itemBuilder: (_, i) {
+              final selected = i == _categoryIndex;
+              return GestureDetector(
+                onTap: () => setState(() => _categoryIndex = i),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  margin: const EdgeInsets.only(right: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.grey.shade300,
+                    ),
+                  ),
+                  child: Text(
+                    _categories[i],
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected
+                          ? Theme.of(context).colorScheme.primary
+                          : Colors.grey.shade600,
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 4),
+        // GIF сетка
+        Expanded(
+          child: gifs.isEmpty
+              ? Center(
+                  child: Text(
+                    'Ничего не найдено',
+                    style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                  ),
+                )
+              : GridView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 4,
+                    mainAxisSpacing: 4,
+                    childAspectRatio: 1,
+                  ),
+                  itemCount: gifs.length,
+                  itemBuilder: (_, i) {
+                    final gif = gifs[i];
+                    final url = gif['url']!;
+                    return GestureDetector(
+                      onTap: () => widget.onGifSelected(url),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: CachedNetworkImage(
+                          imageUrl: url,
+                          fit: BoxFit.cover,
+                          placeholder: (context, url) => Container(
+                            color: Colors.grey.shade100,
+                            child: const Center(
+                              child: SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Container(
+                            color: Colors.grey.shade200,
+                            child: Icon(Icons.gif_box_outlined,
+                                color: Colors.grey.shade400),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 }

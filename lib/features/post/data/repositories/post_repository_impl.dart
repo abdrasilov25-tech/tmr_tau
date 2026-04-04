@@ -14,7 +14,7 @@ class PostRepositoryImpl implements PostRepository {
   PostRepositoryImpl(this._client);
   final SupabaseClient _client;
 
-  static const String _postSelect = '*, users!user_id(name, avatar)';
+  static const String _postSelect = '*, users!user_id(name, avatar, official_page_active)';
 
   @override
   Future<List<PostEntity>> getFeedPosts({
@@ -104,6 +104,7 @@ class PostRepositoryImpl implements PostRepository {
             pollOptions: p.pollOptions,
             pollVoteCounts: p.pollVoteCounts,
             myPollVoteIndex: p.myPollVoteIndex,
+            authorOfficialPageActive: p.authorOfficialPageActive,
           ),
         )
         .toList();
@@ -490,7 +491,7 @@ class PostRepositoryImpl implements PostRepository {
 
     var query = _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('kind', 'news');
     if (cityFilter != null && cityFilter.isNotEmpty) {
       query = query.eq('city', cityFilter);
@@ -588,6 +589,7 @@ class PostRepositoryImpl implements PostRepository {
             pollOptions: p.pollOptions,
             pollVoteCounts: p.pollVoteCounts,
             myPollVoteIndex: p.myPollVoteIndex,
+            authorOfficialPageActive: p.authorOfficialPageActive,
           ),
         )
         .toList(growable: false);
@@ -758,7 +760,7 @@ class PostRepositoryImpl implements PostRepository {
   Future<List<PostEntity>> getPostsByUser(String userId, {String? currentUserId}) async {
     var res = await _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('user_id', userId)
         .order('created_at', ascending: false);
     var list =
@@ -814,6 +816,7 @@ class PostRepositoryImpl implements PostRepository {
                 distanceKm: p.distanceKm,
                 isPromoted: p.isPromoted,
                 promotedUntil: p.promotedUntil,
+                authorOfficialPageActive: p.authorOfficialPageActive,
               ))
           .toList();
     }
@@ -829,7 +832,8 @@ class PostRepositoryImpl implements PostRepository {
     final row = Map<String, dynamic>.from(json)
       ..remove('users')
       ..['user_name'] = userMap?['name']
-      ..['user_avatar'] = userMap?['avatar'];
+      ..['user_avatar'] = userMap?['avatar']
+      ..['author_official_page_active'] = userMap?['official_page_active'] ?? false;
     return PostModel.fromJson(row);
   }
 
@@ -897,6 +901,28 @@ class PostRepositoryImpl implements PostRepository {
   }
 
   @override
+  Future<List<({String userId, String name, String? avatarUrl})>> fetchPollVoters({
+    required String postId,
+    required int optionIndex,
+  }) async {
+    final rows = await _client
+        .from('post_poll_votes')
+        .select('user_id, users!user_id(name, avatar)')
+        .eq('post_id', postId)
+        .eq('option_index', optionIndex)
+        .limit(100);
+    return (rows as List).map((raw) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      final u = m['users'] is Map ? Map<String, dynamic>.from(m['users'] as Map) : null;
+      return (
+        userId: m['user_id'] as String,
+        name: (u?['name'] as String?) ?? 'Пользователь',
+        avatarUrl: u?['avatar'] as String?,
+      );
+    }).toList();
+  }
+
+  @override
   Future<PostEntity> createPost({
     required String userId,
     String imageUrl = '',
@@ -959,7 +985,7 @@ class PostRepositoryImpl implements PostRepository {
     final res = await _client
         .from(SupabaseConstants.postsTable)
         .insert(data)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .single();
     final created = _mapPost(Map<String, dynamic>.from(res as Map));
 
@@ -974,7 +1000,7 @@ class PostRepositoryImpl implements PostRepository {
 
     final verify = await _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('id', created.id)
         .single();
 
@@ -1097,7 +1123,7 @@ class PostRepositoryImpl implements PostRepository {
 
     final res = await _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('kind', 'publication')
         .inFilter('id', postIds);
     final list = (res as List)
@@ -1159,7 +1185,7 @@ class PostRepositoryImpl implements PostRepository {
 
     final res = await _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('kind', 'publication')
         .inFilter('id', postIds);
     final list = (res as List)
@@ -1205,7 +1231,7 @@ class PostRepositoryImpl implements PostRepository {
   Future<List<PostCommentEntity>> getComments(String postId) async {
     final res = await _client
         .from(SupabaseConstants.postCommentsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('post_id', postId)
         .order('created_at', ascending: true);
     final list = (res as List)
@@ -1292,26 +1318,26 @@ class PostRepositoryImpl implements PostRepository {
         ? (hasQuery
             ? _client
                 .from(SupabaseConstants.postsTable)
-                .select('*, users!user_id(name, avatar)')
+                .select('*, users!user_id(name, avatar, official_page_active)')
                 .ilike('caption', '%$normalizedQuery%')
                 .order('created_at', ascending: false)
                 .limit(limit)
             : _client
                 .from(SupabaseConstants.postsTable)
-                .select('*, users!user_id(name, avatar)')
+                .select('*, users!user_id(name, avatar, official_page_active)')
                 .order('created_at', ascending: false)
                 .limit(limit))
         : (hasQuery
             ? _client
                 .from(SupabaseConstants.postsTable)
-                .select('*, users!user_id(name, avatar)')
+                .select('*, users!user_id(name, avatar, official_page_active)')
                 .ilike('caption', '%$normalizedQuery%')
                 .lt('created_at', lastCreatedAt.toIso8601String())
                 .order('created_at', ascending: false)
                 .limit(limit)
             : _client
                 .from(SupabaseConstants.postsTable)
-                .select('*, users!user_id(name, avatar)')
+                .select('*, users!user_id(name, avatar, official_page_active)')
                 .lt('created_at', lastCreatedAt.toIso8601String())
                 .order('created_at', ascending: false)
                 .limit(limit)));
@@ -1391,7 +1417,7 @@ class PostRepositoryImpl implements PostRepository {
     try {
       dynamic qb = _client
           .from(SupabaseConstants.postsTable)
-          .select('*, users!user_id(name, avatar)')
+          .select('*, users!user_id(name, avatar, official_page_active)')
           .eq('kind', 'publication');
       if (videoPublicationsOnly) {
         qb = qb.not('video_url', 'is', null).neq('video_url', '');
@@ -1473,7 +1499,7 @@ class PostRepositoryImpl implements PostRepository {
   Future<PostEntity?> getPostById(String postId, {String? currentUserId}) async {
     final res = await _client
         .from(SupabaseConstants.postsTable)
-        .select('*, users!user_id(name, avatar)')
+        .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('id', postId)
         .maybeSingle();
     if (res == null) return null;
@@ -1523,6 +1549,7 @@ class PostRepositoryImpl implements PostRepository {
         distanceKm: post.distanceKm,
         isPromoted: post.isPromoted,
         promotedUntil: post.promotedUntil,
+        authorOfficialPageActive: post.authorOfficialPageActive,
       );
     }
     return post;

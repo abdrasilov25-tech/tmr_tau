@@ -51,6 +51,10 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       isFollowingByMe: !current.profile.isFollowingByMe,
       products: current.profile.products,
       isVerified: current.profile.isVerified,
+      instagramUrl: current.profile.instagramUrl,
+      telegramUsername: current.profile.telegramUsername,
+      websiteUrl: current.profile.websiteUrl,
+      officialPageActive: current.profile.officialPageActive,
     );
     if (!isClosed) emit(ProfileSuccess(updated));
 

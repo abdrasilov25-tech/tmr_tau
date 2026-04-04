@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:in_app_purchase/in_app_purchase.dart';
+import 'package:in_app_purchase_storekit/src/store_kit_2_wrappers/sk2_transaction_wrapper.dart'; // ignore: implementation_imports
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/entities/qarmet_promotion_history_item.dart';
@@ -505,9 +506,7 @@ class PaymentService {
           try {
             await _verifyPurchase(purchase, profileCosmeticsLifetimeProductId);
             await _setPremiumIapLocalUnlocked(true, userId: auth.id);
-            if (purchase.pendingCompletePurchase) {
-              await _iap.completePurchase(purchase);
-            }
+            await _completeIapPurchase(purchase);
           } catch (e, st) {
             debugPrint('IAP restore processing error: $e\n$st');
           }
@@ -1098,6 +1097,98 @@ class PaymentService {
         .eq('id', auth.id);
   }
 
+  /// StoreKit 2: [InAppPurchase.completePurchase] делает `int.parse(purchase.purchaseID!)`.
+  /// Если [PurchaseDetails.purchaseID] null (краевые случаи в плагине), приложение падает
+  /// с «Null check operator used on a null value». Здесь — безопасное завершение + fallback.
+  Future<void> _completeIapPurchase(PurchaseDetails purchase) async {
+    if (!purchase.pendingCompletePurchase) return;
+
+    final pid = purchase.purchaseID;
+    if (pid != null && pid.isNotEmpty) {
+      await _iap.completePurchase(purchase);
+      return;
+    }
+
+    if (kIsWeb) return;
+    if (defaultTargetPlatform != TargetPlatform.iOS &&
+        defaultTargetPlatform != TargetPlatform.macOS) {
+      return;
+    }
+
+    final finishId = _tryExtractSk2FinishTransactionId(purchase);
+    if (finishId != null && finishId > 0) {
+      try {
+        await SK2Transaction.finish(finishId);
+        return;
+      } catch (e, st) {
+        debugPrint('IAP SK2Transaction.finish fallback failed: $e\n$st');
+      }
+    }
+
+    debugPrint(
+      'IAP: cannot finish transaction — missing purchaseID; '
+      'product=${purchase.productID} platform=${defaultTargetPlatform.name}',
+    );
+  }
+
+  /// Пытается извлечь целочисленный id транзакции SK2 для [SK2Transaction.finish].
+  int? _tryExtractSk2FinishTransactionId(PurchaseDetails purchase) {
+    int? fromJsonValue(Object? raw) {
+      if (raw is int) return raw;
+      if (raw is num) return raw.toInt();
+      if (raw is String) return int.tryParse(raw);
+      return null;
+    }
+
+    int? fromMap(Map<String, dynamic> m) {
+      const keys = <String>[
+        'transactionId',
+        'originalTransactionId',
+        'transaction_id',
+        'original_transaction_id',
+      ];
+      for (final k in keys) {
+        final v = fromJsonValue(m[k]);
+        if (v != null && v > 0) return v;
+      }
+      return null;
+    }
+
+    int? tryDecodeJsonObject(String source) {
+      if (source.isEmpty) return null;
+      try {
+        final decoded = jsonDecode(source);
+        if (decoded is Map) {
+          return fromMap(Map<String, dynamic>.from(decoded));
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    int? tryDecodeJwsPayload(String jws) {
+      final parts = jws.split('.');
+      if (parts.length < 2) return null;
+      try {
+        var payload = parts[1];
+        final pad = payload.length % 4;
+        if (pad == 2) {
+          payload += '==';
+        } else if (pad == 3) {
+          payload += '=';
+        }
+        final bytes = base64Url.decode(payload);
+        final decoded = jsonDecode(utf8.decode(bytes));
+        if (decoded is Map) {
+          return fromMap(Map<String, dynamic>.from(decoded));
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    return tryDecodeJsonObject(purchase.verificationData.localVerificationData) ??
+        tryDecodeJwsPayload(purchase.verificationData.serverVerificationData);
+  }
+
   Future<PaymentResult> _purchase({
     required String storeProductId,
     required Future<void> Function(PurchaseDetails) onVerified,
@@ -1162,9 +1253,7 @@ class PaymentService {
                   'IAP purchase stream: ${purchase.status.name} -> verify',
                 );
                 await onVerified(purchase);
-                if (purchase.pendingCompletePurchase) {
-                  await _iap.completePurchase(purchase);
-                }
+                await _completeIapPurchase(purchase);
                 if (!completer.isCompleted) {
                   completer.complete(
                     const PaymentResult(status: PaymentResultStatus.success),

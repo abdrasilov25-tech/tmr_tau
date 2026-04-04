@@ -36,11 +36,14 @@ serve(async (req) => {
     if (!productId || !verificationData || !source || !platform) {
       return json({ error: "Invalid purchase payload" }, 400);
     }
+    // Должны совпадать с PaymentService (Flutter) и App Store Connect / StoreKit config.
     const officialPageProductIds = new Set([
       "com.bazar.tmrtau.subscription.monthly",
+      "com.example.tmrTau.subscription.monthly", // текущий bundle/storekit в репо
     ]);
     const cosmeticsForeverProductIds = new Set([
       "com.bazar.tmrtau.premium",
+      "com.example.tmrTau.premium", // текущий PaymentService.profileCosmeticsLifetimeProductId
       "com.yourapp.premium", // legacy
     ]);
     const isSupportedProduct =
@@ -50,6 +53,7 @@ serve(async (req) => {
       productId === "qarmet_10" ||
       productId === "qarmet_20" ||
       productId === "qarmet_30" ||
+      productId === "qarmet_40" ||
       cosmeticsForeverProductIds.has(productId) ||
       officialPageProductIds.has(productId);
     if (!isSupportedProduct) {

@@ -465,29 +465,75 @@ class _GroupChatPageState extends State<GroupChatPage> {
     }
   }
 
+  static String _videoMimeFromPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.mov')) return 'video/quicktime';
+    if (lower.endsWith('.webm')) return 'video/webm';
+    if (lower.endsWith('.3gp')) return 'video/3gpp';
+    return 'video/mp4';
+  }
+
   Future<void> _pickAndSendRoundVideo() async {
     final senderId = _currentUserId;
     if (senderId == null || _sending) return;
     final chatStorage = context.read<ChatListStorage>();
     final camStatus = await Permission.camera.request();
     final micStatus = await Permission.microphone.request();
-    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) return;
-    final picker = ImagePicker();
-    final xFile = await picker.pickVideo(
-      source: ImageSource.camera,
-      maxDuration: const Duration(seconds: 60),
-    );
+    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Нужны разрешения камеры и микрофона для видеокружка'),
+          ),
+        );
+      }
+      return;
+    }
+
+    XFile? xFile;
+    try {
+      final picker = ImagePicker();
+      xFile = await picker.pickVideo(
+        source: ImageSource.camera,
+        maxDuration: const Duration(seconds: 60),
+      );
+    } on PlatformException catch (e, st) {
+      debugPrint('group pickVideo: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.message?.isNotEmpty == true
+                ? 'Камера: ${e.message}'
+                : 'Не удалось открыть камеру для записи',
+          ),
+        ),
+      );
+      return;
+    } catch (e, st) {
+      debugPrint('group pickVideo: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось записать видео: $e')),
+      );
+      return;
+    }
+
     if (xFile == null || !mounted) return;
     setState(() => _sending = true);
     try {
       final file = File(xFile.path);
-      final ext = xFile.path.split('.').last;
+      final dot = xFile.path.lastIndexOf('.');
+      final ext = (dot > 0 && dot < xFile.path.length - 1)
+          ? xFile.path.substring(dot + 1).toLowerCase()
+          : 'mp4';
+      final mime = _videoMimeFromPath(xFile.path);
       final storagePath =
           'group_messages/${widget.groupId}/$senderId/${DateTime.now().millisecondsSinceEpoch}.$ext';
       await _client.storage.from('messages').upload(
             storagePath,
             file,
-            fileOptions: const FileOptions(contentType: 'video/mp4', upsert: false),
+            fileOptions: FileOptions(contentType: mime, upsert: false),
           );
       final url = _client.storage.from('messages').getPublicUrl(storagePath);
       await _client.from(SupabaseConstants.chatGroupMessagesTable).insert({
@@ -855,9 +901,20 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             _sending || _cityPostingBlocked ? null : _pickAndSendRoundVideo,
                         icon: const Icon(Icons.videocam_rounded),
                       ),
-                      GestureDetector(
-                        onLongPressStart: (_) => _startVoiceRecord(),
-                        onLongPressEnd: (_) => _stopAndSendVoice(),
+                      Listener(
+                        behavior: HitTestBehavior.opaque,
+                        onPointerDown: (_) {
+                          if (_sending || _cityPostingBlocked) return;
+                          unawaited(_startVoiceRecord());
+                        },
+                        onPointerUp: (_) {
+                          if (_sending || _cityPostingBlocked) return;
+                          unawaited(_stopAndSendVoice());
+                        },
+                        onPointerCancel: (_) {
+                          if (_sending || _cityPostingBlocked) return;
+                          unawaited(_cancelVoiceRecord());
+                        },
                         child: CircleAvatar(
                           radius: 20,
                           backgroundColor:

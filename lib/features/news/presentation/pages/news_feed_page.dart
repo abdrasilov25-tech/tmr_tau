@@ -11,6 +11,7 @@ import 'package:video_player/video_player.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/widgets/verified_badge.dart';
 import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -887,6 +888,7 @@ class _NewsPostCard extends StatelessWidget {
                 commentsCount: post.commentsCount,
                 isAnonymous: anon,
                 openProfile: !anon,
+                isOfficialPage: !anon && post.authorOfficialPageActive,
               ),
               const SizedBox(width: 12),
               // Right column: content
@@ -918,6 +920,10 @@ class _NewsPostCard extends StatelessWidget {
                                     ),
                                   ),
                                 ),
+                                if (!anon && post.authorOfficialPageActive) ...[
+                                  const SizedBox(width: 4),
+                                  const VerifiedBadge(size: 16),
+                                ],
                                 if (post.isPromoted) ...[
                                   const SizedBox(width: 6),
                                   Container(
@@ -1089,6 +1095,7 @@ class _AvatarColumn extends StatelessWidget {
     required this.commentsCount,
     this.isAnonymous = false,
     this.openProfile = true,
+    this.isOfficialPage = false,
   });
 
   final String? avatarUrl;
@@ -1097,10 +1104,13 @@ class _AvatarColumn extends StatelessWidget {
   final int commentsCount;
   final bool isAnonymous;
   final bool openProfile;
+  final bool isOfficialPage;
+
+  static const _goldGradient = [Color(0xFFFFD700), Color(0xFFFFA500), Color(0xFFFFD700)];
 
   @override
   Widget build(BuildContext context) {
-    final avatar = isAnonymous
+    Widget avatar = isAnonymous
         ? CircleAvatar(
             radius: 20,
             backgroundColor: Colors.grey.shade300,
@@ -1115,6 +1125,21 @@ class _AvatarColumn extends StatelessWidget {
             radius: 20,
             fallbackText: userName,
           );
+
+    if (isOfficialPage && !isAnonymous) {
+      avatar = Container(
+        padding: const EdgeInsets.all(2.5),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            colors: _goldGradient,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: avatar,
+      );
+    }
 
     return Column(
       children: [
@@ -1151,6 +1176,21 @@ class _NewsPollBlock extends StatelessWidget {
   final PostEntity post;
   final void Function(int optionIndex)? onVote;
 
+  void _showVoters(BuildContext context, int optionIndex, String optionText) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _PollVotersSheet(
+        postId: post.id,
+        optionIndex: optionIndex,
+        optionText: optionText,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final q = post.pollQuestion ?? '';
@@ -1161,6 +1201,7 @@ class _NewsPollBlock extends StatelessWidget {
         : List<int>.filled(opts.length, 0, growable: false);
     final total = counts.fold<int>(0, (a, b) => a + b);
     final my = post.myPollVoteIndex;
+    final hasVoted = my != null;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -1229,12 +1270,29 @@ class _NewsPollBlock extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            '${counts[i]} голосов · ${total == 0 ? 0 : ((counts[i] / total) * 100).round()}%',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              color: Colors.grey.shade600,
-                              fontWeight: FontWeight.w500,
+                          GestureDetector(
+                            onTap: hasVoted && counts[i] > 0
+                                ? () => _showVoters(context, i, opts[i])
+                                : null,
+                            child: Row(
+                              children: [
+                                Text(
+                                  '${counts[i]} голосов · ${total == 0 ? 0 : ((counts[i] / total) * 100).round()}%',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    color: Colors.grey.shade600,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                if (hasVoted && counts[i] > 0) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    Icons.people_outline,
+                                    size: 13,
+                                    color: Colors.blue.shade400,
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ],
@@ -1252,6 +1310,158 @@ class _NewsPollBlock extends StatelessWidget {
                 color: Colors.grey.shade600,
               ),
             ),
+          if (hasVoted && total > 0)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Нажми на счётчик голосов чтобы увидеть кто голосовал',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  color: Colors.grey.shade400,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Шит с проголосовавшими за вариант опроса
+// ─────────────────────────────────────────────
+
+class _PollVotersSheet extends StatefulWidget {
+  const _PollVotersSheet({
+    required this.postId,
+    required this.optionIndex,
+    required this.optionText,
+  });
+
+  final String postId;
+  final int optionIndex;
+  final String optionText;
+
+  @override
+  State<_PollVotersSheet> createState() => _PollVotersSheetState();
+}
+
+class _PollVotersSheetState extends State<_PollVotersSheet> {
+  List<({String userId, String name, String? avatarUrl})>? _voters;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final repo = context.read<PostRepository>();
+      final result = await repo.fetchPollVoters(
+        postId: widget.postId,
+        optionIndex: widget.optionIndex,
+      );
+      if (mounted) setState(() => _voters = result);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString());
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final voters = _voters;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.5,
+      minChildSize: 0.3,
+      maxChildSize: 0.85,
+      expand: false,
+      builder: (_, sc) => Column(
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Голосовали за:',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '"${widget.optionText}"',
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF0A0A0A),
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+          Expanded(
+            child: _error != null
+                ? Center(
+                    child: Text(
+                      'Ошибка загрузки',
+                      style: TextStyle(color: Colors.grey.shade500),
+                    ),
+                  )
+                : voters == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : voters.isEmpty
+                        ? Center(
+                            child: Text(
+                              'Никто ещё не голосовал',
+                              style: TextStyle(color: Colors.grey.shade500),
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: sc,
+                            itemCount: voters.length,
+                            itemBuilder: (_, i) {
+                              final v = voters[i];
+                              return ListTile(
+                                leading: CachedAvatar(
+                                  imageUrl: v.avatarUrl,
+                                  radius: 18,
+                                  fallbackText: v.name,
+                                ),
+                                title: Text(
+                                  v.name,
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                onTap: () {
+                                  Navigator.pop(context);
+                                  context.push('/profile/${v.userId}');
+                                },
+                              );
+                            },
+                          ),
+          ),
         ],
       ),
     );
