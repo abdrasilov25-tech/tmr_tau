@@ -16,6 +16,17 @@ class LiveBattleRepositoryImpl implements LiveBattleRepository {
   final SupabaseClient _client;
 
   @override
+  Future<LiveBattle?> fetchBattle(String battleId) async {
+    final row = await _client
+        .from(SupabaseConstants.liveBattlesTable)
+        .select()
+        .eq('id', battleId)
+        .maybeSingle();
+    if (row == null) return null;
+    return _mapBattle(Map<String, dynamic>.from(row as Map));
+  }
+
+  @override
   Future<LiveBattle> startBattle(String userA, String userB) async {
     final id = await _client.rpc<String>(
       'start_live_battle',
@@ -147,7 +158,9 @@ class LiveBattleRepositoryImpl implements LiveBattleRepository {
             if ((row['event_type'] ?? '') != 'gift') continue;
             final sender = (row['sender_id'] ?? '').toString();
             if (sender.isEmpty) continue;
-            final amount = (row['gift_price'] as num?)?.toInt() ?? 0;
+            final amount = (row['points_awarded'] as num?)?.toInt() ??
+                (row['gift_price'] as num?)?.toInt() ??
+                0;
             bySender.update(sender, (v) => v + amount, ifAbsent: () => amount);
           }
           final top = bySender.entries.toList()

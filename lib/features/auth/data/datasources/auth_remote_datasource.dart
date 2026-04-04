@@ -5,7 +5,12 @@ import '../models/user_model.dart';
 
 abstract class AuthRemoteDataSource {
   Future<void> signInWithEmail(String email, String password);
-  Future<void> signUpWithEmail(String email, String password, String name);
+  Future<AuthResponse> signUpWithEmail(
+    String email,
+    String password,
+    String name, {
+    String? emailRedirectTo,
+  });
   Future<void> signOut();
   Future<AppUser?> fetchUserProfile(String uid);
 }
@@ -20,10 +25,16 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   }
 
   @override
-  Future<void> signUpWithEmail(String email, String password, String name) async {
-    await _client.auth.signUp(
+  Future<AuthResponse> signUpWithEmail(
+    String email,
+    String password,
+    String name, {
+    String? emailRedirectTo,
+  }) async {
+    return _client.auth.signUp(
       password: password,
       email: email,
+      emailRedirectTo: emailRedirectTo,
       data: {'name': name},
     );
   }

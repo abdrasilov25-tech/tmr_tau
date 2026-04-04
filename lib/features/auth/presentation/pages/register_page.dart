@@ -24,6 +24,13 @@ class _C {
   static const w40    = Color(0x66FFFFFF);
   static const w15    = Color(0x26FFFFFF);
   static const w08    = Color(0x14FFFFFF);
+  /// Текст и иконки внутри светлых полей ввода.
+  static const fieldText = Color(0xFF111827);
+  static const fieldHint = Color(0xFF6B7280);
+  static const fieldLabelMuted = Color(0xFF4B5563);
+  /// Фон поля (непрозрачный, чтобы текст не сливался с градиентом экрана).
+  static const fieldFill = Color(0xFFF9FAFB);
+  static const fieldFillFocused = Color(0xFFFFFFFF);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -224,6 +231,8 @@ class _RegisterPageState extends State<RegisterPage>
 
   void _submit() {
     if (!_validateStep1()) return;
+    final auth = context.read<AuthBloc>().state;
+    if (auth is AuthLoading) return;
     context.read<AuthBloc>().add(AuthSignUpRequested(
       email: _emailController.text.trim(),
       password: _passwordController.text,
@@ -285,6 +294,19 @@ class _RegisterPageState extends State<RegisterPage>
   Widget _buildContent() {
     return BlocConsumer<AuthBloc, AuthState>(
       listener: (context, state) {
+        if (state is AuthSignUpAwaitingEmailConfirmation) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(
+              'Аккаунт создан. Мы отправили письмо на ${state.email}. '
+              'Откройте ссылку в письме, затем войдите.',
+            ),
+            backgroundColor: Colors.black87,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 6),
+          ));
+          if (context.canPop()) context.pop();
+          return;
+        }
         if (state is AuthOAuthDismissed) {
           setState(() { _googleInProgress = false; _appleInProgress = false; });
           return;
@@ -798,7 +820,7 @@ class _NeonTextField extends StatelessWidget {
         ? _C.pink
         : focused
             ? accentColor
-            : _C.w15;
+            : const Color(0xFFE5E7EB);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -808,20 +830,24 @@ class _NeonTextField extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: borderColor.withValues(alpha: focused ? 0.85 : 0.4),
+              color: borderColor.withValues(alpha: focused ? 1.0 : 0.9),
               width: focused ? 1.5 : 1.0,
             ),
-            color: focused
-                ? accentColor.withValues(alpha: 0.06)
-                : _C.w08,
+            color: focused ? _C.fieldFillFocused : _C.fieldFill,
             boxShadow: focused
                 ? [
                     BoxShadow(
-                      color: accentColor.withValues(alpha: 0.18),
+                      color: accentColor.withValues(alpha: 0.22),
                       blurRadius: 14,
                     )
                   ]
-                : [],
+                : [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
           ),
           child: TextField(
             controller: controller,
@@ -830,7 +856,9 @@ class _NeonTextField extends StatelessWidget {
             keyboardType: keyboardType,
             textCapitalization: textCapitalization,
             style: GoogleFonts.inter(
-              fontSize: 15, color: _C.white, fontWeight: FontWeight.w500,
+              fontSize: 15,
+              color: _C.fieldText,
+              fontWeight: FontWeight.w500,
             ),
             onChanged: onChanged,
             onSubmitted: onSubmitted,
@@ -841,20 +869,27 @@ class _NeonTextField extends StatelessWidget {
               labelText: label,
               labelStyle: GoogleFonts.inter(
                 fontSize: 13,
-                color: focused ? accentColor : _C.w60,
+                color: focused ? accentColor : _C.fieldLabelMuted,
                 fontWeight: FontWeight.w500,
               ),
               hintText: hint,
-              hintStyle: GoogleFonts.inter(fontSize: 13, color: _C.w40),
-              prefixIcon: Icon(prefixIcon,
+              hintStyle: GoogleFonts.inter(
+                fontSize: 13,
+                color: _C.fieldHint,
+              ),
+              prefixIcon: Icon(
+                prefixIcon,
                 size: 18,
-                color: focused ? accentColor : _C.w60,
+                color: focused ? accentColor : _C.fieldLabelMuted,
               ),
               suffixIcon: suffixIcon != null
                   ? GestureDetector(
                       onTap: onSuffixTap,
-                      child: Icon(suffixIcon, size: 18,
-                        color: focused ? accentColor : _C.w60),
+                      child: Icon(
+                        suffixIcon,
+                        size: 18,
+                        color: focused ? accentColor : _C.fieldLabelMuted,
+                      ),
                     )
                   : null,
             ),

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/entities/app_user.dart';
+import '../../domain/entities/email_sign_up_result.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_remote_datasource.dart';
 import '../../../../core/auth/oauth_foreground_signal.dart';
@@ -103,13 +104,40 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
-  Future<void> signUpWithEmail(String email, String password, String name) async {
-    await _dataSource.signUpWithEmail(email, password, name);
-    final uid = _client.auth.currentUser?.id;
-    if (uid != null) {
+  Future<EmailSignUpResult> signUpWithEmail(
+    String email,
+    String password,
+    String name,
+  ) async {
+    // Старая сессия в клиенте даёт неверный currentUser после signUp без сессии
+    // и повторная отправка формы приводит к user_already_exists.
+    if (_client.auth.currentSession != null) {
+      await _dataSource.signOut();
+    }
+
+    final response = await _dataSource.signUpWithEmail(
+      email,
+      password,
+      name,
+      emailRedirectTo: OAuthEnvConfig.redirectTo,
+    );
+
+    if (response.session != null && response.user != null) {
+      final uid = response.user!.id;
       await _ensureUserRow(uid, email, name);
       _cachedUser = await _dataSource.fetchUserProfile(uid);
+      _cachedUser ??= AppUser(
+        id: uid,
+        email: response.user!.email ?? email,
+        name: name.isNotEmpty ? name : (response.user!.email ?? email),
+        followersCount: 0,
+      );
+      return EmailSignUpResult.signedIn(_cachedUser!);
     }
+
+    // Подтверждение email в Supabase: пользователь создан, JWT ещё не выдан.
+    _cachedUser = null;
+    return EmailSignUpResult.pendingEmailConfirmation();
   }
 
   @override

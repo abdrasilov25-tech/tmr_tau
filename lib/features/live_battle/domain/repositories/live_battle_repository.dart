@@ -6,6 +6,9 @@ import '../entities/wallet.dart';
 
 abstract class LiveBattleRepository {
   Future<LiveBattle> startBattle(String userA, String userB);
+
+  /// Одноразовая загрузка строки баттла (не ждём первый пуш Realtime).
+  Future<LiveBattle?> fetchBattle(String battleId);
   Future<void> sendLike({
     required String battleId,
     required String userId,

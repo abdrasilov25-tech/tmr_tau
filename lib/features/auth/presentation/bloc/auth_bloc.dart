@@ -206,20 +206,30 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   Future<void> _onSignUpRequested(AuthSignUpRequested event, Emitter<AuthState> emit) async {
     emit(AuthLoading());
     try {
-      await _authRepository.signUpWithEmail(event.email, event.password, event.name);
-      final user = _authRepository.currentUser;
-      if (user != null) {
-        await _multiAccountStorage.setLastActiveAccountId(user.id);
-        await _multiAccountStorage.addAccount(
-          SavedAccount(
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            avatarUrl: user.avatarUrl,
-          ),
-        );
+      final result = await _authRepository.signUpWithEmail(
+        event.email,
+        event.password,
+        event.name,
+      );
+      if (result.pendingEmailConfirmation) {
+        if (!isClosed) {
+          emit(AuthSignUpAwaitingEmailConfirmation(event.email));
+          // Сброс состояния: иначе повторное открытие регистрации снова шлёт signUp → user_already_exists.
+          emit(AuthUnauthenticated());
+        }
+        return;
       }
-      if (!isClosed) emit(user != null ? AuthAuthenticated(user) : AuthUnauthenticated());
+      final user = result.user!;
+      await _multiAccountStorage.setLastActiveAccountId(user.id);
+      await _multiAccountStorage.addAccount(
+        SavedAccount(
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          avatarUrl: user.avatarUrl,
+        ),
+      );
+      if (!isClosed) emit(AuthAuthenticated(user));
     } catch (e) {
       if (!isClosed) emit(AuthError(_authErrorMessage(e)));
     }
@@ -253,6 +263,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
     if (s.contains('user not found') || s.contains('invalid login')) {
       return 'Нет аккаунта с таким email. Зарегистрируйтесь.';
+    }
+    if (s.contains('user_already_exists') ||
+        s.contains('user already registered') ||
+        s.contains('email already registered') ||
+        s.contains('already been registered')) {
+      return 'Этот email уже зарегистрирован. Войдите через «Уже есть аккаунт» '
+          'или восстановите пароль на экране входа.';
     }
     return e.toString();
   }

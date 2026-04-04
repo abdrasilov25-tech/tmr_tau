@@ -467,7 +467,7 @@ class _CameraPreviewFill extends StatelessWidget {
   }
 }
 
-class _CaptureButton extends StatelessWidget {
+class _CaptureButton extends StatefulWidget {
   const _CaptureButton({
     required this.progress,
     required this.isRecording,
@@ -483,15 +483,55 @@ class _CaptureButton extends StatelessWidget {
   final VoidCallback onHoldEnd;
 
   @override
+  State<_CaptureButton> createState() => _CaptureButtonState();
+}
+
+class _CaptureButtonState extends State<_CaptureButton> {
+  bool _isDown = false;
+  // Задержка 200ms отделяет «тап» от «удержания»:
+  // если палец поднялся до 200ms — это тап (фото),
+  // если нет — это начало видеозаписи.
+  static const _holdThreshold = Duration(milliseconds: 200);
+  DateTime? _downAt;
+
+  void _handlePointerDown(PointerDownEvent _) {
+    _isDown = true;
+    _downAt = DateTime.now();
+    Future.delayed(_holdThreshold, () {
+      if (_isDown && mounted) widget.onHoldStart();
+    });
+  }
+
+  void _handlePointerUp(PointerUpEvent _) {
+    final wasDown = _isDown;
+    _isDown = false;
+    if (!wasDown) return;
+    final elapsed = DateTime.now().difference(_downAt ?? DateTime.now());
+    if (elapsed < _holdThreshold) {
+      // Короткое нажатие → фото
+      widget.onTap();
+    } else {
+      // Долгое → завершить запись
+      widget.onHoldEnd();
+    }
+  }
+
+  void _handlePointerCancel(PointerCancelEvent _) {
+    if (_isDown) {
+      _isDown = false;
+      widget.onHoldEnd();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      onLongPressStart: (_) => onHoldStart(),
-      onLongPressEnd: (_) => onHoldEnd(),
-      onLongPressCancel: onHoldEnd,
+    return Listener(
+      onPointerDown: _handlePointerDown,
+      onPointerUp: _handlePointerUp,
+      onPointerCancel: _handlePointerCancel,
       child: AnimatedBuilder(
-        animation: progress,
-        builder: (_, unused) => SizedBox(
+        animation: widget.progress,
+        builder: (_, __) => SizedBox(
           width: 84,
           height: 84,
           child: Stack(
@@ -499,21 +539,21 @@ class _CaptureButton extends StatelessWidget {
             children: [
               SizedBox.expand(
                 child: CircularProgressIndicator(
-                  value: isRecording ? progress.value : 0,
+                  value: widget.isRecording ? widget.progress.value : 0,
                   strokeWidth: 4.5,
-                  valueColor:
-                      const AlwaysStoppedAnimation<Color>(Colors.red),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
                   backgroundColor: Colors.white30,
                 ),
               ),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 140),
-                width: isRecording ? 34 : 66,
-                height: isRecording ? 34 : 66,
+                width: widget.isRecording ? 34 : 66,
+                height: widget.isRecording ? 34 : 66,
                 decoration: BoxDecoration(
-                  color: isRecording ? Colors.red : Colors.white,
-                  borderRadius:
-                      BorderRadius.circular(isRecording ? 10 : 33),
+                  color: widget.isRecording ? Colors.red : Colors.white,
+                  borderRadius: BorderRadius.circular(
+                    widget.isRecording ? 10 : 33,
+                  ),
                 ),
               ),
             ],

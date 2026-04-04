@@ -36,6 +36,15 @@ final class AuthPasswordResetSent extends AuthState {
   const AuthPasswordResetSent();
 }
 
+/// Регистрация прошла; нужно подтвердить email (в Supabase включено подтверждение).
+final class AuthSignUpAwaitingEmailConfirmation extends AuthState {
+  const AuthSignUpAwaitingEmailConfirmation(this.email);
+  final String email;
+
+  @override
+  List<Object?> get props => [email];
+}
+
 final class AuthSmsOtpSent extends AuthState {
   const AuthSmsOtpSent({required this.phone});
   final String phone;

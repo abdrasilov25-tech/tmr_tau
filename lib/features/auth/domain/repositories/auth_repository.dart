@@ -1,4 +1,5 @@
 import '../entities/app_user.dart';
+import '../entities/email_sign_up_result.dart';
 
 abstract class AuthRepository {
   AppUser? get currentUser;
@@ -12,7 +13,11 @@ abstract class AuthRepository {
   /// Сессия + одна попытка загрузить профиль (для обратной совместимости).
   Future<AppUser?> getCurrentUserOnce();
   Future<void> signInWithEmail(String email, String password);
-  Future<void> signUpWithEmail(String email, String password, String name);
+  Future<EmailSignUpResult> signUpWithEmail(
+    String email,
+    String password,
+    String name,
+  );
   Future<void> signInWithGoogle();
   Future<void> signInWithApple();
   Future<void> signInWithSmsOtp(String phone);

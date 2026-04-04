@@ -1069,6 +1069,301 @@ class _ChatsPageState extends State<ChatsPage> {
     }
   }
 
+  Future<void> _showCreateGroupDialog() async {
+    final nameController = TextEditingController();
+    final searchController = TextEditingController();
+    final selectedMembers = <_UserSuggestion>[];
+    var searchResults = <_UserSuggestion>[];
+    var searching = false;
+    var creating = false;
+    Timer? debounce;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModal) {
+            Future<void> runSearch(String q) async {
+              if (q.trim().isEmpty) {
+                setModal(() { searchResults = []; searching = false; });
+                return;
+              }
+              try {
+                final res = await _client
+                    .from(SupabaseConstants.usersTable)
+                    .select('id,name,avatar')
+                    .ilike('name', '%${_sanitizeIlikeUserInput(q)}%')
+                    .neq('id', _sessionUserId)
+                    .limit(12);
+                final list = (res as List)
+                    .map((e) => e as Map<String, dynamic>)
+                    .map((e) => _UserSuggestion(
+                          userId: e['id'] as String,
+                          name: e['name'] as String?,
+                          avatarUrl: e['avatar'] as String?,
+                        ))
+                    .where(
+                      (u) => !selectedMembers.any((s) => s.userId == u.userId),
+                    )
+                    .toList();
+                if (!ctx.mounted) return;
+                setModal(() { searchResults = list; searching = false; });
+              } catch (_) {
+                if (!ctx.mounted) return;
+                setModal(() => searching = false);
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: DraggableScrollableSheet(
+                initialChildSize: 0.88,
+                minChildSize: 0.5,
+                maxChildSize: 0.95,
+                expand: false,
+                builder: (ctx, scrollController) {
+                  return Column(
+                    children: [
+                      // Handle
+                      Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                      // Header
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                        child: Row(
+                          children: [
+                            const Text(
+                              'Новая группа',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Group name
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: TextField(
+                          controller: nameController,
+                          decoration: InputDecoration(
+                            hintText: 'Название группы',
+                            prefixIcon: const Icon(Icons.group_outlined),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          onChanged: (_) => setModal(() {}),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // Selected members chips
+                      if (selectedMembers.isNotEmpty) ...[
+                        SizedBox(
+                          height: 48,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                            itemCount: selectedMembers.length,
+                            itemBuilder: (_, i) {
+                              final m = selectedMembers[i];
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 8),
+                                child: InputChip(
+                                  label: Text(
+                                    m.name ?? 'Участник',
+                                    style: const TextStyle(fontSize: 13),
+                                  ),
+                                  onDeleted: () => setModal(
+                                    () => selectedMembers.removeAt(i),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      // Member search
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: TextField(
+                          controller: searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Добавить участников...',
+                            prefixIcon: const Icon(Icons.person_add_outlined),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                          onChanged: (val) {
+                            debounce?.cancel();
+                            setModal(() => searching = true);
+                            debounce = Timer(
+                              const Duration(milliseconds: 400),
+                              () => runSearch(val),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      // Results or spinner
+                      Expanded(
+                        child: searching
+                            ? const Center(child: CircularProgressIndicator())
+                            : ListView.builder(
+                                controller: scrollController,
+                                itemCount: searchResults.length,
+                                itemBuilder: (_, i) {
+                                  final u = searchResults[i];
+                                  return ListTile(
+                                    leading: CachedAvatar(
+                                      imageUrl: u.avatarUrl,
+                                      radius: 20,
+                                      fallbackText: u.name ?? '?',
+                                    ),
+                                    title: Text(u.name ?? 'Участник'),
+                                    trailing: const Icon(
+                                      Icons.add_circle_outline,
+                                      color: Color(0xFF22C55E),
+                                    ),
+                                    onTap: () => setModal(() {
+                                      selectedMembers.add(u);
+                                      searchResults.removeAt(i);
+                                    }),
+                                  );
+                                },
+                              ),
+                      ),
+                      // Create button
+                      Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 48,
+                          child: FilledButton.icon(
+                            onPressed:
+                                creating ||
+                                    nameController.text.trim().isEmpty
+                                ? null
+                                : () async {
+                                    setModal(() => creating = true);
+                                    try {
+                                      final name =
+                                          nameController.text.trim();
+                                      final created = await _client
+                                          .from(
+                                            SupabaseConstants.chatGroupsTable,
+                                          )
+                                          .insert({
+                                            'owner_id': _sessionUserId,
+                                            'title': name,
+                                          })
+                                          .select('id,title')
+                                          .single();
+                                      final gid = created['id'] as String;
+                                      await GroupChatSystemApi
+                                          .notifyGroupCreated(
+                                        _client,
+                                        groupId: gid,
+                                        ownerId: _sessionUserId,
+                                        title: name,
+                                      );
+                                      await _client
+                                          .from(
+                                            SupabaseConstants
+                                                .chatGroupMembersTable,
+                                          )
+                                          .insert({
+                                            'group_id': gid,
+                                            'user_id': _sessionUserId,
+                                          });
+                                      for (final m in selectedMembers) {
+                                        try {
+                                          await _client
+                                              .from(
+                                                SupabaseConstants
+                                                    .chatGroupMembersTable,
+                                              )
+                                              .insert({
+                                                'group_id': gid,
+                                                'user_id': m.userId,
+                                              });
+                                        } catch (_) {}
+                                      }
+                                      if (!ctx.mounted) return;
+                                      Navigator.pop(ctx);
+                                      if (!mounted) return;
+                                      setState(
+                                        () =>
+                                            _pageFuture = _loadPageData(),
+                                      );
+                                      if (!context.mounted) return;
+                                      await context.push(
+                                        '/chat-group/$gid?name=${Uri.encodeComponent(name)}',
+                                      );
+                                    } catch (e) {
+                                      if (!ctx.mounted) return;
+                                      setModal(() => creating = false);
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Ошибка: $e'),
+                                        ),
+                                      );
+                                    }
+                                  },
+                            icon: creating
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Icon(Icons.group_add_rounded),
+                            label: const Text('Создать группу'),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            );
+          },
+        );
+      },
+    );
+    nameController.dispose();
+    searchController.dispose();
+    debounce?.cancel();
+  }
+
   Future<void> _showChatsTopMenu() async {
     final selected = await showModalBottomSheet<String>(
       context: context,
@@ -1235,8 +1530,18 @@ class _ChatsPageState extends State<ChatsPage> {
   Future<List<_ChatThread>> _loadGroupThreads() async {
     try {
       final temirtau = await _ensureTemirtauCityGroup();
-      // В ленте только городской чат — не тянем остальные группы из memberships.
-      final groupIds = <String>[temirtau.id];
+
+      // Load all groups where user is a member
+      final membershipRes = await _client
+          .from(SupabaseConstants.chatGroupMembersTable)
+          .select('group_id')
+          .eq('user_id', _sessionUserId);
+      final memberGroupIds = (membershipRes as List)
+          .map((e) => (e as Map<String, dynamic>)['group_id'] as String?)
+          .whereType<String>()
+          .toSet();
+      memberGroupIds.add(temirtau.id);
+      final groupIds = memberGroupIds.toList();
 
       final groupsRes = await _client
           .from(SupabaseConstants.chatGroupsTable)
@@ -2025,6 +2330,16 @@ class _ChatsPageState extends State<ChatsPage> {
               );
             },
           ),
+          floatingActionButton: _threadSelectionMode
+              ? null
+              : FloatingActionButton(
+                  heroTag: 'shell_chats_fab_create_group',
+                  onPressed: _showCreateGroupDialog,
+                  tooltip: 'Создать группу',
+                  backgroundColor: const Color(0xFFF59E0B),
+                  foregroundColor: Colors.white,
+                  child: const Icon(Icons.group_add_rounded),
+                ),
         ),
       ),
     );
@@ -2193,6 +2508,68 @@ class _ChatsPageState extends State<ChatsPage> {
     List<_ChatThread> threads, {
     bool requestsTab = false,
   }) {
+    // Build sectioned list items
+    final items = <_ChatListEntry>[];
+    if (requestsTab) {
+      for (final t in threads) { items.add(_ChatListEntry.thread(t)); }
+    } else {
+      final unreadDMs = threads
+          .where(
+            (t) =>
+                t.kind == _ChatThreadKind.direct &&
+                t.unreadCount > 0 &&
+                !t.fromGlobalSearch,
+          )
+          .toList();
+      final groups = threads
+          .where(
+            (t) =>
+                (t.kind == _ChatThreadKind.group ||
+                    t.kind == _ChatThreadKind.channel) &&
+                !t.fromGlobalSearch,
+          )
+          .toList();
+      final readDMs = threads
+          .where(
+            (t) =>
+                t.kind == _ChatThreadKind.direct &&
+                t.unreadCount == 0 &&
+                !t.fromGlobalSearch,
+          )
+          .toList();
+      final searchResults =
+          threads.where((t) => t.fromGlobalSearch).toList();
+
+      if (unreadDMs.isNotEmpty) {
+        items.add(
+          _ChatListEntry.header('Непрочитанные', const Color(0xFFEF4444)),
+        );
+        for (final t in unreadDMs) { items.add(_ChatListEntry.thread(t)); }
+      }
+      if (groups.isNotEmpty) {
+        items.add(
+          _ChatListEntry.headerWithAdd(
+            'Группы и каналы',
+            const Color(0xFFF59E0B),
+            _showCreateGroupDialog,
+          ),
+        );
+        for (final t in groups) { items.add(_ChatListEntry.thread(t)); }
+      }
+      if (readDMs.isNotEmpty) {
+        items.add(
+          _ChatListEntry.header('Диалоги', const Color(0xFF22C55E)),
+        );
+        for (final t in readDMs) { items.add(_ChatListEntry.thread(t)); }
+      }
+      if (searchResults.isNotEmpty) {
+        items.add(
+          _ChatListEntry.header('Результаты поиска', Colors.grey),
+        );
+        for (final t in searchResults) { items.add(_ChatListEntry.thread(t)); }
+      }
+    }
+
     return RefreshIndicator(
       onRefresh: () async {
         final messenger = ScaffoldMessenger.of(this.context);
@@ -2216,19 +2593,26 @@ class _ChatsPageState extends State<ChatsPage> {
       child: RepaintBoundary(
         child: ListView.builder(
           physics: const AlwaysScrollableScrollPhysics(),
-          itemCount: threads.length,
+          itemCount: items.length,
           itemBuilder: (context, index) {
-            final t = threads[index];
+            final item = items[index];
+            if (item.isHeader) {
+              return _SectionHeader(
+                title: item.headerTitle!,
+                color: item.headerColor!,
+                onAdd: item.onAdd,
+              );
+            }
+            final t = item.thread!;
             final isUnread = t.unreadCount > 0;
             final isOnline = _isProbablyOnline(t);
             return Padding(
-              padding: const EdgeInsets.fromLTRB(10, 4, 10, 4),
+              padding: const EdgeInsets.fromLTRB(10, 3, 10, 3),
               child: (t.isTemirtauCity ||
                       _threadSelectionMode ||
                       t.fromGlobalSearch
-                  ? Material(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(18),
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
                       child: _buildThreadTile(
                         context,
                         t,
@@ -2263,9 +2647,8 @@ class _ChatsPageState extends State<ChatsPage> {
                         label: 'В архив',
                         alignRight: true,
                       ),
-                      child: Material(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(18),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
                         child: _buildThreadTile(
                           context,
                           t,
@@ -2290,20 +2673,25 @@ class _ChatsPageState extends State<ChatsPage> {
     bool showRequestActions = false,
   }) {
     final isSelected = _selectedThreadKeys.contains(t.storageKey);
+    final accentColor = _accentColorFor(t);
+    final bgColor = _bgColorFor(t);
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
         border: t.isTemirtauCity
             ? Border.all(color: const Color(0xFF0EA5E9), width: 1.1)
             : isSelected
             ? Border.all(color: const Color(0xFF2563EB), width: 1.4)
-            : null,
+            : Border(
+                left: BorderSide(color: accentColor, width: 3.5),
+              ),
         color: t.isTemirtauCity
             ? const Color(0xFFF0F9FF)
-            : (isSelected ? const Color(0x1A2563EB) : Colors.grey.shade100),
+            : isSelected
+            ? const Color(0x1A2563EB)
+            : bgColor,
       ),
       child: ListTile(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        shape: const RoundedRectangleBorder(),
         minVerticalPadding: 10,
         leading: SizedBox(
           width: 52,
@@ -2509,6 +2897,27 @@ class _ChatsPageState extends State<ChatsPage> {
     final diff = DateTime.now().difference(t.lastMessageAt);
     return diff.inMinutes <= 5;
   }
+
+  Color _accentColorFor(_ChatThread t) {
+    if (t.isTemirtauCity) return const Color(0xFF0EA5E9);
+    if (t.kind == _ChatThreadKind.group ||
+        t.kind == _ChatThreadKind.channel) {
+      return const Color(0xFFF59E0B);
+    }
+    return t.unreadCount > 0
+        ? const Color(0xFFEF4444)
+        : const Color(0xFF22C55E);
+  }
+
+  Color _bgColorFor(_ChatThread t) {
+    if (t.isTemirtauCity) return const Color(0xFFF0F9FF);
+    if (t.kind == _ChatThreadKind.group ||
+        t.kind == _ChatThreadKind.channel) {
+      return const Color(0xFFFFFBEB);
+    }
+    if (t.unreadCount > 0) return const Color(0xFFFFF5F5);
+    return const Color(0xFFF0FDF4);
+  }
 }
 
 /// Бейдж официального городского чата в списке диалогов.
@@ -2708,4 +3117,108 @@ String _timeAgo(DateTime dateTime) {
   if (diff.inHours < 24) return '${diff.inHours} ч';
   if (diff.inDays < 7) return '${diff.inDays} дн';
   return '${dateTime.day}.${dateTime.month}.${dateTime.year}';
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  Chat list sectioned items
+// ─────────────────────────────────────────────────────────────────
+
+class _ChatListEntry {
+  final String? headerTitle;
+  final Color? headerColor;
+  final VoidCallback? onAdd;
+  final _ChatThread? thread;
+
+  const _ChatListEntry._({
+    this.headerTitle,
+    this.headerColor,
+    this.onAdd,
+    this.thread,
+  });
+
+  factory _ChatListEntry.header(String title, Color color) =>
+      _ChatListEntry._(headerTitle: title, headerColor: color);
+
+  factory _ChatListEntry.headerWithAdd(
+    String title,
+    Color color,
+    VoidCallback onAdd,
+  ) => _ChatListEntry._(headerTitle: title, headerColor: color, onAdd: onAdd);
+
+  factory _ChatListEntry.thread(_ChatThread t) =>
+      _ChatListEntry._(thread: t);
+
+  bool get isHeader => thread == null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+//  Section header widget
+// ─────────────────────────────────────────────────────────────────
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.color,
+    this.onAdd,
+  });
+
+  final String title;
+  final Color color;
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 12, 4),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 14,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              color: color,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.8,
+            ),
+          ),
+          const Spacer(),
+          if (onAdd != null)
+            GestureDetector(
+              onTap: onAdd,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.add_rounded, color: color, size: 14),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Создать',
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

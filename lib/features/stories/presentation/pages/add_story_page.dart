@@ -358,9 +358,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
   Future<void> _publish() async {
     if (_isLiveMode) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Прямой эфир скоро будет доступен')),
-      );
+      context.push('/live/host');
       return;
     }
     if (!_hasMedia) return;
@@ -403,6 +401,8 @@ class _AddStoryPageState extends State<AddStoryPage> {
         videoUrl = Supabase.instance.client.storage
             .from(SupabaseConstants.bucketStories)
             .getPublicUrl(path);
+        // Для видео-сторис без отдельного превью используем videoUrl как imageUrl
+        if (imageUrl.isEmpty) imageUrl = videoUrl;
       }
 
       if (_activeMode == _CreateMode.publication) {
@@ -470,12 +470,6 @@ class _AddStoryPageState extends State<AddStoryPage> {
             caption: _captionController.text.trim().isEmpty ? null : _captionController.text.trim(),
           );
       if (!mounted) return;
-      final ownStories = await storiesRepository.getStoriesByUser(authState.user.id);
-      if (ownStories.isEmpty) {
-        throw Exception(
-          'История не найдена после сохранения. Проверьте таблицу stories и политики select.',
-        );
-      }
 
       if (alsoToProfile && videoUrl != null && mounted) {
         await postRepository.createPost(

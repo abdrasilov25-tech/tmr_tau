@@ -85,7 +85,10 @@ class _NearbyFeedPageState extends State<NearbyFeedPage> {
         actions: [
           if (!_isPremium)
             TextButton(
-              onPressed: () => context.push('/premium'),
+              onPressed: () async {
+                await context.push<bool?>('/premium');
+                if (mounted) _load();
+              },
               child: const Text('Купить PRO'),
             ),
         ],

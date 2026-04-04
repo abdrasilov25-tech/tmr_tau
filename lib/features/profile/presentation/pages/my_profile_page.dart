@@ -792,11 +792,15 @@ class _MyProfilePageState extends State<MyProfilePage> {
               return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      color: Colors.black87,
-                      fontWeight: FontWeight.w700,
+                  Flexible(
+                    child: Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.black87,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 4),
@@ -1752,6 +1756,8 @@ class _ProfileContent extends StatelessWidget {
                                                     ? '@${user.username}'
                                                     : user.email,
                                                 textAlign: TextAlign.center,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                                 style: Theme.of(context)
                                                     .textTheme
                                                     .titleLarge

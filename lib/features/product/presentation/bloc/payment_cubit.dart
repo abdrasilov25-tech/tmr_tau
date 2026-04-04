@@ -9,21 +9,31 @@ class PaymentUiState {
   const PaymentUiState({
     this.status = PaymentUiStatus.idle,
     this.message,
+    this.storeInitError,
     this.balance = 0,
     this.catalog = const <QarmetProduct>[],
     this.isOfficialPageActive = false,
     this.cosmeticsLifetimeUnlocked = false,
     this.promotionHistory = const <QarmetPromotionHistoryItem>[],
     this.purchasingQarmetProductId,
+    this.isStoreReady = false,
   });
 
   final PaymentUiStatus status;
   final String? message;
+
+  /// Ошибка инициализации StoreKit/IAP — не null когда магазин недоступен
+  /// или товары не удалось загрузить.
+  final String? storeInitError;
+
   final int balance;
   final List<QarmetProduct> catalog;
   final bool isOfficialPageActive;
   final bool cosmeticsLifetimeUnlocked;
   final List<QarmetPromotionHistoryItem> promotionHistory;
+
+  /// true когда StoreKit успешно загрузил продукты и покупки доступны.
+  final bool isStoreReady;
 
   /// Покупка пакета Qarmet из магазина (IAP). Пока идёт — блокируем только этот SKU,
   /// а не все кнопки при [status] == loading.
@@ -33,8 +43,15 @@ class PaymentUiState {
   bool get isWalletWideBusy =>
       status == PaymentUiStatus.loading && purchasingQarmetProductId == null;
 
+  /// Локальный снимок экономики (синхронизируется с `users.qarmet_balance` через [refreshWallet]).
+  int get userBalance => balance;
+
+  /// Подписка Official Page / премиум-витрина (`users.official_page_active`).
+  bool get isPremium => isOfficialPageActive;
+
   /// Можно нажать «купить» для этого productId (остальные пакеты остаются активными).
   bool canTapBuyQarmetPackage(String productId) {
+    if (!isStoreReady) return false;
     if (status != PaymentUiStatus.loading) return true;
     return purchasingQarmetProductId != null &&
         purchasingQarmetProductId != productId;
@@ -43,6 +60,8 @@ class PaymentUiState {
   PaymentUiState copyWith({
     PaymentUiStatus? status,
     String? message,
+    String? storeInitError,
+    bool clearStoreInitError = false,
     int? balance,
     List<QarmetProduct>? catalog,
     bool? isOfficialPageActive,
@@ -50,10 +69,14 @@ class PaymentUiState {
     List<QarmetPromotionHistoryItem>? promotionHistory,
     String? purchasingQarmetProductId,
     bool clearPurchasingQarmetProductId = false,
+    bool? isStoreReady,
   }) {
     return PaymentUiState(
       status: status ?? this.status,
       message: message,
+      storeInitError: clearStoreInitError
+          ? null
+          : (storeInitError ?? this.storeInitError),
       balance: balance ?? this.balance,
       catalog: catalog ?? this.catalog,
       isOfficialPageActive: isOfficialPageActive ?? this.isOfficialPageActive,
@@ -63,6 +86,7 @@ class PaymentUiState {
       purchasingQarmetProductId: clearPurchasingQarmetProductId
           ? null
           : (purchasingQarmetProductId ?? this.purchasingQarmetProductId),
+      isStoreReady: isStoreReady ?? this.isStoreReady,
     );
   }
 }
@@ -79,32 +103,81 @@ class PaymentCubit extends Cubit<PaymentUiState> {
 
   Future<void> initStore() async {
     try {
-      await _service.initStore();
+      // 1) Каталог пакетов Qarmet задан в коде — показываем сразу, не ждём StoreKit/сеть.
       final mem = _service.getCachedWalletSnapshot();
       final disk = mem ?? await _service.getPersistentWalletSnapshot();
-      final hasWarmData = mem != null || disk != null;
-      final snap = mem ?? disk;
-      if (snap != null) {
-        emit(
-          state.copyWith(
-            status: PaymentUiStatus.idle,
-            message: null,
-            balance: snap.balance,
-            catalog: snap.catalog,
-            isOfficialPageActive: snap.isOfficialPageActive,
-            cosmeticsLifetimeUnlocked: snap.cosmeticsLifetimeUnlocked,
-            promotionHistory: snap.promotionHistory,
-          ),
-        );
-      } else {
-        emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
-      }
-      await refreshWallet(silent: hasWarmData, forceRefresh: false);
+      final warm = mem ?? disk;
+      emit(
+        state.copyWith(
+          status: PaymentUiStatus.idle,
+          message: null,
+          catalog: _service.catalog,
+          balance: warm?.balance ?? 0,
+          isOfficialPageActive: warm?.isOfficialPageActive ?? false,
+          cosmeticsLifetimeUnlocked:
+              warm?.cosmeticsLifetimeUnlocked ?? false,
+          promotionHistory: warm?.promotionHistory ?? const [],
+          storeInitError: _service.storeInitError,
+          isStoreReady: _service.isStoreCatalogLoaded,
+          clearStoreInitError: _service.isStoreCatalogLoaded,
+        ),
+      );
+
+      // 2) StoreKit и актуальные данные кошелька — параллельно, чтобы не суммировать задержки.
+      final walletFuture = _service.loadWalletSnapshot(forceRefresh: false);
+      await _service.initStore();
+      final snapshot = await walletFuture;
+
+      final storeErr = _service.storeInitError;
+      final storeReady = _service.isStoreCatalogLoaded;
+      emit(
+        state.copyWith(
+          status: PaymentUiStatus.idle,
+          message: null,
+          storeInitError: storeErr,
+          clearStoreInitError: storeReady,
+          isStoreReady: storeReady,
+          balance: snapshot.balance,
+          catalog: snapshot.catalog,
+          isOfficialPageActive: snapshot.isOfficialPageActive,
+          cosmeticsLifetimeUnlocked: snapshot.cosmeticsLifetimeUnlocked,
+          promotionHistory: snapshot.promotionHistory,
+        ),
+      );
     } catch (e) {
       emit(
-        state.copyWith(status: PaymentUiStatus.error, message: e.toString()),
+        state.copyWith(
+          status: PaymentUiStatus.error,
+          message: e.toString(),
+          catalog: _service.catalog,
+        ),
       );
     }
+  }
+
+  /// Повторная попытка инициализации StoreKit (вызывается по кнопке Retry в UI).
+  Future<void> retryInitStore() async {
+    emit(
+      state.copyWith(
+        status: PaymentUiStatus.loading,
+        message: null,
+        clearStoreInitError: true,
+        isStoreReady: false,
+      ),
+    );
+    await _service.initStore(forceCatalogRefresh: true);
+    final storeErr = _service.storeInitError;
+    final storeReady = _service.isStoreCatalogLoaded;
+    emit(
+      state.copyWith(
+        status: PaymentUiStatus.idle,
+        catalog: _service.catalog,
+        storeInitError: storeErr,
+        clearStoreInitError: storeReady,
+        isStoreReady: storeReady,
+      ),
+    );
+    await refreshWallet(silent: true, forceRefresh: true);
   }
 
   Future<void> refreshWallet({
@@ -118,10 +191,15 @@ class PaymentCubit extends Cubit<PaymentUiState> {
       final snapshot = await _service.loadWalletSnapshot(
         forceRefresh: forceRefresh,
       );
+      final storeErr = _service.storeInitError;
+      final storeReady = _service.isStoreCatalogLoaded;
       emit(
         state.copyWith(
           status: PaymentUiStatus.idle,
           message: null,
+          storeInitError: storeErr,
+          clearStoreInitError: storeReady,
+          isStoreReady: storeReady,
           balance: snapshot.balance,
           catalog: snapshot.catalog,
           isOfficialPageActive: snapshot.isOfficialPageActive,
@@ -135,6 +213,7 @@ class PaymentCubit extends Cubit<PaymentUiState> {
         state.copyWith(
           status: PaymentUiStatus.error,
           message: e.toString(),
+          catalog: _service.catalog,
           clearPurchasingQarmetProductId: true,
         ),
       );

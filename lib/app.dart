@@ -59,6 +59,8 @@ import 'features/orders/data/repositories/orders_repository_impl.dart';
 import 'features/orders/domain/repositories/orders_repository.dart';
 import 'features/live_battle/data/repositories/live_battle_repository_impl.dart';
 import 'features/live_battle/domain/repositories/live_battle_repository.dart';
+import 'features/live_streaming/data/repositories/live_streaming_repository_impl.dart';
+import 'features/live_streaming/domain/repositories/live_streaming_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -103,6 +105,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   late final MapRepository _mapRepository;
   late final OrdersRepository _ordersRepository;
   late final LiveBattleRepository _liveBattleRepository;
+  late final LiveStreamingRepository _liveStreamingRepository;
   late final AppRouter _appRouter;
   late final GeoService _geoService;
   late final SearchTabActivationController _searchTabActivation;
@@ -149,6 +152,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
     _mapRepository = MapRepositoryImpl(MapRemoteDataSourceImpl(_client));
     _ordersRepository = OrdersRepositoryImpl(_client);
     _liveBattleRepository = LiveBattleRepositoryImpl(_client);
+    _liveStreamingRepository = LiveStreamingRepositoryImpl(_client);
     _geoService = const GeoService();
     _searchTabActivation = SearchTabActivationController();
     _accountManager = AccountManager(
@@ -267,6 +271,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         RepositoryProvider<OrdersRepository>.value(value: _ordersRepository),
         RepositoryProvider<LiveBattleRepository>.value(
           value: _liveBattleRepository,
+        ),
+        RepositoryProvider<LiveStreamingRepository>.value(
+          value: _liveStreamingRepository,
         ),
         RepositoryProvider<GeoService>.value(value: _geoService),
         ChangeNotifierProvider<SearchTabActivationController>.value(

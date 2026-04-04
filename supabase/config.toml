@@ -16,3 +16,7 @@ verify_jwt = true
 
 [functions.updateBoostStatus]
 verify_jwt = true
+
+# RTC-токен Agora (секреты: AGORA_APP_ID, AGORA_APP_CERTIFICATE).
+[functions.agora-rtc-token]
+verify_jwt = true

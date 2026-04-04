@@ -80,9 +80,13 @@ class PaymentService {
   /// Сброс кэша баланса при смене аккаунта (каталог IAP общий, не трогаем).
   void clearWalletMemoryCache() {
     _walletCache = null;
+    _officialPageMonthlyRpcSucceededKeys.clear();
   }
   WalletSnapshot? _walletCache;
   DateTime? _lastMonthlyCreditCheckAt;
+
+  /// Успешные вызовы [callCreditBonus] по ключу транзакции IAP (без повторного RPC при redelivery).
+  final Set<String> _officialPageMonthlyRpcSucceededKeys = <String>{};
   static const String _walletCachePrefix = 'qarmet_wallet_snapshot_v1_';
   static const String _premiumIapLocalPrefix = 'premium_iap_unlocked_v1_';
 
@@ -132,6 +136,9 @@ class PaymentService {
       _qarmetCatalog.values.toList(growable: false);
 
   String? get storeInitError => _storeInitError;
+
+  /// true только когда [initStore] успешно завершился и продукты загружены.
+  bool get isStoreCatalogLoaded => _storeCatalogLoaded && _storeAvailable;
 
   /// Плагин iOS отдаёт [IAPError] `storekit_no_response`, если нативный ответ пустой
   /// (часто гонка сразу после cold start, не «нет сети»).
@@ -443,6 +450,9 @@ class PaymentService {
       storeProductId: productId,
       onVerified: (purchase) async {
         await _verifyPurchase(purchase, productId);
+        if (package.isSubscription) {
+          await _creditOfficialPageMonthlyAfterSubscriptionPurchase(purchase);
+        }
         await _creditPurchasedQarmet(package);
       },
     );
@@ -516,24 +526,42 @@ class PaymentService {
     }
   }
 
-  Future<bool> isPremiumActive() async {
+  /// Premium для ленты «Рядом» (радиусы 10/20 км): только IAP `premium_subscription`
+  /// в полях [premium_active] / [premium_until]. Подписка продавца [official_page_active] сюда не входит.
+  Future<({bool active, DateTime? until})> getNewsMapPremiumInfo() async {
     final auth = _client.auth.currentUser;
-    if (auth == null) return false;
+    if (auth == null) return (active: false, until: null);
     try {
       final row = await _client
           .from('users')
-          .select('premium_active,premium_until,official_page_active')
+          .select('premium_active,premium_until')
           .eq('id', auth.id)
           .maybeSingle();
-      if (row == null) return false;
-      final active = row['premium_active'] as bool? ?? false;
+      if (row == null) return (active: false, until: null);
+      final flag = row['premium_active'] as bool? ?? false;
       final untilRaw = row['premium_until'] as String?;
       final until = DateTime.tryParse(untilRaw ?? '')?.toUtc();
-      final byDate = until != null && until.isAfter(DateTime.now().toUtc());
-      return active || byDate || (row['official_page_active'] as bool? ?? false);
+      final now = DateTime.now().toUtc();
+      final byDate = until != null && until.isAfter(now);
+      return (active: flag || byDate, until: until);
     } catch (_) {
-      return isOfficialPageActive();
+      return (active: false, until: null);
     }
+  }
+
+  Future<bool> isPremiumActive() async {
+    final r = await getNewsMapPremiumInfo();
+    return r.active;
+  }
+
+  /// Цена из App Store / StoreKit Configuration (после [initStore]).
+  String? storeKitPriceForProduct(String storeProductId) {
+    return _productDetailsById(storeProductId)?.price;
+  }
+
+  /// Название товара из магазина (после [initStore]).
+  String? storeKitTitleForProduct(String storeProductId) {
+    return _productDetailsById(storeProductId)?.title;
   }
 
   Future<PaymentResult> purchasePremium() async {
@@ -628,19 +656,90 @@ class PaymentService {
     }
     _lastMonthlyCreditCheckAt = now;
 
+    if (_client.auth.currentUser == null) return;
+    await callCreditBonus();
+  }
+
+  /// Supabase RPC `credit_official_page_monthly_qarmet` — ежемесячное начисление при активной official_page.
+  /// Не бросает: ошибки только в логах. Возвращает новый баланс или `null` при сбое / неавторизован.
+  Future<int?> callCreditBonus() async {
+    debugPrint('Qarmet RPC: callCreditBonus → credit_official_page_monthly_qarmet');
     final auth = _client.auth.currentUser;
-    if (auth == null) return;
+    if (auth == null) {
+      debugPrint('Qarmet RPC: callCreditBonus aborted (not signed in)');
+      return null;
+    }
     try {
-      await _client.rpc<int>('credit_official_page_monthly_qarmet');
-    } on PostgrestException catch (e) {
+      final raw = await _client.rpc<dynamic>('credit_official_page_monthly_qarmet');
+      debugPrint('Qarmet RPC: callCreditBonus raw response: $raw');
+      final balance = raw is int
+          ? raw
+          : (raw is num ? raw.toInt() : int.tryParse(raw?.toString() ?? ''));
+      if (balance == null) {
+        debugPrint('Qarmet RPC: callCreditBonus unexpected null/non-int response');
+        _walletCache = null;
+        return null;
+      }
+      debugPrint('Qarmet RPC: callCreditBonus success balance=$balance user=${auth.id}');
+      _walletCache = null;
+      return balance;
+    } on PostgrestException catch (e, st) {
       debugPrint(
-        'Monthly Qarmet credit skipped: ${e.message.isNotEmpty ? e.message : e.code}',
+        'Qarmet RPC: callCreditBonus PostgrestException code=${e.code} '
+        'message=${e.message}\n$st',
+      );
+      return null;
+    } catch (e, st) {
+      debugPrint('Qarmet RPC: callCreditBonus error $e\n$st');
+      return null;
+    }
+  }
+
+  String _officialPagePurchaseDedupeKey(PurchaseDetails p) {
+    final pid = (p.purchaseID ?? '').trim();
+    if (pid.isNotEmpty) {
+      return '${p.productID}|$pid';
+    }
+    final blob = p.verificationData.serverVerificationData.trim();
+    if (blob.isNotEmpty) {
+      return '${p.productID}|h${blob.hashCode}';
+    }
+    return '${p.productID}|t${p.transactionDate ?? ""}';
+  }
+
+  /// Один успешный RPC на успешную покупку/restore подписки Official Page (без повторов при redelivery StoreKit).
+  Future<void> _creditOfficialPageMonthlyAfterSubscriptionPurchase(
+    PurchaseDetails purchase,
+  ) async {
+    debugPrint(
+      'IAP official_page subscription: purchase received '
+      'status=${purchase.status.name} id=${purchase.productID}',
+    );
+    final key = _officialPagePurchaseDedupeKey(purchase);
+    if (_officialPageMonthlyRpcSucceededKeys.contains(key)) {
+      debugPrint(
+        'Qarmet RPC: skip credit_official_page_monthly_qarmet (already succeeded) key=$key',
+      );
+      return;
+    }
+    final balance = await callCreditBonus();
+    if (balance != null) {
+      if (_officialPageMonthlyRpcSucceededKeys.length >= 64) {
+        _officialPageMonthlyRpcSucceededKeys.clear();
+      }
+      _officialPageMonthlyRpcSucceededKeys.add(key);
+      debugPrint(
+        'Qarmet RPC: official_page purchase chain recorded success key=$key',
+      );
+    } else {
+      debugPrint(
+        'Qarmet RPC: official_page purchase chain RPC did not succeed; key not pinned (may retry)',
       );
     }
   }
 
   WalletSnapshot? getCachedWalletSnapshot({
-    Duration maxAge = const Duration(minutes: 2),
+    Duration maxAge = const Duration(minutes: 8),
   }) {
     final cached = _walletCache;
     if (cached == null) return null;
@@ -707,6 +806,18 @@ class PaymentService {
   Future<WalletSnapshot> loadWalletSnapshot({
     bool forceRefresh = false,
   }) async {
+    if (_client.auth.currentUser == null) {
+      final snap = WalletSnapshot(
+        balance: 0,
+        isOfficialPageActive: false,
+        cosmeticsLifetimeUnlocked: false,
+        promotionHistory: const [],
+        catalog: catalog,
+        fetchedAt: DateTime.now().toUtc(),
+      );
+      _walletCache = snap;
+      return snap;
+    }
     if (!forceRefresh) {
       final cached = getCachedWalletSnapshot();
       if (cached != null) return cached;
@@ -719,10 +830,11 @@ class PaymentService {
     // Kick off monthly credit check in background — don't block wallet load.
     unawaited(ensureMonthlySubscriptionCredit());
 
-    // Combine 3 separate user-row queries into one to avoid 3× round trips.
     final results = await Future.wait<Object>([
       _getUserWalletFields(),
-      getMyPromotionHistory(),
+      getMyPromotionHistory().catchError(
+        (_) => const <QarmetPromotionHistoryItem>[],
+      ),
     ]);
     final fields = results[0] as _UserWalletFields;
     // Sync cosmetics local flag if server says unlocked (background, non-blocking).

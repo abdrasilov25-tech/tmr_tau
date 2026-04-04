@@ -12,7 +12,6 @@ class LiveBattleState {
     this.topDonators = const <DonatorScore>[],
     this.error,
     this.remainingSeconds = 0,
-    this.lastLikeAt,
   });
 
   final bool loading;
@@ -22,7 +21,6 @@ class LiveBattleState {
   final List<DonatorScore> topDonators;
   final String? error;
   final int remainingSeconds;
-  final DateTime? lastLikeAt;
 
   String? get mvpUserId => topDonators.isEmpty ? null : topDonators.first.userId;
 
@@ -34,7 +32,6 @@ class LiveBattleState {
     List<DonatorScore>? topDonators,
     String? error,
     int? remainingSeconds,
-    DateTime? lastLikeAt,
   }) {
     return LiveBattleState(
       loading: loading ?? this.loading,
@@ -44,7 +41,6 @@ class LiveBattleState {
       topDonators: topDonators ?? this.topDonators,
       error: error,
       remainingSeconds: remainingSeconds ?? this.remainingSeconds,
-      lastLikeAt: lastLikeAt ?? this.lastLikeAt,
     );
   }
 }

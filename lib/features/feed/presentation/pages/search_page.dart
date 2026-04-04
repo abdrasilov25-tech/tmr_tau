@@ -485,6 +485,7 @@ class _SearchPageState extends State<SearchPage> {
           ],
         ),
         child: FloatingActionButton.extended(
+          heroTag: 'shell_search_fab_add',
           onPressed: _showCreateFromSearchSheet,
           elevation: 0,
           backgroundColor: Colors.transparent,
@@ -933,20 +934,17 @@ class _OlxSearchFilterBar extends StatelessWidget {
                 ],
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
+                  // Не использовать easeOutBack на уровне switcher: значение anim может стать > 1,
+                  // тогда вложенный CurvedAnimation падает на assert в curves.dart.
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 260),
-                    switchInCurve: Curves.easeOutBack,
-                    switchOutCurve: Curves.easeIn,
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
                     transitionBuilder: (child, anim) {
                       return FadeTransition(
                         opacity: anim,
                         child: ScaleTransition(
-                          scale: Tween<double>(begin: 0.85, end: 1).animate(
-                            CurvedAnimation(
-                              parent: anim,
-                              curve: Curves.easeOutCubic,
-                            ),
-                          ),
+                          scale: Tween<double>(begin: 0.92, end: 1).animate(anim),
                           child: child,
                         ),
                       );

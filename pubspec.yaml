@@ -72,6 +72,7 @@ dependencies:
   record: ^6.2.0
   sign_in_with_apple: ^6.1.4
   crypto: ^3.0.6
+  agora_rtc_engine: ^6.3.0
 
 dev_dependencies:
   flutter_test:
