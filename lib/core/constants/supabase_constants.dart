@@ -53,4 +53,6 @@ class SupabaseConstants {
   static const String bucketStories = 'stories';
   static const String bucketPosts = 'posts';
   static const String bucketAvatars = 'avatars';
+  /// Аудио/видео/фото в чатах: `dm/{userId}/…`, `group_messages/{groupId}/…`.
+  static const String bucketChatMedia = 'messages';
 }

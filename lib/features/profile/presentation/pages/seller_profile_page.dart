@@ -715,6 +715,10 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                         ),
                       ],
                     ),
+                    if (profile.bestTapScore > 0) ...[
+                      const SizedBox(height: 8),
+                      _TapScoreBadge(score: profile.bestTapScore),
+                    ],
                     if (profile.products.isNotEmpty) ...[
                       const SizedBox(height: 10),
                       Text(
@@ -1195,6 +1199,40 @@ class _SellerTikTokStat extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _TapScoreBadge extends StatelessWidget {
+  const _TapScoreBadge({required this.score});
+
+  final int score;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFFF6B35), Color(0xFFF72585)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('🔥', style: TextStyle(fontSize: 16)),
+          const SizedBox(width: 6),
+          Text(
+            'Лучший тап: $score',
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 13,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

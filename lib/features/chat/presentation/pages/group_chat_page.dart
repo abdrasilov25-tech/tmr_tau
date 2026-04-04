@@ -6,12 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import 'package:camera/camera.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/storage/chat_list_storage.dart';
@@ -23,6 +23,7 @@ import '../../domain/temirtau_city_group_config.dart';
 import '../city_thread_icons.dart';
 import '../widgets/city_chat_fixed_avatar.dart';
 import '../chat_unread_badge_controller.dart';
+import '../widgets/dm_hold_video_overlay.dart';
 
 class GroupChatPage extends StatefulWidget {
   const GroupChatPage({
@@ -64,6 +65,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? _playingAudioMessageId;
+  bool _groupRoundVideoOpening = false;
 
   @override
   void initState() {
@@ -434,12 +436,14 @@ class _GroupChatPageState extends State<GroupChatPage> {
       final ext = localPath.split('.').last;
       final storagePath =
           'group_messages/${widget.groupId}/$senderId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await _client.storage.from('messages').upload(
+      await _client.storage.from(SupabaseConstants.bucketChatMedia).upload(
             storagePath,
             file,
             fileOptions: const FileOptions(contentType: 'audio/m4a', upsert: false),
           );
-      final url = _client.storage.from('messages').getPublicUrl(storagePath);
+      final url = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(storagePath);
       await _client.from(SupabaseConstants.chatGroupMessagesTable).insert({
         'group_id': widget.groupId,
         'sender_id': senderId,
@@ -457,9 +461,16 @@ class _GroupChatPageState extends State<GroupChatPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Не удалось отправить аудио: $e')));
+      final msg = e is StorageException &&
+              e.message.toLowerCase().contains('bucket')
+          ? 'Хранилище чата не настроено (нужен бакет messages в Supabase).'
+          : 'Не удалось отправить аудио. Проверьте соединение.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(msg),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -475,67 +486,87 @@ class _GroupChatPageState extends State<GroupChatPage> {
 
   Future<void> _pickAndSendRoundVideo() async {
     final senderId = _currentUserId;
-    if (senderId == null || _sending) return;
+    if (senderId == null || _sending || _groupRoundVideoOpening) return;
     final chatStorage = context.read<ChatListStorage>();
-    final camStatus = await Permission.camera.request();
-    final micStatus = await Permission.microphone.request();
-    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) {
+
+    var cam = await Permission.camera.status;
+    if (!cam.isGranted) cam = await Permission.camera.request();
+    var mic = await Permission.microphone.status;
+    if (!mic.isGranted) mic = await Permission.microphone.request();
+    if (!cam.isGranted || !mic.isGranted) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Нужны разрешения камеры и микрофона для видеокружка'),
+            behavior: SnackBarBehavior.floating,
+            content: Text('Нужны камера и микрофон для видеокружка'),
           ),
         );
       }
       return;
     }
 
-    XFile? xFile;
-    try {
-      final picker = ImagePicker();
-      xFile = await picker.pickVideo(
-        source: ImageSource.camera,
-        maxDuration: const Duration(seconds: 60),
-      );
-    } on PlatformException catch (e, st) {
-      debugPrint('group pickVideo: $e\n$st');
+    final cams = await availableCameras();
+    if (cams.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.message?.isNotEmpty == true
-                ? 'Камера: ${e.message}'
-                : 'Не удалось открыть камеру для записи',
-          ),
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('Камера недоступна (например, на симуляторе без камеры)'),
         ),
-      );
-      return;
-    } catch (e, st) {
-      debugPrint('group pickVideo: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось записать видео: $e')),
       );
       return;
     }
 
-    if (xFile == null || !mounted) return;
+    if (!mounted) return;
+    _groupRoundVideoOpening = true;
+    DmHoldVideoResult? recorded;
+    try {
+      recorded = await Navigator.of(context).push<DmHoldVideoResult>(
+        PageRouteBuilder<DmHoldVideoResult>(
+          opaque: false,
+          barrierDismissible: false,
+          barrierColor: Colors.transparent,
+          transitionDuration: const Duration(milliseconds: 220),
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const DmHoldVideoOverlay(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+    } finally {
+      _groupRoundVideoOpening = false;
+    }
+
+    if (recorded == null || !mounted) return;
+
     setState(() => _sending = true);
     try {
-      final file = File(xFile.path);
-      final dot = xFile.path.lastIndexOf('.');
-      final ext = (dot > 0 && dot < xFile.path.length - 1)
-          ? xFile.path.substring(dot + 1).toLowerCase()
+      final file = recorded.file;
+      int durationSec = 0;
+      try {
+        final ctrl = VideoPlayerController.file(file);
+        await ctrl.initialize();
+        durationSec = ctrl.value.duration.inSeconds;
+        await ctrl.dispose();
+      } catch (_) {}
+
+      final p = file.path;
+      final dot = p.lastIndexOf('.');
+      final ext = (dot > 0 && dot < p.length - 1)
+          ? p.substring(dot + 1).toLowerCase()
           : 'mp4';
-      final mime = _videoMimeFromPath(xFile.path);
+      final mime = _videoMimeFromPath(p);
       final storagePath =
           'group_messages/${widget.groupId}/$senderId/${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await _client.storage.from('messages').upload(
+      await _client.storage.from(SupabaseConstants.bucketChatMedia).upload(
             storagePath,
             file,
             fileOptions: FileOptions(contentType: mime, upsert: false),
           );
-      final url = _client.storage.from('messages').getPublicUrl(storagePath);
+      final url = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(storagePath);
       await _client.from(SupabaseConstants.chatGroupMessagesTable).insert({
         'group_id': widget.groupId,
         'sender_id': senderId,
@@ -543,6 +574,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         'kind': 'video_circle',
         'message_type': 'video_circle',
         'video_url': url,
+        'duration_seconds': durationSec,
         if (_officialCity) 'city_thread': _selectedCityThread,
       });
       await chatStorage.setLastReadAtForGroupThread(
@@ -550,11 +582,21 @@ class _GroupChatPageState extends State<GroupChatPage> {
         _selectedCityThread,
         DateTime.now(),
       );
+      try {
+        await file.delete();
+      } catch (_) {}
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Не удалось отправить кружок: $e')));
+      final msg = e is StorageException &&
+              e.message.toLowerCase().contains('bucket')
+          ? 'Хранилище чата не настроено (бакет messages).'
+          : 'Не удалось отправить кружок. Проверьте соединение.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text(msg),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _sending = false);
     }

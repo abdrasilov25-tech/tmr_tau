@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/cached_avatar.dart';
@@ -48,6 +49,12 @@ class _TapGameScreenState extends State<TapGameScreen>
   Timer? _tickTimer;
   late final AnimationController _pulse;
 
+  // ── Combo system ───────────────────────────────────────────
+  int _comboCount = 0;
+  Timer? _comboResetTimer;
+  static const Duration _comboWindow = Duration(milliseconds: 1200);
+  static const int _comboThreshold = 5; // taps to activate combo
+
   String? get _userId {
     final s = context.read<AuthBloc>().state;
     return s is AuthAuthenticated ? s.user.id : null;
@@ -71,6 +78,7 @@ class _TapGameScreenState extends State<TapGameScreen>
   void dispose() {
     _pollTimer?.cancel();
     _tickTimer?.cancel();
+    _comboResetTimer?.cancel();
     _pulse.dispose();
     super.dispose();
   }
@@ -204,14 +212,7 @@ class _TapGameScreenState extends State<TapGameScreen>
     final need = _boostActive ? 2 : 1;
     if (_stamina < need) {
       HapticFeedback.selectionClick();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Энергия на нуле. Докупи тапы ниже за Qarmet или жди новую сессию.',
-          ),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      context.push('/qarmet-wallet');
       return;
     }
     final now = DateTime.now();
@@ -222,7 +223,24 @@ class _TapGameScreenState extends State<TapGameScreen>
       return;
     }
     _tapTimestamps.add(now);
+    _incrementCombo();
     unawaited(_sendTap());
+  }
+
+  void _incrementCombo() {
+    _comboResetTimer?.cancel();
+    setState(() => _comboCount++);
+    _comboResetTimer = Timer(_comboWindow, () {
+      if (mounted) setState(() => _comboCount = 0);
+    });
+  }
+
+  int get _comboMultiplier {
+    if (_comboCount >= 40) return 5;
+    if (_comboCount >= 25) return 4;
+    if (_comboCount >= 15) return 3;
+    if (_comboCount >= _comboThreshold) return 2;
+    return 1;
   }
 
   Future<void> _sendTap() async {
@@ -577,6 +595,18 @@ class _TapGameScreenState extends State<TapGameScreen>
                             ),
                           ),
                         ),
+                      if (_comboMultiplier > 1)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 200),
+                            child: _ComboBadge(
+                              key: ValueKey(_comboMultiplier),
+                              multiplier: _comboMultiplier,
+                              count: _comboCount,
+                            ),
+                          ),
+                        ),
                       const SizedBox(height: 20),
                       Center(
                         child: ScaleTransition(
@@ -584,7 +614,11 @@ class _TapGameScreenState extends State<TapGameScreen>
                           child: Material(
                             color: Colors.transparent,
                             child: InkWell(
-                              onTap: canTap ? _throttleOrTap : null,
+                              onTap: canTap
+                                  ? _throttleOrTap
+                                  : _sessionOpen
+                                      ? () => context.push('/qarmet-wallet')
+                                      : null,
                               customBorder: const CircleBorder(),
                               child: Ink(
                                 width: 200,
@@ -593,10 +627,11 @@ class _TapGameScreenState extends State<TapGameScreen>
                                   shape: BoxShape.circle,
                                   gradient: LinearGradient(
                                     colors: canTap
-                                        ? const [
-                                            Color(0xFFFF6B35),
-                                            Color(0xFFF72585),
-                                          ]
+                                        ? _comboMultiplier >= 4
+                                            ? const [Color(0xFFFFD700), Color(0xFFFF6B35)]
+                                            : _comboMultiplier >= 2
+                                                ? const [Color(0xFFFF6B35), Color(0xFFAA00FF)]
+                                                : const [Color(0xFFFF6B35), Color(0xFFF72585)]
                                         : [
                                             Colors.grey.shade400,
                                             Colors.grey.shade600,
@@ -605,10 +640,12 @@ class _TapGameScreenState extends State<TapGameScreen>
                                   boxShadow: [
                                     BoxShadow(
                                       color: (canTap
-                                              ? const Color(0xFFF72585)
+                                              ? _comboMultiplier >= 4
+                                                  ? const Color(0xFFFFD700)
+                                                  : const Color(0xFFF72585)
                                               : Colors.grey)
-                                          .withValues(alpha: 0.35),
-                                      blurRadius: 24,
+                                          .withValues(alpha: _comboMultiplier >= 2 ? 0.6 : 0.35),
+                                      blurRadius: _comboMultiplier >= 2 ? 40 : 24,
                                       offset: const Offset(0, 10),
                                     ),
                                   ],
@@ -618,8 +655,10 @@ class _TapGameScreenState extends State<TapGameScreen>
                                     !_sessionOpen
                                         ? 'Стоп'
                                         : !canTap
-                                            ? 'Нужна\nэнергия'
-                                            : 'ТАП!',
+                                            ? '💳\nПополнить'
+                                            : _comboMultiplier >= 4
+                                                ? '🔥\nТАП!'
+                                                : 'ТАП!',
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
                                       color: Colors.white,
@@ -1246,6 +1285,52 @@ class _BoostRow extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ComboBadge extends StatelessWidget {
+  const _ComboBadge({super.key, required this.multiplier, required this.count});
+
+  final int multiplier;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = switch (multiplier) {
+      >= 5 => [const Color(0xFFFFD700), const Color(0xFFFF6B35)],
+      4 => [const Color(0xFFFF6B35), const Color(0xFFAA00FF)],
+      3 => [const Color(0xFFF72585), const Color(0xFF7209B7)],
+      _ => [const Color(0xFF4361EE), const Color(0xFF3A0CA3)],
+    };
+    final label = switch (multiplier) {
+      >= 5 => '🔥 MEGA COMBO x$multiplier',
+      4 => '⚡ COMBO x$multiplier',
+      3 => '💥 COMBO x$multiplier',
+      _ => '✨ COMBO x$multiplier',
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(colors: colors),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: colors.first.withValues(alpha: 0.5),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          fontSize: 15,
+          letterSpacing: 0.5,
         ),
       ),
     );

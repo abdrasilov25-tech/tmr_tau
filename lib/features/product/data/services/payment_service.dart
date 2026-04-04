@@ -1541,13 +1541,16 @@ class PaymentService {
   ) async {
     final auth = _client.auth.currentUser;
     if (auth == null) throw Exception('Пользователь не авторизован');
+    if (_client.auth.currentSession == null) {
+      throw Exception('Пользователь не авторизован');
+    }
 
-    Future<void> invokeWithToken(String accessToken) async {
+    /// Не задаём заголовок Authorization вручную: HTTP-клиент Supabase
+    /// подставляет актуальный JWT перед запросом (в т.ч. после авто-refresh).
+    /// Ручной Bearer со старым accessToken перекрывал это и давал 401 Invalid JWT.
+    Future<void> invokeVerifyPurchase() async {
       final response = await _client.functions.invoke(
         'verifyPurchase',
-        headers: <String, String>{
-          'Authorization': 'Bearer $accessToken',
-        },
         body: <String, dynamic>{
           'userId': auth.id,
           'productId': productId,
@@ -1565,13 +1568,8 @@ class PaymentService {
       }
     }
 
-    Session? session = _client.auth.currentSession;
-    if (session == null) {
-      throw Exception('Пользователь не авторизован');
-    }
-
     try {
-      await invokeWithToken(session.accessToken);
+      await invokeVerifyPurchase();
     } catch (e) {
       final msg = e.toString();
       final looksLikeAuth =
@@ -1581,13 +1579,13 @@ class PaymentService {
       if (!looksLikeAuth) rethrow;
 
       final refreshed = await _client.auth.refreshSession();
-      session = refreshed.session ?? _client.auth.currentSession;
+      final session = refreshed.session ?? _client.auth.currentSession;
       if (session == null) {
         throw Exception(
           'Сессия истекла. Войдите снова и повторите покупку.',
         );
       }
-      await invokeWithToken(session.accessToken);
+      await invokeVerifyPurchase();
     }
   }
 

@@ -19,6 +19,8 @@ class SellerProfileEntity extends Equatable {
     this.websiteUrl,
     /// Подписка Official Page (IAP): витрина, график «Профессиональная» и т.п.
     this.officialPageActive = false,
+    /// Лучший результат в «Тап судьбы» — показывается всем на профиле.
+    this.bestTapScore = 0,
   });
 
   final String id;
@@ -35,6 +37,7 @@ class SellerProfileEntity extends Equatable {
   final String? telegramUsername;
   final String? websiteUrl;
   final bool officialPageActive;
+  final int bestTapScore;
 
   SellerProfileEntity copyWith({
     String? id,
@@ -51,6 +54,7 @@ class SellerProfileEntity extends Equatable {
     String? telegramUsername,
     String? websiteUrl,
     bool? officialPageActive,
+    int? bestTapScore,
   }) {
     return SellerProfileEntity(
       id: id ?? this.id,
@@ -68,6 +72,7 @@ class SellerProfileEntity extends Equatable {
       telegramUsername: telegramUsername ?? this.telegramUsername,
       websiteUrl: websiteUrl ?? this.websiteUrl,
       officialPageActive: officialPageActive ?? this.officialPageActive,
+      bestTapScore: bestTapScore ?? this.bestTapScore,
     );
   }
 
@@ -87,5 +92,6 @@ class SellerProfileEntity extends Equatable {
         telegramUsername,
         websiteUrl,
         officialPageActive,
+        bestTapScore,
       ];
 }

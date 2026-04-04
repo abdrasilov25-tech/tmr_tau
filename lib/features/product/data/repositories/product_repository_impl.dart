@@ -33,8 +33,6 @@ class _UserStateCache {
   static void put(String userId, _UserStateCacheEntry entry) =>
       _store[userId] = entry;
 
-  static void invalidate(String userId) => _store.remove(userId);
-
   /// Добавляем/убираем один id без полного сброса кэша.
   static void patchLike(String userId, String productId, {required bool liked}) {
     final e = _store[userId];
@@ -48,22 +46,15 @@ class _UserStateCache {
     reposted ? e.repostedIds.add(productId) : e.repostedIds.remove(productId);
   }
 
-  static void patchFollow(String userId, String sellerId, {required bool following}) {
-    final e = _store[userId];
-    if (e == null) return;
-    following ? e.followingIds.add(sellerId) : e.followingIds.remove(sellerId);
-  }
 }
 
 class _UserStateCacheEntry {
   _UserStateCacheEntry({
-    required Set<String> likedIds,
-    required Set<String> repostedIds,
-    required Set<String> followingIds,
+    required this.likedIds,
+    required this.repostedIds,
+    required this.followingIds,
     required this.createdAt,
-  })  : likedIds = likedIds,
-        repostedIds = repostedIds,
-        followingIds = followingIds;
+  });
 
   final Set<String> likedIds;
   final Set<String> repostedIds;
@@ -551,11 +542,13 @@ class ProductRepositoryImpl implements ProductRepository {
           .delete()
           .eq('product_id', productId)
           .eq('user_id', userId);
+      _UserStateCache.patchLike(userId, productId, liked: false);
     } else {
       await _client.from(SupabaseConstants.productLikesTable).insert({
         'product_id': productId,
         'user_id': userId,
       });
+      _UserStateCache.patchLike(userId, productId, liked: true);
       await _insertProductNotification(
         productId: productId,
         actorId: userId,
@@ -580,11 +573,13 @@ class ProductRepositoryImpl implements ProductRepository {
           .delete()
           .eq('product_id', productId)
           .eq('user_id', userId);
+      _UserStateCache.patchRepost(userId, productId, reposted: false);
     } else {
       await _client.from(SupabaseConstants.productRepostsTable).insert({
         'product_id': productId,
         'user_id': userId,
       });
+      _UserStateCache.patchRepost(userId, productId, reposted: true);
       await _insertProductNotification(
         productId: productId,
         actorId: userId,
@@ -680,63 +675,6 @@ class ProductRepositoryImpl implements ProductRepository {
   }
 
   /// Четыре независимых запроса — раньше шли последовательно (до ~4× RTT); параллельно быстрее для поиска и ленты товаров.
-  Future<Set<String>> _likedProductIdsForUser(
-    String userId,
-    List<String> productIds,
-  ) async {
-    if (productIds.isEmpty) return {};
-    try {
-      final likes = await _client
-          .from(SupabaseConstants.productLikesTable)
-          .select('product_id')
-          .eq('user_id', userId)
-          .inFilter('product_id', productIds);
-      return (likes as List)
-          .map((e) => (e as Map)['product_id'] as String)
-          .toSet();
-    } catch (_) {
-      return {};
-    }
-  }
-
-  Future<Set<String>> _followingSellerIdsForUser(
-    String userId,
-    List<String> sellerIds,
-  ) async {
-    if (sellerIds.isEmpty) return {};
-    try {
-      final follows = await _client
-          .from(SupabaseConstants.followersTable)
-          .select('following_id')
-          .eq('follower_id', userId)
-          .inFilter('following_id', sellerIds);
-      return (follows as List)
-          .map((e) => (e as Map)['following_id'] as String)
-          .toSet();
-    } catch (_) {
-      return {};
-    }
-  }
-
-  Future<Set<String>> _repostedProductIdsForUser(
-    String userId,
-    List<String> productIds,
-  ) async {
-    if (productIds.isEmpty) return {};
-    try {
-      final repostsByMe = await _client
-          .from(SupabaseConstants.productRepostsTable)
-          .select('product_id')
-          .eq('user_id', userId)
-          .inFilter('product_id', productIds);
-      return (repostsByMe as List)
-          .map((e) => (e as Map)['product_id'] as String)
-          .toSet();
-    } catch (_) {
-      return {};
-    }
-  }
-
   Future<Map<String, int>> _repostCountsByProductId(
     List<String> productIds,
   ) async {
@@ -765,7 +703,6 @@ class ProductRepositoryImpl implements ProductRepository {
     if (currentUserId == null || list.isEmpty) return list;
     final ids = list.map((e) => e.id).toList();
     if (ids.isEmpty) return list;
-    final sellerIds = list.map((e) => e.sellerId).toSet().toList();
 
     // ── Получаем состояние пользователя из кэша или с сервера ──
     Set<String> likedIds;
@@ -1031,7 +968,11 @@ class ProductRepositoryImpl implements ProductRepository {
     for (final key in scores.keys.toList(growable: false)) {
       scores[key] = scores[key]! / maxScore;
     }
-    return scores;
+    // Сохраняем в кэш на 5 минут
+    _AffinityCache.put(currentUserId, scores);
+    return Map.fromEntries(
+      scores.entries.where((e) => candidateSellerIds.contains(e.key)),
+    );
   }
 
   List<ProductEntity> _applyProductDiversityBySeller({

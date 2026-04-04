@@ -72,37 +72,40 @@ class ProfileRepositoryImpl implements ProfileRepository {
       }
     }
 
+    // followers_count уже есть в userMap (денормализованное поле)
     var followersCount = userMap['followers_count'] as int? ?? 0;
     var followingCount = 0;
     var products = <ProductModel>[];
     var isFollowingByMe = false;
 
-    // Параллельно грузим: счётчики, товары и статус подписки — 3 запроса вместо 4 последовательных.
-    try {
-      final countResults = await Future.wait([
-        _client
-            .from(SupabaseConstants.followersTable)
-            .select('follower_id')
-            .eq('following_id', sellerId),
-        _client
-            .from(SupabaseConstants.followersTable)
-            .select('following_id')
-            .eq('follower_id', sellerId),
-      ]);
-      followersCount = (countResults[0] as List).length;
-      followingCount = (countResults[1] as List).length;
-    } catch (_) {
-      followingCount = 0;
-    }
+    // Оптимизированный продуктовый запрос — только нужные колонки
+    const profileProductSelect =
+        'id, title, price, image_url, image_urls, category, category_id, '
+        'seller_id, created_at, city, condition, is_urgent, is_top, '
+        'is_negotiable, is_giveaway, view_count, '
+        'users!seller_id(name, avatar)';
 
-    final secondaryResults = await Future.wait([
+    // Параллельно: following_count + товары (до 30) + статус подписки + лучший тап
+    final parallelResults = await Future.wait([
+      // following_count: только кол-во подписок
       _client
-          .from(SupabaseConstants.productsTable)
-          .select('*, users!seller_id(name, avatar)')
-          .eq('seller_id', sellerId)
-          .order('created_at', ascending: false)
+          .from(SupabaseConstants.followersTable)
+          .select('following_id')
+          .eq('follower_id', sellerId)
+          .limit(2000)
           .then<Object?>((v) => v)
           .catchError((_) => <dynamic>[]),
+      // Товары продавца — лимит 30
+      _client
+          .from(SupabaseConstants.productsTable)
+          .select(profileProductSelect)
+          .eq('seller_id', sellerId)
+          .order('is_top', ascending: false)
+          .order('created_at', ascending: false)
+          .limit(30)
+          .then<Object?>((v) => v)
+          .catchError((_) => <dynamic>[]),
+      // Статус подписки текущего пользователя
       if (currentUserId != null && currentUserId != sellerId)
         _client
             .from(SupabaseConstants.followersTable)
@@ -114,7 +117,23 @@ class ProfileRepositoryImpl implements ProfileRepository {
             .catchError((_) => null)
       else
         Future<Object?>.value(null),
+      // Лучший результат в «Тап судьбы»
+      _client
+          .from('tap_game_plays')
+          .select('score')
+          .eq('user_id', sellerId)
+          .order('score', ascending: false)
+          .limit(1)
+          .then<Object?>((v) => v)
+          .catchError((_) => <dynamic>[]),
     ]);
+    // Переименуем для совместимости с кодом ниже
+    final secondaryResults = [parallelResults[1], parallelResults[2]];
+    followingCount = (parallelResults[0] as List).length;
+    final tapPlays = parallelResults[3] as List? ?? [];
+    final bestTapScore = tapPlays.isNotEmpty
+        ? ((tapPlays.first as Map)['score'] as int? ?? 0)
+        : 0;
 
     try {
       products = (secondaryResults[0] as List)
@@ -143,6 +162,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       telegramUsername: userMap['telegram_username'] as String?,
       websiteUrl: userMap['website_url'] as String?,
       officialPageActive: userMap['official_page_active'] as bool? ?? false,
+      bestTapScore: bestTapScore,
     );
   }
 

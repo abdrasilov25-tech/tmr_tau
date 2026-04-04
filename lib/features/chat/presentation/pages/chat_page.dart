@@ -18,6 +18,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import 'package:camera/camera.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/widgets/cached_avatar.dart';
@@ -32,6 +33,7 @@ import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../widgets/dm_hold_video_overlay.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -97,6 +99,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   // Переключение кнопки send/mic/camera в зависимости от ввода
   final ValueNotifier<bool> _textHasContent = ValueNotifier<bool>(false);
 
+  /// Удержание кнопки видеокружка → через [ _videoCircleArmMs ] открывается запись.
+  Timer? _videoCircleArmTimer;
+  bool _dmVideoOpening = false;
+  static const int _videoCircleArmMs = 220;
+
   @override
   void initState() {
     super.initState();
@@ -141,6 +148,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _reactionsDebounce?.cancel();
     _markReadDebounce?.cancel();
     _presenceTimer?.cancel();
+    _videoCircleArmTimer?.cancel();
     _textHasContent.dispose();
     _voiceTimer?.cancel();
     _audioRecorder.dispose();
@@ -164,6 +172,211 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'last_active_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', uid);
     } catch (_) {}
+  }
+
+  void _cancelDmVideoCircleArm() {
+    _videoCircleArmTimer?.cancel();
+    _videoCircleArmTimer = null;
+  }
+
+  void _scheduleDmVideoCircleIfHeld() {
+    _cancelDmVideoCircleArm();
+    _videoCircleArmTimer = Timer(
+      const Duration(milliseconds: _videoCircleArmMs),
+      () {
+        if (!mounted) return;
+        unawaited(_runDmVideoCircleRecorder());
+      },
+    );
+  }
+
+  String _userFacingChatStorageError(Object e) {
+    if (e is StorageException) {
+      final m = e.message.toLowerCase();
+      if (m.contains('bucket') && m.contains('not found')) {
+        return 'Хранилище чата не настроено на сервере (бакет messages).';
+      }
+      return 'Не удалось загрузить файл. Проверьте соединение.';
+    }
+    return 'Попробуйте ещё раз через минуту.';
+  }
+
+  Future<void> _showSoftChatDialog({
+    required String title,
+    required String message,
+  }) async {
+    if (!mounted) return;
+    final cs = Theme.of(context).colorScheme;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 22, 22, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: cs.primaryContainer.withValues(alpha: 0.6),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(Icons.info_outline_rounded, color: cs.primary),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                message,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      height: 1.4,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Понятно'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _runDmVideoCircleRecorder() async {
+    if (_dmVideoOpening || _sending) return;
+    final uid = _me();
+    if (uid == null || !mounted) return;
+
+    var cam = await Permission.camera.status;
+    if (cam.isPermanentlyDenied) {
+      await _showSoftChatDialog(
+        title: 'Нужна камера',
+        message:
+            'Чтобы записать видеокружок, разрешите доступ к камере в настройках устройства.',
+      );
+      return;
+    }
+    if (!cam.isGranted) {
+      cam = await Permission.camera.request();
+      if (!cam.isGranted) return;
+    }
+    var mic = await Permission.microphone.status;
+    if (mic.isPermanentlyDenied) {
+      await _showSoftChatDialog(
+        title: 'Нужен микрофон',
+        message:
+            'Для видеокружка со звуком разрешите микрофон в настройках устройства.',
+      );
+      return;
+    }
+    if (!mic.isGranted) {
+      mic = await Permission.microphone.request();
+      if (!mic.isGranted) return;
+    }
+
+    final cams = await availableCameras();
+    if (cams.isEmpty) {
+      if (!mounted) return;
+      await _showSoftChatDialog(
+        title: 'Камера недоступна',
+        message:
+            'На этом устройстве нет камеры (например, симулятор) или она занята другим приложением.',
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    _dmVideoOpening = true;
+    try {
+      final result = await Navigator.of(context).push<DmHoldVideoResult>(
+        PageRouteBuilder<DmHoldVideoResult>(
+          opaque: false,
+          barrierDismissible: false,
+          barrierColor: Colors.transparent,
+          transitionDuration: const Duration(milliseconds: 220),
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              const DmHoldVideoOverlay(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+      if (result == null || !mounted) return;
+      await _uploadDmVideoCircleFromFile(result.file, uid);
+    } finally {
+      _dmVideoOpening = false;
+    }
+  }
+
+  Future<void> _uploadDmVideoCircleFromFile(File file, String uid) async {
+    int durationSec = 0;
+    try {
+      final ctrl = VideoPlayerController.file(file);
+      await ctrl.initialize();
+      durationSec = ctrl.value.duration.inSeconds;
+      await ctrl.dispose();
+    } catch (_) {}
+
+    final p = file.path;
+    final dot = p.lastIndexOf('.');
+    final ext = (dot > 0 && dot < p.length - 1)
+        ? p.substring(dot + 1).toLowerCase()
+        : 'mp4';
+    final mime = _videoContentTypeForPath(p);
+
+    setState(() => _sending = true);
+    try {
+      final bytes = await file.readAsBytes();
+      final uploadPath =
+          'dm/$uid/${DateTime.now().millisecondsSinceEpoch}.$ext';
+      await _client.storage.from(SupabaseConstants.bucketChatMedia).uploadBinary(
+            uploadPath,
+            bytes,
+            fileOptions: FileOptions(contentType: mime, upsert: false),
+          );
+      final url = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(uploadPath);
+      await _client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': '',
+        'message_type': 'video_circle',
+        'video_url': url,
+        'duration_seconds': durationSec,
+      });
+      _forceScrollToLatest = true;
+    } catch (e) {
+      if (!mounted) return;
+      await _showSoftChatDialog(
+        title: 'Не отправилось',
+        message: _userFacingChatStorageError(e),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+      try {
+        await file.delete();
+      } catch (_) {}
+    }
   }
 
   Stream<List<Map<String, dynamic>>> _peerPresenceStream() {
@@ -1840,12 +2053,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                     return Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        // 📷 Круглое видео
-                                        _ChatIconBtn(
-                                          icon:
-                                              Icons.camera_alt_rounded,
-                                          onTap:
-                                              _pickAndSendRoundVideo,
+                                        // 🎬 Видеокружок (удерживать)
+                                        _VideoCircleHoldButton(
+                                          onHoldArm:
+                                              _scheduleDmVideoCircleIfHeld,
+                                          onHoldDisarm:
+                                              _cancelDmVideoCircleArm,
                                         ),
                                         // 🎤 Голосовое (удержать)
                                         _VoiceMicButton(
@@ -2027,15 +2240,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     setState(() => _sending = true);
     try {
       final bytes = await file.readAsBytes();
-      final uploadPath = '$uid/${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _client.storage.from('chat_media').uploadBinary(
-        uploadPath,
-        bytes,
-        fileOptions:
-            const FileOptions(contentType: 'audio/m4a', upsert: false),
-      );
-      final url =
-          _client.storage.from('chat_media').getPublicUrl(uploadPath);
+      final uploadPath =
+          'dm/$uid/${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .uploadBinary(
+            uploadPath,
+            bytes,
+            fileOptions:
+                const FileOptions(contentType: 'audio/m4a', upsert: false),
+          );
+      final url = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(uploadPath);
       await _client.from(SupabaseConstants.messagesTable).insert({
         'sender_id': uid,
         'receiver_id': widget.peerId,
@@ -2047,15 +2264,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _forceScrollToLatest = true;
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось отправить голосовое: $e')),
+      await _showSoftChatDialog(
+        title: 'Голосовое не отправилось',
+        message: _userFacingChatStorageError(e),
       );
     } finally {
       if (mounted) setState(() => _sending = false);
     }
   }
-
-  // ── Круглые видео ──────────────────────────────────────────
 
   static String _videoContentTypeForPath(String path) {
     final lower = path.toLowerCase();
@@ -2063,117 +2279,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     if (lower.endsWith('.webm')) return 'video/webm';
     if (lower.endsWith('.3gp')) return 'video/3gpp';
     return 'video/mp4';
-  }
-
-  Future<void> _pickAndSendRoundVideo() async {
-    final uid = _me();
-    if (uid == null || !mounted) return;
-
-    // Запрашиваем разрешения, но не блокируем если denied —
-    // image_picker сам обрабатывает запрос через iOS native
-    final camStatus = await Permission.camera.status;
-    if (camStatus.isPermanentlyDenied) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('Разрешите камеру в Настройках'),
-          action: SnackBarAction(label: 'Открыть', onPressed: openAppSettings),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-      return;
-    }
-    if (!camStatus.isGranted) await Permission.camera.request();
-    final micStatus = await Permission.microphone.status;
-    if (micStatus.isPermanentlyDenied) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: const Text('Разрешите микрофон в Настройках'),
-          action: SnackBarAction(label: 'Открыть', onPressed: openAppSettings),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-      return;
-    }
-    if (!micStatus.isGranted) await Permission.microphone.request();
-    if (!mounted) return;
-
-    XFile? xFile;
-    try {
-      final picker = ImagePicker();
-      xFile = await picker.pickVideo(
-        source: ImageSource.camera,
-        maxDuration: const Duration(seconds: 60),
-      );
-    } on PlatformException catch (e, st) {
-      debugPrint('pickVideo camera: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.message?.isNotEmpty == true
-                ? 'Камера: ${e.message}'
-                : 'Не удалось открыть камеру для записи',
-          ),
-        ),
-      );
-      return;
-    } catch (e, st) {
-      debugPrint('pickVideo: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось записать видео: $e')),
-      );
-      return;
-    }
-
-    if (xFile == null || !mounted) return;
-
-    final file = File(xFile.path);
-    int durationSec = 0;
-    try {
-      final ctrl = VideoPlayerController.file(file);
-      await ctrl.initialize();
-      durationSec = ctrl.value.duration.inSeconds;
-      await ctrl.dispose();
-    } catch (_) {}
-
-    final ext = () {
-      final p = xFile!.path;
-      final i = p.lastIndexOf('.');
-      if (i <= 0 || i >= p.length - 1) return 'mp4';
-      return p.substring(i + 1).toLowerCase();
-    }();
-    final mime = _videoContentTypeForPath(xFile.path);
-
-    setState(() => _sending = true);
-    try {
-      final bytes = await file.readAsBytes();
-      final uploadPath =
-          '$uid/${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await _client.storage.from('chat_media').uploadBinary(
-        uploadPath,
-        bytes,
-        fileOptions: FileOptions(contentType: mime, upsert: false),
-      );
-      final url =
-          _client.storage.from('chat_media').getPublicUrl(uploadPath);
-      await _client.from(SupabaseConstants.messagesTable).insert({
-        'sender_id': uid,
-        'receiver_id': widget.peerId,
-        'text': '',
-        'message_type': 'video_circle',
-        'video_url': url,
-        'duration_seconds': durationSec,
-      });
-      _forceScrollToLatest = true;
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось отправить видео: $e')),
-      );
-    } finally {
-      if (mounted) setState(() => _sending = false);
-    }
   }
 
   void _showThemePicker() {
@@ -2222,7 +2327,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         },
         onRoundVideo: () {
           Navigator.pop(sheetCtx);
-          unawaited(_pickAndSendRoundVideo());
+          unawaited(_runDmVideoCircleRecorder());
         },
         onLocation: () {
           Navigator.pop(sheetCtx);
@@ -2291,15 +2396,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       final bytes = await xFile.readAsBytes();
       final ext = xFile.name.split('.').last.toLowerCase();
       final uploadPath =
-          '$uid/img_${DateTime.now().millisecondsSinceEpoch}.$ext';
-      await _client.storage.from('chat_media').uploadBinary(
-        uploadPath,
-        bytes,
-        fileOptions:
-            FileOptions(contentType: 'image/$ext', upsert: false),
-      );
-      final url =
-          _client.storage.from('chat_media').getPublicUrl(uploadPath);
+          'dm/$uid/img_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      await _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .uploadBinary(
+            uploadPath,
+            bytes,
+            fileOptions:
+                FileOptions(contentType: 'image/$ext', upsert: false),
+          );
+      final url = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(uploadPath);
       final inserted = await _client
           .from(SupabaseConstants.messagesTable)
           .insert({
@@ -3306,6 +3414,42 @@ class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
 }
 
 // ══════════════════════════════════════════════════════════════
+// Видеокружок: удержание ~220 ms → запись (как голосовое рядом)
+// ══════════════════════════════════════════════════════════════
+
+class _VideoCircleHoldButton extends StatelessWidget {
+  const _VideoCircleHoldButton({
+    required this.onHoldArm,
+    required this.onHoldDisarm,
+  });
+
+  final VoidCallback onHoldArm;
+  final VoidCallback onHoldDisarm;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'Удерживайте для видеокружка',
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: (_) => onHoldArm(),
+        onPointerUp: (_) => onHoldDisarm(),
+        onPointerCancel: (_) => onHoldDisarm(),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Icon(
+            Icons.videocam_rounded,
+            size: 24,
+            color: cs.primary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // _ChatIconBtn — маленькая кнопка иконки в input bar
 // ══════════════════════════════════════════════════════════════
 
@@ -3397,67 +3541,106 @@ class _AttachmentSheet extends StatelessWidget {
       _AttachItem(Icons.bar_chart_rounded, 'Опрос', const Color(0xFF06B6D4), onPoll),
       _AttachItem(Icons.event_rounded, 'Мероприятие', const Color(0xFFEF4444), onEvent),
     ];
-    return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
+    final cs = Theme.of(context).colorScheme;
+    final surface = Theme.of(context).brightness == Brightness.dark
+        ? cs.surfaceContainerHigh
+        : cs.surface;
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      child: Container(
+        decoration: BoxDecoration(
+          color: surface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 24,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: cs.outline.withValues(alpha: 0.35),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
-              GridView.count(
-                crossAxisCount: 4,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 8,
-                childAspectRatio: 0.82,
-                children: items.map((item) {
-                  return GestureDetector(
-                    onTap: item.onTap,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 56,
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: item.color.withValues(alpha: 0.15),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(item.icon,
-                              color: item.color, size: 28),
+                const SizedBox(height: 6),
+                Text(
+                  'Вложение',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
+                ),
+                const SizedBox(height: 16),
+                GridView.count(
+                  crossAxisCount: 4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 18,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.82,
+                  children: items.map((item) {
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: item.onTap,
+                        borderRadius: BorderRadius.circular(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 58,
+                              height: 58,
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                  colors: [
+                                    item.color.withValues(alpha: 0.22),
+                                    item.color.withValues(alpha: 0.08),
+                                  ],
+                                ),
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: item.color.withValues(alpha: 0.2),
+                                ),
+                              ),
+                              child: Icon(item.icon,
+                                  color: item.color, size: 28),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              item.label,
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .labelMedium
+                                  ?.copyWith(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.15,
+                                    color: cs.onSurface.withValues(alpha: 0.88),
+                                  ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          item.label,
-                          textAlign: TextAlign.center,
-                          maxLines: 2,
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 8),
-            ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
           ),
         ),
       ),

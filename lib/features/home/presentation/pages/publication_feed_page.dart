@@ -50,7 +50,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
 
   final ScrollController _scrollController = ScrollController();
   static const int _pageSize = 12;
-  static const Duration _warmCacheTtl = Duration(seconds: 90);
+  static const Duration _warmCacheTtl = Duration(minutes: 3);
   static _PublicationFeedWarmCache? _warmCache;
 
   String? get _currentUserId {

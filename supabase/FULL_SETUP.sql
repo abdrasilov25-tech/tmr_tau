@@ -831,7 +831,8 @@ values
   ('products', 'products', true),
   ('posts', 'posts', true),
   ('stories', 'stories', true),
-  ('avatars', 'avatars', true)
+  ('avatars', 'avatars', true),
+  ('messages', 'messages', true)
 on conflict (id) do update set name = excluded.name, public = excluded.public;
 
 -- Политики Storage: загрузка для авторизованных, чтение для всех
@@ -854,6 +855,11 @@ drop policy if exists "Allow authenticated uploads to avatars" on storage.object
 drop policy if exists "Allow public read avatars" on storage.objects;
 create policy "Allow authenticated uploads to avatars" on storage.objects for insert to authenticated with check (bucket_id = 'avatars');
 create policy "Allow public read avatars" on storage.objects for select to public using (bucket_id = 'avatars');
+
+drop policy if exists "Allow authenticated uploads to messages" on storage.objects;
+drop policy if exists "Allow public read messages" on storage.objects;
+create policy "Allow authenticated uploads to messages" on storage.objects for insert to authenticated with check (bucket_id = 'messages');
+create policy "Allow public read messages" on storage.objects for select to public using (bucket_id = 'messages');
 
 -- ============== Delete expired stories (run via cron or Edge Function) ==============
 -- delete from public.stories where expires_at < now();
