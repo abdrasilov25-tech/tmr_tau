@@ -33,6 +33,7 @@ import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/edit_product_page.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
 import '../../features/product/presentation/pages/qarmet_wallet_page.dart';
+import '../../features/tap_game/tap_game_screen.dart';
 import '../../features/product/presentation/pages/premium_purchase_page.dart';
 import '../../features/profile/presentation/pages/my_profile_page.dart';
 import '../../features/profile/presentation/pages/seller_profile_page.dart';
@@ -232,6 +233,10 @@ class AppRouter {
       GoRoute(
         path: '/qarmet-wallet',
         builder: (context, state) => const QarmetWalletPage(),
+      ),
+      GoRoute(
+        path: '/tap-game',
+        builder: (context, state) => const TapGameScreen(),
       ),
       GoRoute(
         path: '/nearby',

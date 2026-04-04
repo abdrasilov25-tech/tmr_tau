@@ -35,6 +35,7 @@ class PostModel extends PostEntity {
     super.pollVoteCounts = const [],
     super.myPollVoteIndex,
     super.authorOfficialPageActive = false,
+    super.isFollowingAuthor = false,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
@@ -93,6 +94,7 @@ class PostModel extends PostEntity {
       pollVoteCounts: List<int>.filled(pollOpts.length, 0, growable: false),
       myPollVoteIndex: null,
       authorOfficialPageActive: (json['author_official_page_active'] as bool?) ?? false,
+      isFollowingAuthor: (json['is_following_author'] as bool?) ?? false,
     );
   }
 }

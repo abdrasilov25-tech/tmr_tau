@@ -106,7 +106,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
 
   Future<void> _loadTopUsersOnly() async {
     try {
-      final top = await context.read<NotificationsRepository>().getTopUsersByLikes(limit: 12);
+      final top = await context.read<NotificationsRepository>().getTopUsersByLikes(limit: 50);
       if (!mounted) return;
       setState(() => _topUsers = top);
     } catch (_) {
@@ -131,7 +131,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     try {
       final repo = context.read<NotificationsRepository>();
       final list = await repo.getNotifications(userId);
-      final top = await repo.getTopUsersByLikes(limit: 12);
+      final top = await repo.getTopUsersByLikes(limit: 50);
       if (!mounted) return;
       setState(() {
         _items = list;
@@ -365,6 +365,27 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     }
   }
 
+  void _showLeaderboard(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _TopUsersLeaderboardSheet(
+        users: _topUsers,
+        onUserTap: (userId) {
+          Navigator.of(context).pop();
+          final auth = context.read<AuthBloc>().state;
+          final myId = auth is AuthAuthenticated ? auth.user.id : null;
+          if (myId != null && myId == userId) {
+            context.push('/home/profile');
+          } else {
+            context.push('/profile/$userId');
+          }
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -412,29 +433,36 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
                     ),
                   ),
                 )
-              : _items.isEmpty
-                  ? Center(
-                      child: Text(
-                        'Пока нет уведомлений',
-                        style: theme.textTheme.bodyLarge?.copyWith(
-                          color: ThemedContentSurface.profileTextSecondary,
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(bottom: 24),
+                    children: [
+                      if (_topUsers.isNotEmpty) ...[
+                        _TopUsersByLikesCard(
+                          users: _topUsers,
+                          onViewAll: () => _showLeaderboard(context),
                         ),
-                      ),
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _load,
-                      child: ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.only(bottom: 24),
-                        children: [
-                          if (_topUsers.isNotEmpty) ...[
-                            _TopUsersByLikesCard(users: _topUsers),
-                            const SizedBox(height: 4),
-                          ],
-                          ..._buildGroupedList(context),
-                        ],
-                      ),
-                    ),
+                        const SizedBox(height: 4),
+                      ],
+                      if (_items.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 48),
+                          child: Center(
+                            child: Text(
+                              'Пока нет уведомлений',
+                              style: theme.textTheme.bodyLarge?.copyWith(
+                                color: ThemedContentSurface.profileTextSecondary,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._buildGroupedList(context),
+                    ],
+                  ),
+                ),
     );
   }
 
@@ -672,9 +700,10 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
 }
 
 class _TopUsersByLikesCard extends StatelessWidget {
-  const _TopUsersByLikesCard({required this.users});
+  const _TopUsersByLikesCard({required this.users, this.onViewAll});
 
   final List<TopUserRankEntity> users;
+  final VoidCallback? onViewAll;
 
   @override
   Widget build(BuildContext context) {
@@ -710,18 +739,42 @@ class _TopUsersByLikesCard extends StatelessWidget {
                 children: [
                   const Icon(Icons.emoji_events_rounded, color: Color(0xFFFFC400)),
                   const SizedBox(width: 8),
-                  Text(
-                    'Топ пользователей',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
+                  Expanded(
+                    child: Text(
+                      'Топ пользователей',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
+                  if (onViewAll != null)
+                    GestureDetector(
+                      onTap: onViewAll,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(20),
+                          color: Colors.white.withValues(alpha: 0.15),
+                        ),
+                        child: Text(
+                          'Все',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 3),
               Text(
                 'Рейтинг по лайкам публикаций',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: Colors.white.withValues(alpha: 0.75),
                 ),
@@ -767,6 +820,13 @@ class _TopUserTile extends StatelessWidget {
     return Colors.white.withValues(alpha: 0.85);
   }
 
+  String _rankBadge(int r) {
+    if (r == 1) return '👑';
+    if (r == 2) return '⚔️';
+    if (r == 3) return '⛏️';
+    return '#$r';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Material(
@@ -788,8 +848,18 @@ class _TopUserTile extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(6, 6, 6, 4),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            color: Colors.white.withValues(alpha: 0.07),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+            color: rank <= 3
+                ? Colors.white.withValues(alpha: 0.12)
+                : Colors.white.withValues(alpha: 0.07),
+            border: Border.all(
+              color: rank == 1
+                  ? const Color(0xFFFFD54F).withValues(alpha: 0.5)
+                  : rank == 2
+                      ? const Color(0xFFCFD8DC).withValues(alpha: 0.4)
+                      : rank == 3
+                          ? const Color(0xFFFFB74D).withValues(alpha: 0.4)
+                          : Colors.white.withValues(alpha: 0.12),
+            ),
           ),
           child: FittedBox(
             fit: BoxFit.scaleDown,
@@ -800,11 +870,11 @@ class _TopUserTile extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    '#$rank',
+                    _rankBadge(rank),
                     style: TextStyle(
                       color: _rankColor(rank),
                       fontWeight: FontWeight.w800,
-                      fontSize: 12,
+                      fontSize: rank <= 3 ? 16 : 12,
                       height: 1,
                     ),
                   ),
@@ -833,6 +903,7 @@ class _TopUserTile extends StatelessWidget {
                     '${formatCompactCount(user.totalLikes)} лайков',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    softWrap: false,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white.withValues(alpha: 0.78),
@@ -850,6 +921,413 @@ class _TopUserTile extends StatelessWidget {
     );
   }
 }
+
+// ─────────────────────────────────────────────
+// Leaderboard Bottom Sheet
+// ─────────────────────────────────────────────
+
+class _TopUsersLeaderboardSheet extends StatelessWidget {
+  const _TopUsersLeaderboardSheet({
+    required this.users,
+    required this.onUserTap,
+  });
+
+  final List<TopUserRankEntity> users;
+  final void Function(String userId) onUserTap;
+
+  String _rankBadge(int r) {
+    if (r == 1) return '👑';
+    if (r == 2) return '⚔️';
+    if (r == 3) return '⛏️';
+    return '#$r';
+  }
+
+  Color _rankColor(int r) {
+    if (r == 1) return const Color(0xFFFFD54F);
+    if (r == 2) return const Color(0xFFB0BEC5);
+    if (r == 3) return const Color(0xFFFF8A65);
+    return const Color(0xFF9E9E9E);
+  }
+
+  Color _rowBg(int r) {
+    if (r == 1) return const Color(0xFFFFD54F).withValues(alpha: 0.12);
+    if (r == 2) return const Color(0xFFCFD8DC).withValues(alpha: 0.10);
+    if (r == 3) return const Color(0xFFFFB74D).withValues(alpha: 0.10);
+    return Colors.transparent;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.88,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      snap: true,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF14161F),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              // Drag handle
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // Header
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      const Color(0xFF1E2230),
+                      const Color(0xFF14161F).withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFFFD54F), Color(0xFFFFA000)],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFFD54F).withValues(alpha: 0.4),
+                            blurRadius: 12,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.emoji_events_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Топ пользователей',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          Text(
+                            'Рейтинг по лайкам публикаций',
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.55),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Top-3 podium
+              if (users.length >= 3)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: _PodiumRow(users: users.take(3).toList(), onTap: onUserTap),
+                ),
+              // Divider
+              Divider(
+                color: Colors.white.withValues(alpha: 0.08),
+                height: 1,
+                indent: 20,
+                endIndent: 20,
+              ),
+              const SizedBox(height: 8),
+              // Full list (rank 4+)
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
+                  itemCount: users.length > 3 ? users.length - 3 : 0,
+                  itemBuilder: (context, index) {
+                    final rank = index + 4;
+                    final u = users[rank - 1];
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => onUserTap(u.userId),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          margin: const EdgeInsets.symmetric(vertical: 3),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(14),
+                            color: _rowBg(rank),
+                          ),
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final w = constraints.maxWidth;
+                              final rankW = w < 300 ? 34.0 : 40.0;
+                              final avatarR = w < 300 ? 18.0 : 20.0;
+                              final likesW = (w * 0.28).clamp(52.0, 84.0);
+                              return Row(
+                                children: [
+                                  SizedBox(
+                                    width: rankW,
+                                    child: Center(
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          _rankBadge(rank),
+                                          textAlign: TextAlign.center,
+                                          maxLines: 1,
+                                          style: TextStyle(
+                                            color: _rankColor(rank),
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(width: w < 300 ? 6 : 8),
+                                  CachedAvatar(
+                                    imageUrl: u.avatarUrl,
+                                    radius: avatarR,
+                                    fallbackText: u.name,
+                                    enableLightboxOnTap: false,
+                                  ),
+                                  SizedBox(width: w < 300 ? 8 : 10),
+                                  Expanded(
+                                    child: Text(
+                                      u.name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(width: w < 300 ? 4 : 8),
+                                  SizedBox(
+                                    width: likesW,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.favorite_rounded,
+                                          size: 12,
+                                          color: Colors.white.withValues(alpha: 0.45),
+                                        ),
+                                        const SizedBox(width: 3),
+                                        Expanded(
+                                          child: Text(
+                                            formatCompactCount(u.totalLikes),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            textAlign: TextAlign.end,
+                                            style: TextStyle(
+                                              color: Colors.white.withValues(alpha: 0.7),
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _PodiumRow extends StatelessWidget {
+  const _PodiumRow({required this.users, required this.onTap});
+
+  final List<TopUserRankEntity> users;
+  final void Function(String userId) onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    // Order: 2nd (left), 1st (center, taller), 3rd (right)
+    final ordered = [users[1], users[0], users[2]];
+    final ranks = [2, 1, 3];
+    // Запас под аватар, бейдж, имя и лайки + масштаб текста (a11y).
+    final heights = [118.0, 152.0, 108.0];
+    final badges = ['⚔️', '👑', '⛏️'];
+    final colors = [
+      const Color(0xFFCFD8DC),
+      const Color(0xFFFFD54F),
+      const Color(0xFFFF8A65),
+    ];
+    final avatarRadii = [22.0, 28.0, 20.0];
+
+    final podiumRow = Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(3, (i) {
+        final u = ordered[i];
+        final rank = ranks[i];
+        return GestureDetector(
+          onTap: () => onTap(u.userId),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 100,
+            height: heights[i],
+            decoration: BoxDecoration(
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  colors[i].withValues(alpha: 0.18),
+                  colors[i].withValues(alpha: 0.06),
+                ],
+              ),
+              border: Border.all(
+                color: colors[i].withValues(alpha: 0.35),
+                width: rank == 1 ? 1.5 : 1,
+              ),
+            ),
+            clipBehavior: Clip.hardEdge,
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(4, 2, 4, 6),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        badges[i],
+                        style: TextStyle(
+                          fontSize: rank == 1 ? 20 : 16,
+                          height: 1,
+                        ),
+                      ),
+                      SizedBox(height: rank == 1 ? 4 : 3),
+                      CachedAvatar(
+                        imageUrl: u.avatarUrl,
+                        radius: avatarRadii[i],
+                        fallbackText: u.name,
+                        enableLightboxOnTap: false,
+                      ),
+                      SizedBox(height: rank == 1 ? 4 : 3),
+                      SizedBox(
+                        width: 92,
+                        child: Text(
+                          u.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: rank == 1 ? 10.5 : 9.5,
+                            fontWeight: FontWeight.w700,
+                            height: 1.1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.favorite_rounded,
+                            size: 10,
+                            color: colors[i].withValues(alpha: 0.8),
+                          ),
+                          const SizedBox(width: 3),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 72),
+                            child: Text(
+                              formatCompactCount(u.totalLikes),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: colors[i].withValues(alpha: 0.9),
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w600,
+                                height: 1,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const minPodiumWidth = 304.0;
+        if (constraints.maxWidth >= minPodiumWidth) {
+          return podiumRow;
+        }
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.bottomCenter,
+            child: SizedBox(
+              width: minPodiumWidth,
+              child: podiumRow,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ─────────────────────────────────────────────
+// Notification Tile
+// ─────────────────────────────────────────────
 
 class _NotificationTile extends StatefulWidget {
   const _NotificationTile({

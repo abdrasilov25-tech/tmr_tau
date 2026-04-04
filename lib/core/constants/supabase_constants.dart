@@ -45,6 +45,9 @@ class SupabaseConstants {
   static const String giftCatalogTable = 'gift_catalog';
   /// Прямой эфир (Agora): см. migrations/20260404180000_live_rooms.sql.
   static const String liveRoomsTable = 'live_rooms';
+  /// «Тап судьбы»: см. migrations/20260404220000_tap_game.sql.
+  static const String tapGameSessionsTable = 'tap_game_sessions';
+  static const String tapGameScoresTable = 'tap_game_scores';
 
   static const String bucketProducts = 'products';
   static const String bucketStories = 'stories';

@@ -17,6 +17,7 @@ import '../../../auth/domain/repositories/auth_repository.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_author_follow_pill.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../bloc/news_bloc.dart';
@@ -193,6 +194,18 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
                             return _NewsPostCard(
                               post: post,
                               currentUserId: userId,
+                              onFollow: userId != null &&
+                                      userId != post.userId &&
+                                      !post.isAnonymous
+                                  ? () {
+                                      context.read<NewsBloc>().add(
+                                            NewsToggleFollow(
+                                              followerId: userId,
+                                              followingId: post.userId,
+                                            ),
+                                          );
+                                    }
+                                  : null,
                               onPollVote: userId == null
                                   ? null
                                   : (int optionIndex) {
@@ -839,6 +852,7 @@ class _NewsPostCard extends StatelessWidget {
   const _NewsPostCard({
     required this.post,
     required this.currentUserId,
+    this.onFollow,
     this.onPollVote,
     required this.onLike,
     required this.onRepost,
@@ -850,6 +864,7 @@ class _NewsPostCard extends StatelessWidget {
 
   final PostEntity post;
   final String? currentUserId;
+  final VoidCallback? onFollow;
   final void Function(int optionIndex)? onPollVote;
   final VoidCallback onLike;
   final VoidCallback onRepost;
@@ -957,6 +972,14 @@ class _NewsPostCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                        if (onFollow != null) ...[
+                          const SizedBox(width: 6),
+                          PostAuthorFollowPill(
+                            isFollowing: post.isFollowingAuthor,
+                            onTap: onFollow!,
+                            compact: true,
+                          ),
+                        ],
                         // Three dots
                         GestureDetector(
                           onTap: onOptionsPressed,

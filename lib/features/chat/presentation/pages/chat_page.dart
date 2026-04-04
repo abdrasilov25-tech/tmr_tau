@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +13,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
@@ -1529,7 +1532,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                           CrossAxisAlignment.end,
                                       children: [
                                         Flexible(
-                                          child: msgType == 'image' &&
+                                          child: msgType == 'gif' &&
+                                                  imageUrl != null
+                                              ? _GifMessageBubble(
+                                                  key: ValueKey('gif_$messageId'),
+                                                  gifUrl: imageUrl,
+                                                  isMe: isMe,
+                                                )
+                                              : msgType == 'image' &&
                                                   imageUrl != null
                                               ? _ImageMessageBubble(
                                                   key: ValueKey('img_$messageId'),
@@ -1541,8 +1551,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                               : locationData != null
                                                   ? _LocationBubble(
                                                       key: ValueKey('loc_$messageId'),
-                                                      lat: locationData.$1,
-                                                      lng: locationData.$2,
+                                                      lat: locationData.lat,
+                                                      lng: locationData.lng,
+                                                      address: locationData.address,
                                                       isMe: isMe,
                                                     )
                                                   : msgType == 'audio' &&
@@ -1737,9 +1748,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                         newText.trim().isNotEmpty;
                                   },
                                   onGifSelected: (url) {
-                                    // GIF как изображение
                                     setState(() => _showEmojiPanel = false);
-                                    _sendImageUrl(url);
+                                    _sendImageUrl(url, isGif: true);
                                   },
                                 )
                               : const SizedBox.shrink(),
@@ -1936,7 +1946,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 
   Future<void> _startVoiceRecording() async {
     final status = await Permission.microphone.request();
-    if (!status.isGranted || !mounted) return;
+    if (status.isPermanentlyDenied) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Разрешите микрофон в Настройках'),
+          action: SnackBarAction(label: 'Открыть', onPressed: openAppSettings),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return;
+    }
+    if (!status.isGranted && !status.isLimited) return;
+    if (!mounted) return;
     final dir = await getTemporaryDirectory();
     final path =
         '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
@@ -2048,18 +2069,33 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final uid = _me();
     if (uid == null || !mounted) return;
 
-    final camStatus = await Permission.camera.request();
-    final micStatus = await Permission.microphone.request();
-    if (!camStatus.isGranted || !micStatus.isGranted || !mounted) {
+    // Запрашиваем разрешения, но не блокируем если denied —
+    // image_picker сам обрабатывает запрос через iOS native
+    final camStatus = await Permission.camera.status;
+    if (camStatus.isPermanentlyDenied) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Нужны разрешения камеры и микрофона для видеокружка'),
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Разрешите камеру в Настройках'),
+          action: SnackBarAction(label: 'Открыть', onPressed: openAppSettings),
+          behavior: SnackBarBehavior.floating,
+        ));
       }
       return;
     }
+    if (!camStatus.isGranted) await Permission.camera.request();
+    final micStatus = await Permission.microphone.status;
+    if (micStatus.isPermanentlyDenied) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: const Text('Разрешите микрофон в Настройках'),
+          action: SnackBarAction(label: 'Открыть', onPressed: openAppSettings),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+      return;
+    }
+    if (!micStatus.isGranted) await Permission.microphone.request();
+    if (!mounted) return;
 
     XFile? xFile;
     try {
@@ -2296,7 +2332,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _sendImageUrl(String url) async {
+  Future<void> _sendImageUrl(String url, {bool isGif = false}) async {
     final uid = _me();
     if (uid == null) return;
     try {
@@ -2304,7 +2340,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'sender_id': uid,
         'receiver_id': widget.peerId,
         'text': '',
-        'message_type': 'image',
+        'message_type': isGif ? 'gif' : 'image',
         'image_url': url,
       });
       _forceScrollToLatest = true;
@@ -2340,10 +2376,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           timeLimit: Duration(seconds: 12),
         ),
       );
-      final text =
-          '__location__|${pos.latitude}|${pos.longitude}';
-      final tempId =
-          'tmp_loc_${DateTime.now().millisecondsSinceEpoch}';
+
+      // Reverse geocoding — получаем название места
+      String address = '';
+      try {
+        final placemarks = await placemarkFromCoordinates(
+          pos.latitude, pos.longitude,
+        );
+        if (placemarks.isNotEmpty) {
+          final p = placemarks.first;
+          final parts = <String>[
+            if (p.street != null && p.street!.isNotEmpty) p.street!,
+            if (p.locality != null && p.locality!.isNotEmpty) p.locality!,
+          ];
+          address = parts.join(', ');
+        }
+      } catch (_) {}
+
+      final encoded = Uri.encodeComponent(address);
+      final text = '__location__|${pos.latitude}|${pos.longitude}|$encoded';
+      final tempId = 'tmp_loc_${DateTime.now().millisecondsSinceEpoch}';
       setState(() {
         _optimisticMessages.add({
           'id': tempId,
@@ -2436,14 +2488,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  (double, double)? _parseLocationMessage(String text) {
+  ({double lat, double lng, String address})? _parseLocationMessage(String text) {
     if (!text.startsWith('__location__|')) return null;
     final parts = text.split('|');
     if (parts.length < 3) return null;
     final lat = double.tryParse(parts[1]);
     final lng = double.tryParse(parts[2]);
     if (lat == null || lng == null) return null;
-    return (lat, lng);
+    final address = parts.length >= 4
+        ? Uri.decodeComponent(parts[3])
+        : '';
+    return (lat: lat, lng: lng, address: address);
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -3883,74 +3938,308 @@ class _ImageMessageBubble extends StatelessWidget {
 // _LocationBubble — пузырь с местоположением
 // ══════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════
+// _GifMessageBubble — анимиро��анный GIF
+// ══════════════════════════════════════════════════════════════
+
+class _GifMessageBubble extends StatelessWidget {
+  const _GifMessageBubble({
+    super.key,
+    required this.gifUrl,
+    required this.isMe,
+  });
+
+  final String gifUrl;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = Radius.circular(16);
+    final borderRadius = isMe
+        ? const BorderRadius.only(
+            topLeft: radius,
+            topRight: radius,
+            bottomLeft: radius,
+            bottomRight: Radius.circular(4),
+          )
+        : const BorderRadius.only(
+            topLeft: radius,
+            topRight: radius,
+            bottomLeft: Radius.circular(4),
+            bottomRight: radius,
+          );
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: Stack(
+        alignment: Alignment.bottomLeft,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(
+                maxWidth: 200, maxHeight: 200, minWidth: 100),
+            // Image.network animate GIFs natively on mobile
+            child: Image.network(
+              gifUrl,
+              fit: BoxFit.cover,
+              width: 200,
+              loadingBuilder: (ctx, child, progress) {
+                if (progress == null) return child;
+                return Container(
+                  width: 200,
+                  height: 140,
+                  color: Colors.grey.shade200,
+                  child: const Center(child: CircularProgressIndicator()),
+                );
+              },
+              errorBuilder: (ctx, err, st) => Container(
+                width: 200,
+                height: 100,
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.gif_box_rounded,
+                    color: Colors.grey, size: 40),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 6,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: const Text(
+                'GIF',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// _LocationBubble — карта с OSM тайлами (WhatsApp-стиль)
+// ══════════════════════════════════════════════════════════════
+
 class _LocationBubble extends StatelessWidget {
   const _LocationBubble({
     super.key,
     required this.lat,
     required this.lng,
     required this.isMe,
+    this.address = '',
   });
 
   final double lat;
   final double lng;
   final bool isMe;
+  final String address;
+
+  static const int _zoom = 15;
+  static const double _tileSize = 256.0;
+  static const double _bubbleW = 230.0;
+  static const double _mapH = 130.0;
+
+  // OSM tile coords
+  static int _tx(double lon, int z) =>
+      ((lon + 180.0) / 360.0 * (1 << z)).floor();
+
+  static int _ty(double lat, int z) {
+    final r = lat * math.pi / 180.0;
+    return ((1.0 -
+                math.log(math.tan(r) + 1.0 / math.cos(r)) / math.pi) /
+            2.0 *
+            (1 << z))
+        .floor();
+  }
+
+  // Fractional offset of point inside its tile (0..256 px)
+  static double _ox(double lon, int z) =>
+      ((lon + 180.0) / 360.0 * (1 << z) - _tx(lon, z)) * _tileSize;
+
+  static double _oy(double lat, int z) {
+    final r = lat * math.pi / 180.0;
+    final n = (1.0 -
+            math.log(math.tan(r) + 1.0 / math.cos(r)) / math.pi) /
+        2.0 *
+        (1 << z);
+    return (n - n.floor()) * _tileSize;
+  }
+
+  Future<void> _openMaps() async {
+    final uri = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
 
   @override
   Widget build(BuildContext context) {
+    final cx = _tx(lng, _zoom);
+    final cy = _ty(lat, _zoom);
+    // Pixel position of the pin within the 3x3 tile grid (each tile = 256px)
+    final pinX = _tileSize + _ox(lng, _zoom);
+    final pinY = _tileSize + _oy(lat, _zoom);
+    // Scale factor to fit the 3x3 grid (768px wide) into _bubbleW
+    final scale = _bubbleW / (_tileSize * 3);
+    final scaledPinX = pinX * scale;
+    final scaledPinY = pinY * scale;
+
     return GestureDetector(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Координаты: $lat, $lng'),
-          action: SnackBarAction(
-            label: 'Скопировать',
-            onPressed: () => Clipboard.setData(
-                ClipboardData(text: '$lat,$lng')),
-          ),
-          behavior: SnackBarBehavior.floating,
-        ));
-      },
-      child: Container(
-        width: 200,
-        height: 100,
-        decoration: BoxDecoration(
-          color: isMe
-              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.12)
-              : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-              color: isMe
-                  ? Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.3)
-                  : Colors.grey.shade300),
-        ),
-        child: Row(
-          children: [
-            const SizedBox(width: 12),
-            Icon(Icons.location_on_rounded,
-                color: Colors.red.shade400, size: 32),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Местоположение',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 13)),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${lat.toStringAsFixed(5)}, ${lng.toStringAsFixed(5)}',
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade600),
-                    maxLines: 2,
-                  ),
-                ],
+      onTap: _openMaps,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: SizedBox(
+          width: _bubbleW,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // ── Map preview ──
+              SizedBox(
+                width: _bubbleW,
+                height: _mapH,
+                child: Stack(
+                  children: [
+                    // OSM тайлы 3×3
+                    SizedBox(
+                      width: _bubbleW,
+                      height: _mapH,
+                      child: ClipRect(
+                        child: Transform.scale(
+                          scale: scale,
+                          alignment: Alignment.topLeft,
+                          child: SizedBox(
+                            width: _tileSize * 3,
+                            height: _tileSize * 3,
+                            child: GridView.builder(
+                              physics: const NeverScrollableScrollPhysics(),
+                              padding: EdgeInsets.zero,
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                childAspectRatio: 1,
+                              ),
+                              itemCount: 9,
+                              itemBuilder: (ctx, i) {
+                                final row = i ~/ 3;
+                                final col = i % 3;
+                                final tx = cx - 1 + col;
+                                final ty = cy - 1 + row;
+                                final tileUrl =
+                                    'https://tile.openstreetmap.org/$_zoom/$tx/$ty.png';
+                                return CachedNetworkImage(
+                                  imageUrl: tileUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (ctx, url) => Container(
+                                      color: const Color(0xFFE8E0D8)),
+                                  errorWidget: (ctx, url, err) => Container(
+                                      color: const Color(0xFFE8E0D8)),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Пин геолокации
+                    Positioned(
+                      left: scaledPinX - 14,
+                      top: scaledPinY - 28,
+                      child: Icon(
+                        Icons.location_on,
+                        color: const Color(0xFFE53935),
+                        size: 28,
+                        shadows: const [
+                          Shadow(
+                            color: Colors.black38,
+                            offset: Offset(0, 2),
+                            blurRadius: 4,
+                          )
+                        ],
+                      ),
+                    ),
+                    // Полупрозрачная кнопка "открыть"
+                    Positioned(
+                      top: 6,
+                      right: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Colors.black26,
+                              blurRadius: 4,
+                            )
+                          ],
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.open_in_new, size: 12,
+                                color: Color(0xFF1565C0)),
+                            SizedBox(width: 3),
+                            Text(
+                              'Открыть',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF1565C0),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-          ],
+              // ── Address footer ──
+              Container(
+                width: _bubbleW,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isMe
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey.shade200,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.location_on_rounded,
+                      size: 16,
+                      color: isMe
+                          ? Colors.white70
+                          : Colors.red.shade400,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        address.isNotEmpty ? address : 'Местоположение',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isMe ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

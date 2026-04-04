@@ -35,6 +35,7 @@ class PostEntity extends Equatable {
     this.pollVoteCounts = const [],
     this.myPollVoteIndex,
     this.authorOfficialPageActive = false,
+    this.isFollowingAuthor = false,
   });
 
   final String id;
@@ -74,6 +75,8 @@ class PostEntity extends Equatable {
   final int? myPollVoteIndex;
   /// Автор поста имеет активную подписку Official Page (синяя галочка + золотая рамка).
   final bool authorOfficialPageActive;
+  /// Текущий пользователь подписан на автора (followers).
+  final bool isFollowingAuthor;
 
   bool get hasPoll =>
       pollQuestion != null &&
@@ -124,6 +127,7 @@ class PostEntity extends Equatable {
     int? myPollVoteIndex,
     bool clearMyPollVote = false,
     bool? authorOfficialPageActive,
+    bool? isFollowingAuthor,
   }) {
     return PostEntity(
       id: id ?? this.id,
@@ -161,6 +165,7 @@ class PostEntity extends Equatable {
           ? null
           : (myPollVoteIndex ?? this.myPollVoteIndex),
       authorOfficialPageActive: authorOfficialPageActive ?? this.authorOfficialPageActive,
+      isFollowingAuthor: isFollowingAuthor ?? this.isFollowingAuthor,
     );
   }
 
@@ -199,5 +204,6 @@ class PostEntity extends Equatable {
         pollVoteCounts,
         myPollVoteIndex,
         authorOfficialPageActive,
+        isFollowingAuthor,
       ];
 }

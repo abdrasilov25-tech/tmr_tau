@@ -51,6 +51,17 @@ final class NewsToggleRepost extends NewsEvent {
   final String userId;
 }
 
+final class NewsToggleFollow extends NewsEvent {
+  const NewsToggleFollow({
+    required this.followerId,
+    required this.followingId,
+  });
+  final String followerId;
+  final String followingId;
+  @override
+  List<Object?> get props => [followerId, followingId];
+}
+
 final class NewsRefresh extends NewsEvent {
   const NewsRefresh({this.currentUserId, this.cityFilter});
   final String? currentUserId;

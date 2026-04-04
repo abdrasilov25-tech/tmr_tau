@@ -25,6 +25,7 @@ import '../../../notifications/presentation/notification_tab_badge_controller.da
 import '../../../notifications/presentation/widgets/notification_activity_peek_bar.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_author_follow_pill.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../widgets/user_avatar_tap.dart';
@@ -850,6 +851,44 @@ class _MainHomePageState extends State<MainHomePage> {
     }
   }
 
+  Future<void> _toggleFollow(PostEntity post) async {
+    final userId = _currentUserId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы подписаться')),
+      );
+      return;
+    }
+    if (userId == post.userId) return;
+
+    final authorId = post.userId;
+    final was = post.isFollowingAuthor;
+
+    void applyFollow(bool following) {
+      for (var i = 0; i < _postsRecommendations.length; i++) {
+        if (_postsRecommendations[i].userId == authorId) {
+          _postsRecommendations[i] =
+              _postsRecommendations[i].copyWith(isFollowingAuthor: following);
+        }
+      }
+      for (var i = 0; i < _postsSubscriptions.length; i++) {
+        if (_postsSubscriptions[i].userId == authorId) {
+          _postsSubscriptions[i] =
+              _postsSubscriptions[i].copyWith(isFollowingAuthor: following);
+        }
+      }
+    }
+
+    setState(() => applyFollow(!was));
+    _invalidateFollowingIdsCache();
+
+    try {
+      await context.read<ProfileRepository>().toggleFollow(userId, authorId);
+    } catch (_) {
+      if (mounted) setState(() => applyFollow(was));
+    }
+  }
+
   Future<void> _shareToUser(PostEntity post) async {
     if (_currentUserId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -927,6 +966,9 @@ class _MainHomePageState extends State<MainHomePage> {
             height: itemHeight,
             post: post,
             currentUserId: _currentUserId,
+            onFollow: _currentUserId != null && _currentUserId != post.userId
+                ? () => unawaited(_toggleFollow(post))
+                : null,
             onLike: () => _toggleLike(post),
             onRepost: () => _toggleRepost(post),
             onSave: () => _toggleSave(post),
@@ -1288,6 +1330,7 @@ class _InstagramPostItem extends StatelessWidget {
     required this.height,
     required this.post,
     required this.currentUserId,
+    this.onFollow,
     required this.onLike,
     required this.onComment,
     required this.onRepost,
@@ -1298,6 +1341,7 @@ class _InstagramPostItem extends StatelessWidget {
   final double height;
   final PostEntity post;
   final String? currentUserId;
+  final VoidCallback? onFollow;
 
   final VoidCallback onLike;
   final VoidCallback onComment;
@@ -1355,6 +1399,14 @@ class _InstagramPostItem extends StatelessWidget {
                         ),
                       ),
                     ),
+                    if (onFollow != null) ...[
+                      const SizedBox(width: 8),
+                      PostAuthorFollowPill(
+                        isFollowing: p.isFollowingAuthor,
+                        onTap: onFollow!,
+                        compact: true,
+                      ),
+                    ],
                   ],
                 ),
               ),

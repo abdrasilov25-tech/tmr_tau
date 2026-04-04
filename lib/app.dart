@@ -61,6 +61,8 @@ import 'features/live_battle/data/repositories/live_battle_repository_impl.dart'
 import 'features/live_battle/domain/repositories/live_battle_repository.dart';
 import 'features/live_streaming/data/repositories/live_streaming_repository_impl.dart';
 import 'features/live_streaming/domain/repositories/live_streaming_repository.dart';
+import 'features/tap_game/data/tap_game_repository_impl.dart';
+import 'features/tap_game/domain/repositories/tap_game_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -106,6 +108,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   late final OrdersRepository _ordersRepository;
   late final LiveBattleRepository _liveBattleRepository;
   late final LiveStreamingRepository _liveStreamingRepository;
+  late final TapGameRepository _tapGameRepository;
   late final AppRouter _appRouter;
   late final GeoService _geoService;
   late final SearchTabActivationController _searchTabActivation;
@@ -153,6 +156,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
     _ordersRepository = OrdersRepositoryImpl(_client);
     _liveBattleRepository = LiveBattleRepositoryImpl(_client);
     _liveStreamingRepository = LiveStreamingRepositoryImpl(_client);
+    _tapGameRepository = TapGameRepositoryImpl(_client);
     _geoService = const GeoService();
     _searchTabActivation = SearchTabActivationController();
     _accountManager = AccountManager(
@@ -275,6 +279,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         RepositoryProvider<LiveStreamingRepository>.value(
           value: _liveStreamingRepository,
         ),
+        RepositoryProvider<TapGameRepository>.value(value: _tapGameRepository),
         RepositoryProvider<GeoService>.value(value: _geoService),
         ChangeNotifierProvider<SearchTabActivationController>.value(
           value: _searchTabActivation,
@@ -326,7 +331,10 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
               }
             },
             child: BlocProvider<NewsBloc>(
-              create: (context) => NewsBloc(context.read<PostRepository>()),
+              create: (context) => NewsBloc(
+                context.read<PostRepository>(),
+                context.read<ProfileRepository>(),
+              ),
               child: BlocProvider<FeedBloc>(
                 create: (context) => FeedBloc(
                   _feedRepository,

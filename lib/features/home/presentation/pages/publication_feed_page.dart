@@ -309,10 +309,14 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
   Future<void> _toggleFollow(PostEntity post) async {
     final uid = _currentUserId;
     if (uid == null || uid == post.userId) return;
+    final prev = post.isFollowingAuthor;
+    _updatePost(post.copyWith(isFollowingAuthor: !prev));
     try {
       final profileRepo = context.read<ProfileRepository>();
       await profileRepo.toggleFollow(uid, post.userId);
-    } catch (_) {}
+    } catch (_) {
+      _updatePost(post.copyWith(isFollowingAuthor: prev));
+    }
   }
 
   // ── Build ──────────────────────────────────────────────────

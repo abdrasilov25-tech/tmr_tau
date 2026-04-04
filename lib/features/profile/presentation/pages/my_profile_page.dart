@@ -1343,6 +1343,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
             const Divider(height: 1, indent: 16, endIndent: 16),
             // ── Остальные пункты ─────────────────────────────────────────
             ListTile(
+              leading: const Icon(Icons.touch_app_rounded),
+              title: const Text('Тап судьбы 🔥'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/tap-game');
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.palette_outlined),
               title: const Text('Темки'),
               onTap: () {

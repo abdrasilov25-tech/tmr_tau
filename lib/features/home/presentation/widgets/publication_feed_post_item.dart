@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../post/presentation/widgets/post_author_follow_pill.dart';
 import '../pages/post_detail_modal.dart';
 import '../pages/video_feed_screen.dart';
 import 'user_avatar_tap.dart';
@@ -199,9 +200,12 @@ class _PostHeader extends StatelessWidget {
             ),
           ),
 
-          // Кнопка Follow (не для своих постов)
           if (!isOwnPost && onFollow != null)
-            _FollowButton(onTap: onFollow!),
+            PostAuthorFollowPill(
+              isFollowing: post.isFollowingAuthor,
+              onTap: onFollow!,
+              compact: true,
+            ),
 
           // Меню (три точки)
           _OptionsMenu(post: post, currentUserId: currentUserId),
@@ -218,35 +222,6 @@ class _PostHeader extends StatelessWidget {
     if (diff.inDays < 7) return '${diff.inDays} д';
     if (diff.inDays < 30) return '${(diff.inDays / 7).floor()} нед';
     return '${(diff.inDays / 30).floor()} мес';
-  }
-}
-
-class _FollowButton extends StatelessWidget {
-  const _FollowButton({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: Theme.of(context).colorScheme.primary,
-          ),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          'Follow',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-        ),
-      ),
-    );
   }
 }
 

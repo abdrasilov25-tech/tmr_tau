@@ -130,8 +130,10 @@ class _NotificationTile extends StatelessWidget {
     Widget leading;
     if (notification.actorId != null) {
       leading = CachedAvatar(
-        url: notification.actorAvatarUrl,
+        imageUrl: notification.actorAvatarUrl,
         radius: 24,
+        fallbackText: notification.actorName,
+        enableLightboxOnTap: false,
       );
     } else {
       leading = CircleAvatar(

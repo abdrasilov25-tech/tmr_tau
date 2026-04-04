@@ -69,6 +69,26 @@ class PostRepositoryImpl implements PostRepository {
         (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
     final savedIds =
         (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
+
+    final authorIds = list
+        .map((e) => e.userId)
+        .where((id) => id != currentUserId)
+        .toSet()
+        .toList(growable: false);
+    var followingAuthorIds = <String>{};
+    if (authorIds.isNotEmpty) {
+      try {
+        final fr = await _client
+            .from(SupabaseConstants.followersTable)
+            .select('following_id')
+            .eq('follower_id', currentUserId)
+            .inFilter('following_id', authorIds);
+        followingAuthorIds = (fr as List)
+            .map((e) => (e as Map)['following_id'] as String)
+            .toSet();
+      } catch (_) {}
+    }
+
     return list
         .map(
           (p) => PostModel(
@@ -105,6 +125,8 @@ class PostRepositoryImpl implements PostRepository {
             pollVoteCounts: p.pollVoteCounts,
             myPollVoteIndex: p.myPollVoteIndex,
             authorOfficialPageActive: p.authorOfficialPageActive,
+            isFollowingAuthor: p.userId != currentUserId &&
+                followingAuthorIds.contains(p.userId),
           ),
         )
         .toList();
@@ -529,70 +551,7 @@ class PostRepositoryImpl implements PostRepository {
       limit: safeLimit,
     );
     list = await _attachPollStats(list, currentUserId);
-
-    final ids = list.map((e) => e.id).toList(growable: false);
-    final likes = await _client
-        .from(SupabaseConstants.postLikesTable)
-        .select('post_id')
-        .eq('user_id', currentUserId)
-        .inFilter('post_id', ids);
-    final reposts = await _client
-        .from(SupabaseConstants.repostsTable)
-        .select('post_id')
-        .eq('user_id', currentUserId)
-        .inFilter('post_id', ids);
-    final saves = await _client
-        .from(SupabaseConstants.postSavesTable)
-        .select('post_id')
-        .eq('user_id', currentUserId)
-        .inFilter('post_id', ids);
-    final likedIds =
-        (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
-    final repostedIds = (reposts as List)
-        .map((e) => (e as Map)['post_id'] as String)
-        .toSet();
-    final savedIds =
-        (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
-
-    return list
-        .map(
-          (p) => PostModel(
-            id: p.id,
-            userId: p.userId,
-            kind: p.kind,
-            imageUrl: p.imageUrl,
-            imageUrls: p.imageUrls,
-            caption: p.caption,
-            videoUrl: p.videoUrl,
-            videoDurationSeconds: p.videoDurationSeconds,
-            createdAt: p.createdAt,
-            likesCount: p.likesCount,
-            dislikesCount: p.dislikesCount,
-            commentsCount: p.commentsCount,
-            viewsCount: p.viewsCount,
-            repostsCount: p.repostsCount,
-            userName: p.userName,
-            userAvatarUrl: p.userAvatarUrl,
-            isLikedByMe: likedIds.contains(p.id),
-            isDislikedByMe: p.isDislikedByMe,
-            isRepostedByMe: repostedIds.contains(p.id),
-            isSavedByMe: savedIds.contains(p.id),
-            latitude: p.latitude,
-            longitude: p.longitude,
-            distanceKm: p.distanceKm,
-            isPromoted: p.isPromoted,
-            promotedUntil: p.promotedUntil,
-            city: p.city,
-            isAnonymous: p.isAnonymous,
-            locationLabel: p.locationLabel,
-            pollQuestion: p.pollQuestion,
-            pollOptions: p.pollOptions,
-            pollVoteCounts: p.pollVoteCounts,
-            myPollVoteIndex: p.myPollVoteIndex,
-            authorOfficialPageActive: p.authorOfficialPageActive,
-          ),
-        )
-        .toList(growable: false);
+    return await _applyPostUserState(list, currentUserId);
   }
 
   List<PostEntity> _applySmartNewsRanking(List<PostEntity> source) {
@@ -789,6 +748,18 @@ class PostRepositoryImpl implements PostRepository {
           .inFilter('post_id', ids);
       final likedIds = (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
       final savedIds = (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
+      var followingProfile = false;
+      if (userId != currentUserId) {
+        try {
+          final row = await _client
+              .from(SupabaseConstants.followersTable)
+              .select('following_id')
+              .eq('follower_id', currentUserId)
+              .eq('following_id', userId)
+              .maybeSingle();
+          followingProfile = row != null;
+        } catch (_) {}
+      }
       return list
           .map((p) => PostModel(
                 id: p.id,
@@ -817,6 +788,7 @@ class PostRepositoryImpl implements PostRepository {
                 isPromoted: p.isPromoted,
                 promotedUntil: p.promotedUntil,
                 authorOfficialPageActive: p.authorOfficialPageActive,
+                isFollowingAuthor: followingProfile,
               ))
           .toList();
     }
@@ -1132,37 +1104,7 @@ class PostRepositoryImpl implements PostRepository {
     final order = {for (var i = 0; i < postIds.length; i++) postIds[i]: i};
     list.sort((a, b) => (order[a.id] ?? 1 << 20).compareTo(order[b.id] ?? 1 << 20));
 
-    return list
-        .map(
-          (p) => PostModel(
-            id: p.id,
-            userId: p.userId,
-            kind: p.kind,
-            imageUrl: p.imageUrl,
-            imageUrls: p.imageUrls,
-            caption: p.caption,
-            videoUrl: p.videoUrl,
-            videoDurationSeconds: p.videoDurationSeconds,
-            createdAt: p.createdAt,
-            likesCount: p.likesCount,
-            dislikesCount: p.dislikesCount,
-            commentsCount: p.commentsCount,
-            viewsCount: p.viewsCount,
-            repostsCount: p.repostsCount,
-            userName: p.userName,
-            userAvatarUrl: p.userAvatarUrl,
-            isLikedByMe: p.isLikedByMe,
-            isDislikedByMe: p.isDislikedByMe,
-            isRepostedByMe: p.isRepostedByMe,
-            isSavedByMe: true,
-            latitude: p.latitude,
-            longitude: p.longitude,
-            distanceKm: p.distanceKm,
-            isPromoted: p.isPromoted,
-            promotedUntil: p.promotedUntil,
-          ),
-        )
-        .toList(growable: false);
+    return _applyPostUserState(list, userId);
   }
 
   @override
@@ -1194,37 +1136,7 @@ class PostRepositoryImpl implements PostRepository {
     final order = {for (var i = 0; i < postIds.length; i++) postIds[i]: i};
     list.sort((a, b) => (order[a.id] ?? 1 << 20).compareTo(order[b.id] ?? 1 << 20));
 
-    return list
-        .map(
-          (p) => PostModel(
-            id: p.id,
-            userId: p.userId,
-            kind: p.kind,
-            imageUrl: p.imageUrl,
-            imageUrls: p.imageUrls,
-            caption: p.caption,
-            videoUrl: p.videoUrl,
-            videoDurationSeconds: p.videoDurationSeconds,
-            createdAt: p.createdAt,
-            likesCount: p.likesCount,
-            dislikesCount: p.dislikesCount,
-            commentsCount: p.commentsCount,
-            viewsCount: p.viewsCount,
-            repostsCount: p.repostsCount,
-            userName: p.userName,
-            userAvatarUrl: p.userAvatarUrl,
-            isLikedByMe: true,
-            isDislikedByMe: p.isDislikedByMe,
-            isRepostedByMe: p.isRepostedByMe,
-            isSavedByMe: p.isSavedByMe,
-            latitude: p.latitude,
-            longitude: p.longitude,
-            distanceKm: p.distanceKm,
-            isPromoted: p.isPromoted,
-            promotedUntil: p.promotedUntil,
-          ),
-        )
-        .toList(growable: false);
+    return _applyPostUserState(list, userId);
   }
 
   @override
@@ -1347,61 +1259,7 @@ class PostRepositoryImpl implements PostRepository {
 
     if (currentUserId == null || list.isEmpty) return list;
 
-    final ids = list.map((e) => e.id).toList(growable: false);
-    final likes = await _client
-        .from(SupabaseConstants.postLikesTable)
-        .select('post_id')
-        .eq('user_id', currentUserId)
-        .inFilter('post_id', ids);
-    final reposts = await _client
-        .from(SupabaseConstants.repostsTable)
-        .select('post_id')
-        .eq('user_id', currentUserId)
-        .inFilter('post_id', ids);
-    final saves = await _client
-        .from(SupabaseConstants.postSavesTable)
-        .select('post_id')
-        .eq('user_id', currentUserId)
-        .inFilter('post_id', ids);
-
-    final likedIds =
-        (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
-    final repostedIds =
-        (reposts as List).map((e) => (e as Map)['post_id'] as String).toSet();
-    final savedIds =
-        (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
-
-    return list
-        .map(
-          (p) => PostModel(
-            id: p.id,
-            userId: p.userId,
-            kind: p.kind,
-            imageUrl: p.imageUrl,
-            imageUrls: p.imageUrls,
-            caption: p.caption,
-            videoUrl: p.videoUrl,
-            videoDurationSeconds: p.videoDurationSeconds,
-            createdAt: p.createdAt,
-            likesCount: p.likesCount,
-            dislikesCount: p.dislikesCount,
-            commentsCount: p.commentsCount,
-            viewsCount: p.viewsCount,
-            repostsCount: p.repostsCount,
-            userName: p.userName,
-            userAvatarUrl: p.userAvatarUrl,
-            isLikedByMe: likedIds.contains(p.id),
-            isDislikedByMe: p.isDislikedByMe,
-            isRepostedByMe: repostedIds.contains(p.id),
-            isSavedByMe: savedIds.contains(p.id),
-            latitude: p.latitude,
-            longitude: p.longitude,
-            distanceKm: p.distanceKm,
-            isPromoted: p.isPromoted,
-            promotedUntil: p.promotedUntil,
-          ),
-        )
-        .toList(growable: false);
+    return await _applyPostUserState(list, currentUserId);
   }
 
   @override
@@ -1436,60 +1294,7 @@ class PostRepositoryImpl implements PostRepository {
           .map((e) => _mapPost(e as Map<String, dynamic>))
           .toList(growable: false);
       if (currentUserId == null || list.isEmpty) return list;
-      final ids = list.map((e) => e.id).toList(growable: false);
-      final likes = await _client
-          .from(SupabaseConstants.postLikesTable)
-          .select('post_id')
-          .eq('user_id', currentUserId)
-          .inFilter('post_id', ids);
-      final reposts = await _client
-          .from(SupabaseConstants.repostsTable)
-          .select('post_id')
-          .eq('user_id', currentUserId)
-          .inFilter('post_id', ids);
-      final saves = await _client
-          .from(SupabaseConstants.postSavesTable)
-          .select('post_id')
-          .eq('user_id', currentUserId)
-          .inFilter('post_id', ids);
-      final likedIds =
-          (likes as List).map((e) => (e as Map)['post_id'] as String).toSet();
-      final repostedIds = (reposts as List)
-          .map((e) => (e as Map)['post_id'] as String)
-          .toSet();
-      final savedIds =
-          (saves as List).map((e) => (e as Map)['post_id'] as String).toSet();
-      return list
-          .map(
-            (p) => PostModel(
-              id: p.id,
-              userId: p.userId,
-              kind: p.kind,
-              imageUrl: p.imageUrl,
-              imageUrls: p.imageUrls,
-              caption: p.caption,
-              videoUrl: p.videoUrl,
-              videoDurationSeconds: p.videoDurationSeconds,
-              createdAt: p.createdAt,
-              likesCount: p.likesCount,
-              dislikesCount: p.dislikesCount,
-              commentsCount: p.commentsCount,
-              viewsCount: p.viewsCount,
-              repostsCount: p.repostsCount,
-              userName: p.userName,
-              userAvatarUrl: p.userAvatarUrl,
-              isLikedByMe: likedIds.contains(p.id),
-              isDislikedByMe: p.isDislikedByMe,
-              isRepostedByMe: repostedIds.contains(p.id),
-              isSavedByMe: savedIds.contains(p.id),
-              latitude: p.latitude,
-              longitude: p.longitude,
-              distanceKm: p.distanceKm,
-              isPromoted: p.isPromoted,
-              promotedUntil: p.promotedUntil,
-            ),
-          )
-          .toList(growable: false);
+      return await _applyPostUserState(list, currentUserId);
     } catch (_) {
       return const [];
     }
@@ -1523,6 +1328,18 @@ class PostRepositoryImpl implements PostRepository {
           .eq('post_id', postId)
           .eq('user_id', currentUserId)
           .maybeSingle();
+      var followingAuthor = false;
+      if (post.userId != currentUserId) {
+        try {
+          final row = await _client
+              .from(SupabaseConstants.followersTable)
+              .select('following_id')
+              .eq('follower_id', currentUserId)
+              .eq('following_id', post.userId)
+              .maybeSingle();
+          followingAuthor = row != null;
+        } catch (_) {}
+      }
       return PostModel(
         id: post.id,
         userId: post.userId,
@@ -1550,6 +1367,7 @@ class PostRepositoryImpl implements PostRepository {
         isPromoted: post.isPromoted,
         promotedUntil: post.promotedUntil,
         authorOfficialPageActive: post.authorOfficialPageActive,
+        isFollowingAuthor: followingAuthor,
       );
     }
     return post;

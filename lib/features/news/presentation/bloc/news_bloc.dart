@@ -4,22 +4,25 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../profile/domain/repositories/profile_repository.dart';
 
 part 'news_event.dart';
 part 'news_state.dart';
 
 class NewsBloc extends Bloc<NewsEvent, NewsState> {
-  NewsBloc(this._repository) : super(NewsInitial()) {
+  NewsBloc(this._repository, this._profileRepository) : super(NewsInitial()) {
     on<NewsLoaded>(_onLoaded);
     on<NewsLoadMore>(_onLoadMore);
     on<NewsVotePoll>(_onVotePoll);
     on<NewsToggleLike>(_onToggleLike);
     on<NewsToggleRepost>(_onToggleRepost);
+    on<NewsToggleFollow>(_onToggleFollow);
     on<NewsRefresh>(_onRefresh);
     on<NewsCleared>(_onCleared);
   }
 
   final PostRepository _repository;
+  final ProfileRepository _profileRepository;
   static const int _pageSize = 20;
 
   void _onCleared(NewsCleared event, Emitter<NewsState> emit) {
@@ -182,6 +185,46 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
       }).toList();
       if (!isClosed) emit(current.copyWith(posts: updated));
     } catch (_) {}
+  }
+
+  Future<void> _onToggleFollow(
+    NewsToggleFollow event,
+    Emitter<NewsState> emit,
+  ) async {
+    final current = state;
+    if (current is! NewsSuccess) return;
+    final authorId = event.followingId;
+    PostEntity? sample;
+    for (final p in current.posts) {
+      if (p.userId == authorId) {
+        sample = p;
+        break;
+      }
+    }
+    if (sample == null) return;
+    final was = sample.isFollowingAuthor;
+    final optimistic = current.posts
+        .map(
+          (p) => p.userId == authorId
+              ? p.copyWith(isFollowingAuthor: !was)
+              : p,
+        )
+        .toList(growable: false);
+    if (!isClosed) emit(current.copyWith(posts: optimistic));
+    try {
+      await _profileRepository.toggleFollow(event.followerId, authorId);
+    } catch (_) {
+      if (!isClosed) {
+        final reverted = current.posts
+            .map(
+              (p) => p.userId == authorId
+                  ? p.copyWith(isFollowingAuthor: was)
+                  : p,
+            )
+            .toList(growable: false);
+        emit(current.copyWith(posts: reverted));
+      }
+    }
   }
 
   Future<void> _onRefresh(NewsRefresh event, Emitter<NewsState> emit) async {

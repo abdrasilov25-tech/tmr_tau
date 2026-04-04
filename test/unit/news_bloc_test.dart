@@ -4,11 +4,15 @@ import 'package:mocktail/mocktail.dart';
 import 'package:tmr_tau/features/news/presentation/bloc/news_bloc.dart';
 import 'package:tmr_tau/features/post/domain/entities/post_entity.dart';
 import 'package:tmr_tau/features/post/domain/repositories/post_repository.dart';
+import 'package:tmr_tau/features/profile/domain/repositories/profile_repository.dart';
 
 class MockPostRepository extends Mock implements PostRepository {}
 
+class MockProfileRepository extends Mock implements ProfileRepository {}
+
 void main() {
   late MockPostRepository mockRepo;
+  late MockProfileRepository mockProfile;
   final t0 = DateTime(2024, 6, 1);
 
   PostEntity post({
@@ -32,11 +36,13 @@ void main() {
 
   setUp(() {
     mockRepo = MockPostRepository();
+    mockProfile = MockProfileRepository();
+    when(() => mockProfile.toggleFollow(any(), any())).thenAnswer((_) async {});
   });
 
   group('NewsBloc', () {
     test('initial state is NewsInitial', () {
-      expect(NewsBloc(mockRepo).state, isA<NewsInitial>());
+      expect(NewsBloc(mockRepo, mockProfile).state, isA<NewsInitial>());
     });
 
     blocTest<NewsBloc, NewsState>(
@@ -55,7 +61,7 @@ void main() {
             post(id: 'n2', kind: 'NEWS'),
           ],
         );
-        return NewsBloc(mockRepo);
+        return NewsBloc(mockRepo, mockProfile);
       },
       act: (b) => b.add(const NewsLoaded(currentUserId: 'u1')),
       expect: () => [
@@ -78,7 +84,7 @@ void main() {
             currentUserId: any(named: 'currentUserId'),
           ),
         ).thenThrow(Exception('network'));
-        return NewsBloc(mockRepo);
+        return NewsBloc(mockRepo, mockProfile);
       },
       act: (b) => b.add(const NewsLoaded()),
       expect: () => [
@@ -104,7 +110,7 @@ void main() {
             currentUserId: 'u',
           ),
         ).thenThrow(Exception('fail'));
-        return NewsBloc(mockRepo);
+        return NewsBloc(mockRepo, mockProfile);
       },
       act: (b) async {
         b.add(const NewsLoaded(currentUserId: 'u'));
@@ -136,7 +142,7 @@ void main() {
           ),
         ).thenAnswer((_) async => [post(id: 'x', likes: 3, liked: false)]);
         when(() => mockRepo.toggleLike('x', 'u1')).thenThrow(Exception('e'));
-        return NewsBloc(mockRepo);
+        return NewsBloc(mockRepo, mockProfile);
       },
       act: (b) async {
         b.add(const NewsLoaded());
@@ -164,6 +170,50 @@ void main() {
     );
 
     blocTest<NewsBloc, NewsState>(
+      'NewsToggleFollow: оптимистично для всех постов автора',
+      build: () {
+        when(
+          () => mockRepo.getNewsPosts(
+            limit: 20,
+            offset: 0,
+            currentUserId: 'u1',
+          ),
+        ).thenAnswer(
+          (_) async => [
+            post(id: 'a', kind: 'news'),
+            post(id: 'b', kind: 'news'),
+          ],
+        );
+        return NewsBloc(mockRepo, mockProfile);
+      },
+      act: (b) async {
+        b.add(const NewsLoaded(currentUserId: 'u1'));
+        await b.stream.firstWhere((s) => s is NewsSuccess);
+        b.add(
+          const NewsToggleFollow(
+            followerId: 'u1',
+            followingId: 'author',
+          ),
+        );
+      },
+      expect: () => [
+        isA<NewsLoading>(),
+        isA<NewsSuccess>().having(
+          (NewsSuccess s) =>
+              s.posts.every((p) => p.isFollowingAuthor == false),
+          'до',
+          true,
+        ),
+        isA<NewsSuccess>().having(
+          (NewsSuccess s) =>
+              s.posts.every((p) => p.isFollowingAuthor == true),
+          'после',
+          true,
+        ),
+      ],
+    );
+
+    blocTest<NewsBloc, NewsState>(
       'NewsToggleRepost: после успеха меняет счётчик',
       build: () {
         when(
@@ -174,7 +224,7 @@ void main() {
           ),
         ).thenAnswer((_) async => [post(id: 'x', reposts: 1, reposted: false)]);
         when(() => mockRepo.toggleRepost('x', 'u1')).thenAnswer((_) async {});
-        return NewsBloc(mockRepo);
+        return NewsBloc(mockRepo, mockProfile);
       },
       act: (b) async {
         b.add(const NewsLoaded());

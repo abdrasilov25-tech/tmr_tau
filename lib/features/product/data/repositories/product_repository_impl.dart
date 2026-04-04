@@ -10,6 +10,106 @@ import '../../domain/repositories/product_repository.dart';
 import '../../domain/value_objects/product_price_insight.dart';
 import '../models/product_model.dart';
 
+// ─────────────────────────────────────────────────────────────
+// In-memory caches (static — живут пока жив процесс)
+// ─────────────────────────────────────────────────────────────
+
+/// Кэш флагов «лайкнул / репостил / подписан» — TTL 2 мин.
+/// Обновляется при мутациях (toggleLike, toggleFollow...).
+class _UserStateCache {
+  static const _ttl = Duration(minutes: 2);
+  static final Map<String, _UserStateCacheEntry> _store = {};
+
+  static _UserStateCacheEntry? get(String userId) {
+    final e = _store[userId];
+    if (e == null) return null;
+    if (DateTime.now().difference(e.createdAt) > _ttl) {
+      _store.remove(userId);
+      return null;
+    }
+    return e;
+  }
+
+  static void put(String userId, _UserStateCacheEntry entry) =>
+      _store[userId] = entry;
+
+  static void invalidate(String userId) => _store.remove(userId);
+
+  /// Добавляем/убираем один id без полного сброса кэша.
+  static void patchLike(String userId, String productId, {required bool liked}) {
+    final e = _store[userId];
+    if (e == null) return;
+    liked ? e.likedIds.add(productId) : e.likedIds.remove(productId);
+  }
+
+  static void patchRepost(String userId, String productId, {required bool reposted}) {
+    final e = _store[userId];
+    if (e == null) return;
+    reposted ? e.repostedIds.add(productId) : e.repostedIds.remove(productId);
+  }
+
+  static void patchFollow(String userId, String sellerId, {required bool following}) {
+    final e = _store[userId];
+    if (e == null) return;
+    following ? e.followingIds.add(sellerId) : e.followingIds.remove(sellerId);
+  }
+}
+
+class _UserStateCacheEntry {
+  _UserStateCacheEntry({
+    required Set<String> likedIds,
+    required Set<String> repostedIds,
+    required Set<String> followingIds,
+    required this.createdAt,
+  })  : likedIds = likedIds,
+        repostedIds = repostedIds,
+        followingIds = followingIds;
+
+  final Set<String> likedIds;
+  final Set<String> repostedIds;
+  final Set<String> followingIds;
+  final DateTime createdAt;
+}
+
+/// Кэш аффинити продавцов — TTL 5 мин.
+class _AffinityCache {
+  static const _ttl = Duration(minutes: 5);
+  static String? _uid;
+  static Map<String, double>? _scores;
+  static DateTime? _at;
+
+  static Map<String, double>? get(String userId) {
+    if (_uid != userId || _scores == null || _at == null) return null;
+    if (DateTime.now().difference(_at!) > _ttl) { _scores = null; return null; }
+    return Map<String, double>.from(_scores!);
+  }
+
+  static void put(String userId, Map<String, double> scores) {
+    _uid = userId;
+    _scores = Map<String, double>.from(scores);
+    _at = DateTime.now();
+  }
+}
+
+/// Кэш количества репостов по productId — TTL 30 сек.
+class _RepostCountCache {
+  static const _ttl = Duration(seconds: 30);
+  static Map<String, int> _counts = {};
+  static DateTime? _at;
+
+  static Map<String, int>? getFor(List<String> ids) {
+    if (_at == null || DateTime.now().difference(_at!) > _ttl) return null;
+    // Возвращаем только если все запрошенные ID есть в кэше
+    if (ids.any((id) => !_counts.containsKey(id))) return null;
+    return Map.fromEntries(ids.map((id) => MapEntry(id, _counts[id] ?? 0)));
+  }
+
+  static void merge(Map<String, int> fresh) {
+    _counts = {..._counts, ...fresh};
+    _at = DateTime.now();
+  }
+}
+
 class ProductRepositoryImpl implements ProductRepository {
   @override
   Future<SellerListingPolicy> getSellerListingPolicy(String sellerId) async {
@@ -104,14 +204,16 @@ class ProductRepositoryImpl implements ProductRepository {
     Set<String> excludeSellerIds = const {},
   }) async {
     final safeLimit = limit.clamp(1, 100);
-    final fetchWindow = math.max(safeLimit * 3, 30);
-    final fetchFrom = math.max(offset * 3, 0);
+    // Загружаем только 1.5× для ранжирования — вместо 3×
+    final fetchWindow = math.max((safeLimit * 1.5).ceil(), safeLimit + 5);
+    final fetchFrom = offset < 0 ? 0 : offset;
     final fetchTo = fetchFrom + fetchWindow - 1;
     dynamic queryBuilder = _client
         .from(SupabaseConstants.productsTable)
         .select(_productSelect);
     queryBuilder = _excludeSellerIds(queryBuilder, excludeSellerIds);
     final res = await queryBuilder
+        .order('is_top', ascending: false)
         .order('created_at', ascending: false)
         .range(fetchFrom, fetchTo);
     final rawList = _mapProducts(res as List);
@@ -318,8 +420,9 @@ class ProductRepositoryImpl implements ProductRepository {
     final res = await _client
         .from(SupabaseConstants.productsTable)
         .select(_productSelect)
+        .order('view_count', ascending: false)
         .order('created_at', ascending: false)
-        .limit(math.max(safeLimit * 3, 30));
+        .limit(math.max((safeLimit * 1.5).ceil(), safeLimit + 5));
     final list = _mapProducts(res as List);
     final ranked = await _rankFeedProducts(
       source: list,
@@ -664,17 +767,41 @@ class ProductRepositoryImpl implements ProductRepository {
     if (ids.isEmpty) return list;
     final sellerIds = list.map((e) => e.sellerId).toSet().toList();
 
-    final results = await Future.wait<Object>([
-      _likedProductIdsForUser(currentUserId, ids),
-      _followingSellerIdsForUser(currentUserId, sellerIds),
-      _repostedProductIdsForUser(currentUserId, ids),
-      _repostCountsByProductId(ids),
-    ]);
+    // ── Получаем состояние пользователя из кэша или с сервера ──
+    Set<String> likedIds;
+    Set<String> repostedIds;
+    Set<String> followingIds;
 
-    final likedIds = results[0] as Set<String>;
-    final followingIds = results[1] as Set<String>;
-    final repostedIds = results[2] as Set<String>;
-    final repostCounts = results[3] as Map<String, int>;
+    final cached = _UserStateCache.get(currentUserId);
+    if (cached != null) {
+      likedIds = cached.likedIds;
+      repostedIds = cached.repostedIds;
+      followingIds = cached.followingIds;
+    } else {
+      // Первый раз — загружаем все сразу одним параллельным запросом
+      final results = await Future.wait<Object>([
+        _allLikedProductIds(currentUserId),
+        _allFollowingSellerIds(currentUserId),
+        _allRepostedProductIds(currentUserId),
+      ]);
+      likedIds = results[0] as Set<String>;
+      followingIds = results[1] as Set<String>;
+      repostedIds = results[2] as Set<String>;
+      _UserStateCache.put(
+        currentUserId,
+        _UserStateCacheEntry(
+          likedIds: likedIds,
+          repostedIds: repostedIds,
+          followingIds: followingIds,
+          createdAt: DateTime.now(),
+        ),
+      );
+    }
+
+    // ── Количество репостов — кэш 30 сек ──
+    Map<String, int> repostCounts =
+        _RepostCountCache.getFor(ids) ?? await _repostCountsByProductId(ids);
+    _RepostCountCache.merge(repostCounts);
 
     return list
         .map(
@@ -689,6 +816,54 @@ class ProductRepositoryImpl implements ProductRepository {
           ),
         )
         .toList();
+  }
+
+  /// Загружает ВСЕ лайки пользователя (limit 1000) за один запрос.
+  Future<Set<String>> _allLikedProductIds(String userId) async {
+    try {
+      final rows = await _client
+          .from(SupabaseConstants.productLikesTable)
+          .select('product_id')
+          .eq('user_id', userId)
+          .limit(1000);
+      return (rows as List)
+          .map((e) => (e as Map)['product_id'] as String)
+          .toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Загружает ВСЕ подписки пользователя за один запрос.
+  Future<Set<String>> _allFollowingSellerIds(String userId) async {
+    try {
+      final rows = await _client
+          .from(SupabaseConstants.followersTable)
+          .select('following_id')
+          .eq('follower_id', userId)
+          .limit(1000);
+      return (rows as List)
+          .map((e) => (e as Map)['following_id'] as String)
+          .toSet();
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Загружает ВСЕ репосты пользователя за один запрос.
+  Future<Set<String>> _allRepostedProductIds(String userId) async {
+    try {
+      final rows = await _client
+          .from(SupabaseConstants.productRepostsTable)
+          .select('product_id')
+          .eq('user_id', userId)
+          .limit(1000);
+      return (rows as List)
+          .map((e) => (e as Map)['product_id'] as String)
+          .toSet();
+    } catch (_) {
+      return {};
+    }
   }
 
   Future<String?> _productSellerId(String productId) async {
@@ -805,6 +980,15 @@ class ProductRepositoryImpl implements ProductRepository {
     required Set<String> candidateSellerIds,
   }) async {
     if (candidateSellerIds.isEmpty) return const <String, double>{};
+
+    // Возвращаем из кэша если свежий
+    final cached = _AffinityCache.get(currentUserId);
+    if (cached != null) {
+      // Фильтруем только нужных продавцов
+      return Map.fromEntries(
+        cached.entries.where((e) => candidateSellerIds.contains(e.key)),
+      );
+    }
     final scores = <String, double>{};
 
     Future<void> addSignal({
