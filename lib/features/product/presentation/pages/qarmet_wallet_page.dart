@@ -122,9 +122,13 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
             final purchaseTargetChanged =
                 prev.purchasingQarmetProductId !=
                     next.purchasingQarmetProductId;
+            final storeStateChanged =
+                prev.isStoreReady != next.isStoreReady ||
+                prev.storeInitError != next.storeInitError;
             return dataChanged ||
                 loadingChanged ||
-                purchaseTargetChanged;
+                purchaseTargetChanged ||
+                storeStateChanged;
           },
           listener: (context, state) {
             if (state.status == PaymentUiStatus.error ||
@@ -1194,6 +1198,8 @@ class _QarmetPackageCard extends StatelessWidget {
         return 'Новичок';
       case PaymentService.promotionBusinessProductId:
         return 'Лучшая цена';
+      case PaymentService.promotionEliteProductId:
+        return 'Элита';
       case PaymentService.officialPageProductId:
         return 'Донатер';
       default:
@@ -1209,6 +1215,8 @@ class _QarmetPackageCard extends StatelessWidget {
         return 'Для тех, кто только начинает и хочет буст с бонусом.';
       case PaymentService.promotionBusinessProductId:
         return 'Максимум Qarmet за ваши деньги. Самый выгодный пакет.';
+      case PaymentService.promotionEliteProductId:
+        return '800 Qarmet — максимальный пакет для активных пользователей.';
       case PaymentService.officialPageProductId:
         return 'Инстаграм-галочка, статус профиля и ежемесячные начисления.';
       default:
@@ -1224,6 +1232,8 @@ class _QarmetPackageCard extends StatelessWidget {
         return 'Хит для старта';
       case PaymentService.promotionBusinessProductId:
         return 'Топ выгода';
+      case PaymentService.promotionEliteProductId:
+        return 'Макс пакет';
       case PaymentService.officialPageProductId:
         return 'Статус';
       default:
@@ -1239,6 +1249,8 @@ class _QarmetPackageCard extends StatelessWidget {
         return const Color(0xFF7C3AED);
       case PaymentService.promotionBusinessProductId:
         return const Color(0xFF1D4ED8);
+      case PaymentService.promotionEliteProductId:
+        return const Color(0xFFD97706);
       case PaymentService.officialPageProductId:
         return const Color(0xFFBE123C);
       default:

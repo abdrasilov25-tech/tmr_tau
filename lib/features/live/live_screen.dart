@@ -3,11 +3,11 @@ import 'dart:io';
 
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart';
+import '../../core/config/agora_live_config.dart';
+import '../../core/permissions/agora_media_permissions.dart';
 
 /// Простой полноэкранный локальный превью + вход в канал Agora.
-///
-/// App ID задан по ТЗ интеграции; для продакшена при необходимости вынесите в конфиг.
+/// App ID — из `.env` ([AgoraLiveConfig.appId]).
 class LiveScreen extends StatefulWidget {
   const LiveScreen({super.key, required this.channelId});
 
@@ -24,9 +24,6 @@ class _LiveScreenState extends State<LiveScreen> {
 
   late final RtcEngineEventHandler _handler;
 
-  /// App ID из задания на интеграцию Agora.
-  static const String _appId = 'ca25294379a6406386da96a5d367cdc4';
-
   @override
   void initState() {
     super.initState();
@@ -42,9 +39,17 @@ class _LiveScreenState extends State<LiveScreen> {
 
   Future<void> _setup() async {
     try {
-      final cam = await Permission.camera.request();
-      final mic = await Permission.microphone.request();
-      if (!cam.isGranted || !mic.isGranted) {
+      if (!AgoraLiveConfig.isConfigured) {
+        if (mounted) {
+          setState(() {
+            _joining = false;
+            _error = 'Добавьте AGORA_APP_ID в файл .env и перезапустите приложение';
+          });
+        }
+        return;
+      }
+
+      if (!await ensureAgoraCameraAndMicrophone(context)) {
         if (mounted) {
           setState(() {
             _joining = false;
@@ -56,7 +61,7 @@ class _LiveScreenState extends State<LiveScreen> {
 
       final engine = createAgoraRtcEngine();
       await engine.initialize(
-        RtcEngineContext(appId: _appId),
+        RtcEngineContext(appId: AgoraLiveConfig.appId),
       );
       engine.registerEventHandler(_handler);
       await engine.enableVideo();

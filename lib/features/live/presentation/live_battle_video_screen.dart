@@ -4,10 +4,10 @@ import 'dart:io';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/config/agora_live_config.dart';
+import '../../../core/permissions/agora_media_permissions.dart';
 import '../../live_battle/domain/entities/gift.dart';
 import '../../live_battle/domain/entities/live_battle.dart';
 import '../../live_battle/domain/repositories/live_battle_repository.dart';
@@ -112,16 +112,16 @@ class _LiveBattleVideoScreenState extends State<LiveBattleVideoScreen> {
 
   Future<void> _initAgora() async {
     try {
-      final cam = await Permission.camera.request();
-      final mic = await Permission.microphone.request();
-      if (!cam.isGranted || !mic.isGranted) {
-        if (mounted) {
-          setState(() {
-            _joiningChannel = false;
-            _error = 'Нужны камера и микрофон';
-          });
+      if (widget.isHost) {
+        if (!await ensureAgoraCameraAndMicrophone(context)) {
+          if (mounted) {
+            setState(() {
+              _joiningChannel = false;
+              _error = 'Нужны камера и микрофон';
+            });
+          }
+          return;
         }
-        return;
       }
 
       final engine = createAgoraRtcEngine();

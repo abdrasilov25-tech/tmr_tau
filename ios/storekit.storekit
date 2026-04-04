@@ -15,6 +15,21 @@
   ],
   "products" : [
     {
+      "displayPrice" : "12.99",
+      "familyShareable" : false,
+      "internalID" : "6761380560",
+      "localizations" : [
+        {
+          "description" : "800 Qarmet — максимальный пакет",
+          "displayName" : "Elite — 800 Qarmet",
+          "locale" : "ru"
+        }
+      ],
+      "productID" : "qarmet_40",
+      "referenceName" : "Qarmet4",
+      "type" : "Consumable"
+    },
+    {
       "displayPrice" : "0.99",
       "familyShareable" : false,
       "internalID" : "6761380556",
@@ -70,7 +85,7 @@
           "locale" : "ru"
         }
       ],
-      "productID" : "com.bazar.tmrtau.premium",
+      "productID" : "com.example.tmrTau.premium",
       "referenceName" : "Premium profile",
       "type" : "NonConsumable"
     },
@@ -152,7 +167,7 @@
               "locale" : "ru"
             }
           ],
-          "productID" : "com.bazar.tmrtau.subscription.monthly",
+          "productID" : "com.example.tmrTau.subscription.monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Official Page (bazar)",
           "subscriptionGroupID" : "A8F2C1E4",

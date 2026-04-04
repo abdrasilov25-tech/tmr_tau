@@ -120,6 +120,8 @@ flutter:
     - assets/city_thread_purchases.png
     - assets/city_thread_sales.png
     - assets/city_thread_discussion.png
+    - assets/splash_tram_photo.png
+    - assets/splash_qarmet_hero.png
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

@@ -42,6 +42,15 @@ post_install do |installer|
       if current.nil? || Gem::Version.new(current) < Gem::Version.new(min_ios)
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios
       end
+
+      # permission_handler: без этих макросов на iOS камера/микрофон не запрашиваются.
+      gcc = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
+      gcc = ['$(inherited)'] if gcc.nil?
+      gcc = [gcc] unless gcc.is_a?(Array)
+      %w[PERMISSION_CAMERA=1 PERMISSION_MICROPHONE=1].each do |flag|
+        gcc << flag unless gcc.include?(flag)
+      end
+      config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = gcc
     end
 
     # geocoding_ios podspec lists PrivacyInfo.xcprivacy as a source; Xcode then tries to compile it.

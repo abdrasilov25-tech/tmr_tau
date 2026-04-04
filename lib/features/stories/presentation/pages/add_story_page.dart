@@ -502,33 +502,97 @@ class _AddStoryPageState extends State<AddStoryPage> {
   @override
   Widget build(BuildContext context) {
     final emptyState = _isLiveMode
-        ? Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.wifi_tethering_rounded,
-                size: 80,
-                color: Colors.grey.shade600,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Запуск прямого эфира',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: Colors.white70,
+        ? TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: 1),
+            duration: const Duration(milliseconds: 640),
+            curve: Curves.easeOutCubic,
+            builder: (context, t, _) {
+              return Opacity(
+                opacity: t,
+                child: Transform.translate(
+                  offset: Offset(0, 14 * (1 - t)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 22),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(24),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            const Color(0xFF1E1E26).withValues(alpha: 0.94),
+                            const Color(0xFF14141A).withValues(alpha: 0.98),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFF3355).withValues(alpha: 0.12),
+                            blurRadius: 28,
+                            spreadRadius: 0,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 32, 24, 28),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.wifi_tethering_rounded,
+                              size: 56,
+                              color: const Color(0xFFFF5A73),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'Запуск прямого эфира',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(
+                                    color: const Color(0xFFF2F2F7),
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              'Откроется экран вещателя: камера, название и выход в эфир.',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.58),
+                                height: 1.4,
+                                fontSize: 14,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 26),
+                            FilledButton.icon(
+                              onPressed: _publish,
+                              icon: const Icon(Icons.live_tv_rounded),
+                              label: const Text('Начать эфир'),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFFFF3355),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 22,
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              FilledButton.icon(
-                onPressed: _publish,
-                icon: const Icon(Icons.live_tv_rounded),
-                label: const Text('Начать эфир'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
+                  ),
                 ),
-              ),
-            ],
+              );
+            },
           )
         : Column(
             mainAxisAlignment: MainAxisAlignment.center,

@@ -47,11 +47,12 @@ class PaymentService {
   static const String promotionStartProductId = 'qarmet_10';
   static const String promotionPremiumProductId = 'qarmet_20';
   static const String promotionBusinessProductId = 'qarmet_30';
+  static const String promotionEliteProductId = 'qarmet_40';
 
   /// Единственный Product ID авто-подписки Official Page (ASC, Sandbox, StoreKit config).
   /// Дубликатов и legacy ID для этой подписки нет.
   static const String monthlySubscriptionProductId =
-      'com.bazar.tmrtau.subscription.monthly';
+      'com.example.tmrTau.subscription.monthly';
 
   /// Алиас к [monthlySubscriptionProductId] (совместимость с остальным кодом).
   static const String officialPageProductId = monthlySubscriptionProductId;
@@ -59,7 +60,7 @@ class PaymentService {
   static const String promotePostProductId = 'promote_post';
   /// Non-consumable: оформление профиля (рамки, бейджи, галочка) + стикеры на карте.
   static const String profileCosmeticsLifetimeProductId =
-      'com.bazar.tmrtau.premium';
+      'com.example.tmrTau.premium';
 
   /// Уровни, выставляемые на сервере при успешной покупке [profileCosmeticsLifetimeProductId].
   static const int profileCosmeticsIapMaxFrameLevel = 3;
@@ -114,6 +115,14 @@ class PaymentService {
       baseQarmet: 400,
       bonusQarmet: 0,
       priceKzt: 1299,
+    ),
+    // LIVE-battle mapping: qarmet_40 -> 800.
+    promotionEliteProductId: QarmetProduct(
+      productId: promotionEliteProductId,
+      title: 'Elite',
+      baseQarmet: 800,
+      bonusQarmet: 0,
+      priceKzt: 2499,
     ),
     // Месячная подписка Official Page (Store); ежемесячные Qarmet — RPC credit_official_page_monthly_qarmet.
     monthlySubscriptionProductId: QarmetProduct(
@@ -177,13 +186,13 @@ class PaymentService {
     Set<String> productIds,
   ) async {
     var response = await _iap.queryProductDetails(productIds);
-    const maxRetries = 5;
+    const maxRetries = 3;
     for (var i = 0;
         i < maxRetries &&
             response.error != null &&
             _isTransientStoreKitQueryError(response.error);
         i++) {
-      final ms = 450 * (i + 1);
+      final ms = 300 * (i + 1);
       debugPrint(
         'IAP queryProductDetails transient error (${response.error!.code}), '
         'retry in ${ms}ms (${i + 1}/$maxRetries)',
@@ -201,14 +210,14 @@ class PaymentService {
     var response = await _queryProductDetailsOnceWithTransientRetries(productIds);
     // Пустой список при отсутствии жёсткой ошибки — типично для симулятора / гонки после старта.
     if (productIds.isNotEmpty && response.productDetails.isEmpty) {
-      const emptyMax = 3;
+      const emptyMax = 2;
       for (var j = 0; j < emptyMax; j++) {
         if (response.productDetails.isNotEmpty) break;
         if (response.error != null &&
             !_isTransientStoreKitQueryError(response.error)) {
           break;
         }
-        final ms = 380 * (j + 1);
+        final ms = 250 * (j + 1);
         debugPrint(
           'IAP queryProductDetails empty (err=${response.error?.code}), '
           'retry in ${ms}ms (${j + 1}/$emptyMax)',

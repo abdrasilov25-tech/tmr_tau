@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/widgets/splash_qarmet_hero_backdrop.dart';
+import '../../../../core/widgets/temirtau_tram_loader.dart';
 import '../bloc/auth_bloc.dart';
 
 class SplashPage extends StatefulWidget {
@@ -12,14 +14,11 @@ class SplashPage extends StatefulWidget {
 }
 
 class _SplashPageState extends State<SplashPage>
-    with TickerProviderStateMixin {
-  static const _minSplash = Duration(milliseconds: 320);
+    with SingleTickerProviderStateMixin {
+  static const _minSplash = Duration(milliseconds: 4200);
 
   late final DateTime _splashStartedAt;
-  late AnimationController _logoController;
   late AnimationController _fadeOutController;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _opacityAnimation;
   bool _navigating = false;
 
   @override
@@ -27,36 +26,16 @@ class _SplashPageState extends State<SplashPage>
     super.initState();
     _splashStartedAt = DateTime.now();
 
-    _logoController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 900),
-    );
-    _scaleAnimation = Tween<double>(begin: 0.5, end: 1.05).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: Curves.easeOutBack,
-      ),
-    );
-    _opacityAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
-      ),
-    );
-
     _fadeOutController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 320),
+      duration: const Duration(milliseconds: 420),
     );
-
-    _logoController.forward();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _scheduleNavigateFromAuth();
     });
   }
 
-  /// Ждём конец проверки сессии и минимальное время бренд-анимации; без искусственных 2.5 с.
   void _scheduleNavigateFromAuth() {
     if (!mounted || _navigating) return;
 
@@ -97,7 +76,6 @@ class _SplashPageState extends State<SplashPage>
 
   @override
   void dispose() {
-    _logoController.dispose();
     _fadeOutController.dispose();
     super.dispose();
   }
@@ -111,39 +89,40 @@ class _SplashPageState extends State<SplashPage>
           state is AuthError,
       listener: (context, state) {
         if (_navigating) return;
-        // Даём кадру сменить состояние, затем снова проверяем минимальное время сплэша.
         Future<void>.delayed(const Duration(milliseconds: 120), () {
           if (mounted) _scheduleNavigateFromAuth();
         });
       },
       child: Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: AnimatedBuilder(
-            animation: Listenable.merge([_logoController, _fadeOutController]),
-            builder: (context, child) {
-              final fadeOut = 1.0 - _fadeOutController.value;
-              return Opacity(
-                opacity: _opacityAnimation.value * fadeOut,
-                child: Center(
-                  child: Transform.scale(
-                    scale: _scaleAnimation.value,
-                    child: Image.asset(
-                      'assets/icons.png',
-                      width: 160,
-                      height: 160,
-                      cacheWidth: 320,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, _, _) => const Icon(
-                        Icons.image_outlined,
-                        size: 120,
-                        color: Colors.white54,
+        backgroundColor: const Color(0xFF080A10),
+        body: AnimatedBuilder(
+          animation: _fadeOutController,
+          builder: (context, child) {
+            final fadeOut = 1.0 - _fadeOutController.value;
+            return Opacity(
+              opacity: fadeOut,
+              child: child,
+            );
+          },
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              const SplashQarmetHeroBackdrop(),
+              SafeArea(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.sizeOf(context).width - 40,
                       ),
+                      child: const TemirtauTramLoader(height: 54),
                     ),
                   ),
                 ),
-              );
-            },
+              ),
+            ],
           ),
         ),
       ),

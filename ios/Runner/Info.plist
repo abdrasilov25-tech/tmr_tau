@@ -46,13 +46,13 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Камера нужна, чтобы снять фото или видео для поста, объявления или истории.</string>
+	<string>Камера нужна для фото и видео в постах, историях, чате и прямом эфире.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Мы используем вашу геолокацию, чтобы показывать публикации рядом с вами и улучшать рекомендации.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Геолокация используется для отображения локального контента и удобства использования приложения.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Микрофон нужен при записи видео со звуком.</string>
+	<string>Микрофон нужен для видео со звуком и прямого эфира.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Нам нужен доступ к фото, чтобы сохранять выбранные изображения в приложение (если требуется).</string>
 	<key>NSPhotoLibraryUsageDescription</key>
