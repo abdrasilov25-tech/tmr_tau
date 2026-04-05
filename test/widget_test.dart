@@ -8,11 +8,17 @@ import 'package:tmr_tau/core/storage/chat_list_storage.dart';
 import 'package:tmr_tau/core/storage/chat_story_list_storage.dart';
 import 'package:tmr_tau/core/storage/local_reactions_storage.dart';
 import 'package:tmr_tau/core/storage/multi_account_storage.dart';
+import 'package:tmr_tau/features/chat/data/chat_streak_storage.dart';
+import 'package:tmr_tau/features/chat/data/chat_pets_storage.dart';
+import 'package:tmr_tau/features/chat/data/chat_sticker_favorites_storage.dart';
 
 void main() {
   late LocalReactionsStorage localReactionsStorage;
   late ChatListStorage chatListStorage;
   late ChatStoryListStorage chatStoryListStorage;
+  late ChatStreakStorage chatStreakStorage;
+  late ChatPetsStorage chatPetsStorage;
+  late ChatStickerFavoritesStorage chatStickerFavoritesStorage;
   late MultiAccountStorage multiAccountStorage;
   late AccountRepository accountRepository;
 
@@ -22,6 +28,9 @@ void main() {
     localReactionsStorage = LocalReactionsStorage(prefs);
     chatListStorage = ChatListStorage(prefs);
     chatStoryListStorage = ChatStoryListStorage(prefs);
+    chatStreakStorage = ChatStreakStorage(prefs);
+    chatPetsStorage = ChatPetsStorage(prefs);
+    chatStickerFavoritesStorage = ChatStickerFavoritesStorage(prefs);
     multiAccountStorage = MultiAccountStorage(prefs, const FlutterSecureStorage());
     accountRepository = AccountRepositoryImpl(prefs);
   });
@@ -38,6 +47,9 @@ void main() {
           localReactionsStorage: localReactionsStorage,
           chatListStorage: chatListStorage,
           chatStoryListStorage: chatStoryListStorage,
+          chatStreakStorage: chatStreakStorage,
+          chatPetsStorage: chatPetsStorage,
+          chatStickerFavoritesStorage: chatStickerFavoritesStorage,
           multiAccountStorage: multiAccountStorage,
           accountRepository: accountRepository,
         ),

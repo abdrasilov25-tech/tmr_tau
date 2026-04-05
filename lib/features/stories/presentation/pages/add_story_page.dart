@@ -120,7 +120,64 @@ class _AddStoryPageState extends State<AddStoryPage> {
       } else {
         _image = preloaded;
       }
+    } else {
+      // Нет preloaded-файла — пробуем восстановить черновик
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadDraftIfAvailable());
     }
+  }
+
+  Future<void> _loadDraftIfAvailable() async {
+    final prefs = await SharedPreferences.getInstance();
+    final draftPath = prefs.getString(_prefStoryDraftPath);
+    if (draftPath == null || draftPath.isEmpty) return;
+    final file = File(draftPath);
+    if (!await file.exists()) {
+      await prefs.remove(_prefStoryDraftPath);
+      await prefs.remove(_prefStoryDraftIsVideo);
+      await prefs.remove(_prefStoryDraftCaption);
+      return;
+    }
+    final isVideo = prefs.getBool(_prefStoryDraftIsVideo) ?? false;
+    final caption = prefs.getString(_prefStoryDraftCaption) ?? '';
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey.shade900,
+        title: const Text('Восстановить черновик?', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'Найден сохранённый черновик сторис. Хотите продолжить редактирование?',
+          style: TextStyle(color: Colors.grey.shade300, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Нет'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Восстановить'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      if (isVideo) {
+        _activeMode = _CreateMode.video;
+        _video = file;
+      } else {
+        _image = file;
+      }
+      _captionController.text = caption;
+    });
+    if (isVideo) {
+      await _validatePreloadedVideo(file);
+    }
+    // Clear draft after loading
+    await prefs.remove(_prefStoryDraftPath);
+    await prefs.remove(_prefStoryDraftIsVideo);
+    await prefs.remove(_prefStoryDraftCaption);
   }
 
   Future<void> _validatePreloadedVideo(File file) async {

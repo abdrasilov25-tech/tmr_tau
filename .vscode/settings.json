@@ -1,3 +1,8 @@
 {
-    "cmake.sourceDirectory": "/Users/beksultanbekmurzaev/flutter.project/tmr_tau/linux"
+  "cmake.sourceDirectory": "/Users/beksultanbekmurzaev/flutter.project/tmr_tau/linux",
+  "deno.enable": true,
+  "deno.enablePaths": ["./supabase/functions"],
+  "deno.config": "./supabase/functions/deno.json",
+  "deno.lint": true,
+  "deno.cacheOnSave": true
 }

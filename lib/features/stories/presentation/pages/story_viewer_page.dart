@@ -887,6 +887,8 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                     Expanded(
                       child: Text(
                         widget.group.userName ?? 'Пользователь',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w600,
@@ -969,11 +971,13 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                               onTap: _openComposer,
                               child: Padding(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 12,
+                                  horizontal: 14,
+                                  vertical: 10,
                                 ),
                                 child: Text(
                                   'Отправить сообщение...',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     color: Colors.grey.shade400,
                                     fontSize: 15,
@@ -983,16 +987,34 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 4),
                         IconButton(
+                          constraints: const BoxConstraints(
+                            minWidth: 40,
+                            minHeight: 40,
+                          ),
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
                           onPressed: _sendingReply ? null : () => _sendQuickReaction('❤️'),
                           icon: const Icon(Icons.favorite_border_rounded, color: Colors.white),
                         ),
                         IconButton(
+                          constraints: const BoxConstraints(
+                            minWidth: 40,
+                            minHeight: 40,
+                          ),
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
                           onPressed: _openComposer,
                           icon: const Icon(Icons.mode_comment_outlined, color: Colors.white),
                         ),
                         IconButton(
+                          constraints: const BoxConstraints(
+                            minWidth: 40,
+                            minHeight: 40,
+                          ),
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
                           onPressed: _shareCurrentStory,
                           icon: const Icon(Icons.send_outlined, color: Colors.white),
                         ),
@@ -1394,23 +1416,9 @@ class _StoryContent extends StatelessWidget {
                   ),
                 if (hasMusicSticker)
                   Positioned(
-                    left: 14,
-                    right: 14,
-                    top: 12,
-                    child: IgnorePointer(
-                      child: StoryMusicTopCaptionBar(
-                        title: (story.musicTitle ?? '').trim().isEmpty
-                            ? 'Музыка'
-                            : story.musicTitle!.trim(),
-                        artist: (story.musicArtist ?? '').trim(),
-                      ),
-                    ),
-                  ),
-                if (hasMusicSticker)
-                  Positioned(
                     left: 12,
                     right: 12,
-                    bottom: 20,
+                    bottom: 80,
                     child: IgnorePointer(
                       child: Align(
                         alignment: Alignment.bottomCenter,

@@ -57,6 +57,8 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   bool _boomerangMode = false;
   int _filterIndex = 0;
   bool _appliedRecordIntent = false;
+  bool _showGrid = false;
+  int _countdownSeconds = 0; // 0 = off, 3, 10
 
   late final AnimationController _progressCtrl;
   static const Duration _maxRecordDuration = Duration(seconds: 60);
@@ -232,6 +234,44 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   Future<void> _takePicture() async {
     final ctrl = _cameraCtrl;
     if (ctrl == null || !ctrl.value.isInitialized || _isRecording) return;
+    if (_countdownSeconds > 0) {
+      await _runCountdownAndShoot(ctrl);
+      return;
+    }
+    try {
+      final xFile = await ctrl.takePicture();
+      if (!mounted) return;
+      context.go(
+        '/add-story',
+        extra: StoryCameraResult(file: File(xFile.path), isVideo: false),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _runCountdownAndShoot(CameraController ctrl) async {
+    for (var i = _countdownSeconds; i > 0; i--) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '$i...',
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              color: Colors.white,
+            ),
+          ),
+          duration: const Duration(milliseconds: 900),
+          backgroundColor: Colors.black54,
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.symmetric(horizontal: 120, vertical: 180),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        ),
+      );
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+    if (!mounted) return;
     try {
       final xFile = await ctrl.takePicture();
       if (!mounted) return;
@@ -305,42 +345,177 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   void _showCameraSettingsSheet() {
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.grey.shade900,
+      backgroundColor: const Color(0xFF1C1C1E),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Настройки камеры',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Дополнительные параметры появятся позже.',
-                style: TextStyle(color: Colors.grey.shade400, height: 1.35),
-              ),
-              const SizedBox(height: 16),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Закрыть'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Handle bar
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 18),
+                Text(
+                  'Настройки камеры',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 20),
+                // Flash mode row
+                _SettingsSection(
+                  label: 'Вспышка',
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      for (final mode in [
+                        FlashMode.off,
+                        FlashMode.auto,
+                        FlashMode.always,
+                        FlashMode.torch,
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: GestureDetector(
+                            onTap: () async {
+                              final ctrl = _cameraCtrl;
+                              if (ctrl == null) return;
+                              try {
+                                await ctrl.setFlashMode(mode);
+                                setState(() => _flashMode = mode);
+                                setModal(() {});
+                              } catch (_) {}
+                            },
+                            child: Container(
+                              width: 42,
+                              height: 42,
+                              decoration: BoxDecoration(
+                                color: _flashMode == mode
+                                    ? Colors.white
+                                    : Colors.white12,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                _flashModeIcon(mode),
+                                size: 20,
+                                color: _flashMode == mode
+                                    ? Colors.black
+                                    : Colors.white70,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Grid overlay row
+                _SettingsSection(
+                  label: 'Сетка',
+                  child: Switch.adaptive(
+                    value: _showGrid,
+                    activeThumbColor: Colors.white,
+                    activeTrackColor: const Color(0xFF0A84FF),
+                    onChanged: (v) {
+                      setState(() => _showGrid = v);
+                      setModal(() {});
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+                // Countdown timer row
+                _SettingsSection(
+                  label: 'Таймер',
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      for (final sec in [0, 3, 10])
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() => _countdownSeconds = sec);
+                              setModal(() {});
+                            },
+                            child: Container(
+                              width: 52,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: _countdownSeconds == sec
+                                    ? Colors.white
+                                    : Colors.white12,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                sec == 0 ? 'Выкл' : '$sec с',
+                                style: TextStyle(
+                                  color: _countdownSeconds == sec
+                                      ? Colors.black
+                                      : Colors.white70,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    style: TextButton.styleFrom(
+                      backgroundColor: Colors.white10,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text(
+                      'Готово',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
+  }
+
+  IconData _flashModeIcon(FlashMode mode) {
+    switch (mode) {
+      case FlashMode.off:
+        return Icons.flash_off_rounded;
+      case FlashMode.auto:
+        return Icons.flash_auto_rounded;
+      case FlashMode.always:
+        return Icons.flash_on_rounded;
+      case FlashMode.torch:
+        return Icons.highlight_rounded;
+    }
   }
 
   void _toggleHandsFree() {
@@ -518,6 +693,10 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                 style: TextStyle(color: Colors.white70),
               ),
             ),
+
+          // Grid overlay
+          if (_showGrid && _permissionGranted && !_initializing)
+            IgnorePointer(child: _GridOverlay()),
 
           SafeArea(
             child: Padding(
@@ -1199,4 +1378,59 @@ class _PermissionView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Row with label on the left and a child widget on the right (for settings sheet).
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({required this.label, required this.child});
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const Spacer(),
+        child,
+      ],
+    );
+  }
+}
+
+/// 3×3 rule-of-thirds grid overlay for the camera preview.
+class _GridOverlay extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(painter: _GridPainter());
+  }
+}
+
+class _GridPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.25)
+      ..strokeWidth = 0.8;
+    // vertical lines
+    for (var i = 1; i <= 2; i++) {
+      final x = size.width * i / 3;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
+    }
+    // horizontal lines
+    for (var i = 1; i <= 2; i++) {
+      final y = size.height * i / 3;
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_GridPainter old) => false;
 }

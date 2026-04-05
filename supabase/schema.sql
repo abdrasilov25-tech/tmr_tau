@@ -1484,6 +1484,7 @@ alter table public.messages
       'video_circle',
       'image',
       'gif',
+      'sticker',
       'file',
       'event',
       'location'

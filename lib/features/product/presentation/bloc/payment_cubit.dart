@@ -191,6 +191,13 @@ class PaymentCubit extends Cubit<PaymentUiState> {
       final snapshot = await _service.loadWalletSnapshot(
         forceRefresh: forceRefresh,
       );
+      // Если IAP ранее упал (таймаут StoreKit, гонка при старте), pull-to-refresh
+      // и повторный заход на экран сами пробуют переподключить магазин.
+      if (!_service.isStoreCatalogLoaded) {
+        await _service.initStore(
+          forceCatalogRefresh: forceRefresh || _service.storeInitError != null,
+        );
+      }
       final storeErr = _service.storeInitError;
       final storeReady = _service.isStoreCatalogLoaded;
       emit(
@@ -297,6 +304,28 @@ class PaymentCubit extends Cubit<PaymentUiState> {
           clearPurchasingQarmetProductId: true,
         ),
       );
+    }
+  }
+
+  /// Purchase a chat pet by spending Qarmet. Returns true on success.
+  Future<bool> purchaseChatPet({
+    required String petId,
+    required int cost,
+  }) async {
+    emit(state.copyWith(status: PaymentUiStatus.loading, message: null));
+    try {
+      await _service.spendForChatPet(cost: cost, petId: petId);
+      await refreshWallet(silent: true, forceRefresh: true);
+      emit(state.copyWith(status: PaymentUiStatus.idle));
+      return true;
+    } catch (e) {
+      emit(
+        state.copyWith(
+          status: PaymentUiStatus.error,
+          message: e.toString(),
+        ),
+      );
+      return false;
     }
   }
 

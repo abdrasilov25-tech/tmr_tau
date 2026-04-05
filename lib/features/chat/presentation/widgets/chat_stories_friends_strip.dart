@@ -43,10 +43,10 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
         return const SizedBox.shrink();
       }
       return SizedBox(
-        height: enableNotes ? 162 : 102,
+        height: enableNotes ? 190 : 128,
         child: ListView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           children: [
             _FriendStoryCircle(
               group: null,
@@ -77,10 +77,10 @@ class ChatStoriesFriendsStrip extends StatelessWidget {
         : groups.where((g) => g.userId != currentUserId).toList(growable: false);
 
     return SizedBox(
-      height: enableNotes ? 162 : 102,
+      height: enableNotes ? 176 : 116,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         children: [
           if (currentUserId != null)
             _FriendStoryCircle(
@@ -159,20 +159,26 @@ class _FriendStoryCircle extends StatelessWidget {
     final imageUrl = (fromGroup != null && fromGroup.isNotEmpty)
         ? fromGroup
         : profileAvatarUrl;
-    const outerSize = 56.0;
-    const ringWidth = 2.8;
-    final innerRadius = (outerSize - ringWidth * 2) / 2;
+    const outerSize = 72.0;
+    const ringWidth = 2.5;
+    final innerRadius = (outerSize - ringWidth * 2 - 3) / 2;
     final innerDiameter = innerRadius * 2;
     final ringGradient = ringState == _StoryRingState.unseen
         ? const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFFFF6F61), Color(0xFFE53935)],
+            begin: Alignment.topRight,
+            end: Alignment.bottomLeft,
+            colors: [
+              Color(0xFFFAD961), // yellow
+              Color(0xFFF76B1C), // orange
+              Color(0xFFDD2476), // pink-red
+              Color(0xFF833AB4), // purple
+            ],
+            stops: [0.0, 0.33, 0.66, 1.0],
           )
         : const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xFF66BB6A), Color(0xFF2E7D32)],
+            colors: [Color(0xFFBDBDBD), Color(0xFF9E9E9E)],
           );
 
     return Padding(
@@ -185,7 +191,7 @@ class _FriendStoryCircle extends StatelessWidget {
           children: [
             if (enableNotes)
               SizedBox(
-                height: 24,
+                height: 28,
                 child: note.trim().isNotEmpty
                     ? Padding(
                         padding: const EdgeInsets.only(bottom: 4),
@@ -325,14 +331,14 @@ class _FriendStoryCircle extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             SizedBox(
-              width: 68,
+              width: 78,
               child: Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      fontSize: 10,
+                      fontSize: 11,
                       color: Colors.grey.shade600,
                     ),
               ),

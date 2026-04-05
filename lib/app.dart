@@ -12,6 +12,9 @@ import 'core/storage/chat_list_storage.dart';
 import 'core/storage/chat_story_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
+import 'features/chat/data/chat_streak_storage.dart';
+import 'features/chat/data/chat_pets_storage.dart';
+import 'features/chat/data/chat_sticker_favorites_storage.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/domain/theme_repository.dart';
 import 'core/theme/data/theme_repository_impl.dart';
@@ -78,6 +81,9 @@ class TmrTauApp extends StatefulWidget {
     required this.localReactionsStorage,
     required this.chatListStorage,
     required this.chatStoryListStorage,
+    required this.chatStreakStorage,
+    required this.chatPetsStorage,
+    required this.chatStickerFavoritesStorage,
     required this.multiAccountStorage,
     required this.accountRepository,
   });
@@ -88,6 +94,9 @@ class TmrTauApp extends StatefulWidget {
   final LocalReactionsStorage localReactionsStorage;
   final ChatListStorage chatListStorage;
   final ChatStoryListStorage chatStoryListStorage;
+  final ChatStreakStorage chatStreakStorage;
+  final ChatPetsStorage chatPetsStorage;
+  final ChatStickerFavoritesStorage chatStickerFavoritesStorage;
   final MultiAccountStorage multiAccountStorage;
   final AccountRepository accountRepository;
 
@@ -252,6 +261,15 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         RepositoryProvider<ChatStoryListStorage>.value(
           value: widget.chatStoryListStorage,
         ),
+        RepositoryProvider<ChatStreakStorage>.value(
+          value: widget.chatStreakStorage,
+        ),
+        RepositoryProvider<ChatPetsStorage>.value(
+          value: widget.chatPetsStorage,
+        ),
+        ChangeNotifierProvider<ChatStickerFavoritesStorage>.value(
+          value: widget.chatStickerFavoritesStorage,
+        ),
         RepositoryProvider<MultiAccountStorage>.value(
             value: widget.multiAccountStorage),
         RepositoryProvider<AccountRepository>.value(
@@ -318,6 +336,10 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                 final paymentCubit = context.read<PaymentCubit>();
                 widget.chatListStorage.setActiveAccountId(state.user.id);
                 widget.chatStoryListStorage.setActiveAccountId(state.user.id);
+                widget.chatStreakStorage.setActiveUserId(state.user.id);
+                widget.chatPetsStorage.setActiveUserId(state.user.id);
+                widget.chatStickerFavoritesStorage
+                    .setActiveUserId(state.user.id);
                 // Лайки/репосты в ленте — общий кэш до пользователя; чаты изолированы по accountId в storage.
                 await widget.localReactionsStorage.clearReactions();
                 if (!context.mounted) return;
@@ -381,6 +403,10 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                     listener: (context, state) {
                       widget.chatListStorage.setActiveAccountId(null);
                       widget.chatStoryListStorage.setActiveAccountId(null);
+                      widget.chatStreakStorage.setActiveUserId(null);
+                      widget.chatPetsStorage.setActiveUserId(null);
+                      widget.chatStickerFavoritesStorage
+                          .setActiveUserId(null);
                       context.read<ChatUnreadBadgeController>().clear();
                       context.read<NotificationTabBadgeController>().clear();
                       context.read<NewsBloc>().add(const NewsCleared());

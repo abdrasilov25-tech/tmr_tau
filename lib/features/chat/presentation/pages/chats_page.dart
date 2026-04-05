@@ -10,6 +10,7 @@ import '../../../../core/storage/chat_list_storage.dart';
 import '../../../../core/storage/chat_story_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../widgets/city_chat_fixed_avatar.dart';
+import '../../data/chat_streak_storage.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/entities/story_entity.dart';
@@ -2769,6 +2770,9 @@ class _ChatsPageState extends State<ChatsPage> {
               const SizedBox(width: 8),
               const _CityListBadge(),
             ],
+            if (t.kind == _ChatThreadKind.direct && !t.isTemirtauCity) ...[
+              _buildStreakBadge(t.peerId),
+            ],
           ],
         ),
         subtitle: Text(
@@ -2943,6 +2947,44 @@ class _ChatsPageState extends State<ChatsPage> {
     }
     if (t.unreadCount > 0) return const Color(0xFFFFF5F5);
     return const Color(0xFFF0FDF4);
+  }
+
+  Widget _buildStreakBadge(String peerId) {
+    final streak = context.read<ChatStreakStorage>().getStreak(peerId);
+    if (streak < 3) return const SizedBox.shrink();
+    final emoji = streak >= 30
+        ? '🔥🔥🔥'
+        : streak >= 14
+        ? '🔥🔥'
+        : '🔥';
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFFFF6B35), Color(0xFFFF4500)],
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 10)),
+            const SizedBox(width: 2),
+            Text(
+              '$streak',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                height: 1,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

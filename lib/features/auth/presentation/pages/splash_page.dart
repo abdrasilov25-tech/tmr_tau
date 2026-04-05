@@ -126,7 +126,7 @@ class _SplashPageState extends State<SplashPage>
                       constraints: BoxConstraints(
                         maxWidth: MediaQuery.sizeOf(context).width - 40,
                       ),
-                      child: const TemirtauTramLoader(height: 54),
+                      child: const TemirtauTramLoader(height: 62),
                     ),
                   ),
                 ),

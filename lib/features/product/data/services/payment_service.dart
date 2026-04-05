@@ -211,14 +211,14 @@ class PaymentService {
     var response = await _queryProductDetailsOnceWithTransientRetries(productIds);
     // Пустой список при отсутствии жёсткой ошибки — типично для симулятора / гонки после старта.
     if (productIds.isNotEmpty && response.productDetails.isEmpty) {
-      const emptyMax = 2;
+      const emptyMax = 5;
       for (var j = 0; j < emptyMax; j++) {
         if (response.productDetails.isNotEmpty) break;
         if (response.error != null &&
             !_isTransientStoreKitQueryError(response.error)) {
           break;
         }
-        final ms = 250 * (j + 1);
+        final ms = 280 * (j + 1);
         debugPrint(
           'IAP queryProductDetails empty (err=${response.error?.code}), '
           'retry in ${ms}ms (${j + 1}/$emptyMax)',
@@ -359,7 +359,7 @@ class PaymentService {
     }
     try {
       await WidgetsBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 60));
+      await Future<void>.delayed(const Duration(milliseconds: 120));
 
       final available = await _iap.isAvailable();
       _storeAvailable = available;
@@ -440,7 +440,14 @@ class PaymentService {
     } catch (e, st) {
       _products = const <ProductDetails>[];
       _storeCatalogLoaded = false;
-      _storeAvailable = false;
+      // Не ставим _storeAvailable = false: сбой запроса каталога ≠ «магазин недоступен
+      // на устройстве». Иначе после временной ошибки StoreKit/Play Billing экран
+      // остаётся «мёртвым» до полного перезапуска приложения.
+      try {
+        _storeAvailable = await _iap.isAvailable();
+      } catch (_) {
+        _storeAvailable = false;
+      }
       _storeInitError = e is PlatformException
           ? _friendlyStoreError(e)
           : _friendlyIapUserMessage(e.toString());
@@ -1095,6 +1102,13 @@ class PaymentService {
         .from('users')
         .update({'profile_badge_level': badgeLevel})
         .eq('id', auth.id);
+  }
+
+  /// Spend Qarmet to purchase a chat pet.
+  Future<void> spendForChatPet({required int cost, required String petId}) async {
+    _requireAuthUser();
+    if (cost <= 0) return; // free pet — no spend needed
+    await _spendQarmet(cost, reason: 'chat_pet_$petId');
   }
 
   /// StoreKit 2: [InAppPurchase.completePurchase] делает `int.parse(purchase.purchaseID!)`.

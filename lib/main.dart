@@ -9,6 +9,9 @@ import 'core/storage/chat_list_storage.dart';
 import 'core/storage/chat_story_list_storage.dart';
 import 'core/storage/local_reactions_storage.dart';
 import 'core/storage/multi_account_storage.dart';
+import 'features/chat/data/chat_streak_storage.dart';
+import 'features/chat/data/chat_pets_storage.dart';
+import 'features/chat/data/chat_sticker_favorites_storage.dart';
 import 'core/config/oauth_env_config.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -62,10 +65,16 @@ Future<void> main() async {
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
   final chatStoryListStorage = ChatStoryListStorage(prefs);
+  final chatStreakStorage = ChatStreakStorage(prefs);
+  final chatPetsStorage = ChatPetsStorage(prefs);
+  final chatStickerFavoritesStorage = ChatStickerFavoritesStorage(prefs);
   if (supabaseOk) {
     final sessionUid = Supabase.instance.client.auth.currentUser?.id;
     chatListStorage.setActiveAccountId(sessionUid);
     chatStoryListStorage.setActiveAccountId(sessionUid);
+    chatStreakStorage.setActiveUserId(sessionUid);
+    chatPetsStorage.setActiveUserId(sessionUid);
+    chatStickerFavoritesStorage.setActiveUserId(sessionUid);
     await chatListStorage.clearLegacyGlobalKeys();
     await chatStoryListStorage.clearLegacyGlobalKeys();
   }
@@ -80,6 +89,9 @@ Future<void> main() async {
     localReactionsStorage: localReactions,
     chatListStorage: chatListStorage,
     chatStoryListStorage: chatStoryListStorage,
+    chatStreakStorage: chatStreakStorage,
+    chatPetsStorage: chatPetsStorage,
+    chatStickerFavoritesStorage: chatStickerFavoritesStorage,
     multiAccountStorage: multiAccountStorage,
     accountRepository: accountRepository,
   ));

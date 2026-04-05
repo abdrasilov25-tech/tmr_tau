@@ -350,10 +350,10 @@ class _StoriesStripState extends State<_StoriesStrip> {
     });
 
     return SizedBox(
-      height: 100,
+      height: 112,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         children: [
           if (isLoggedIn)
             _StoryCircle(

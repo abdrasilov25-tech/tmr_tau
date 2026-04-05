@@ -4,12 +4,14 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
@@ -28,6 +30,11 @@ import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/storage/chat_list_storage.dart';
 import '../chat_unread_badge_controller.dart';
+import '../../data/chat_giphy_catalog.dart';
+import '../../data/chat_streak_storage.dart';
+import '../../data/chat_pets_storage.dart';
+import '../../domain/entities/chat_pet.dart';
+import '../widgets/chat_pet_shop_sheet.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
@@ -36,6 +43,7 @@ import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../widgets/chat_sticker_picker_tab.dart';
 import '../widgets/dm_hold_video_overlay.dart';
 
 class ChatPage extends StatefulWidget {
@@ -788,6 +796,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         return '📷 Фото';
       case 'gif':
         return 'GIF';
+      case 'sticker':
+        final u = (m['image_url'] as String?)?.trim() ?? '';
+        if (u.isNotEmpty) return '🎨 Стикер';
+        final t = raw.trim();
+        return t.isNotEmpty ? t : '🎨 Стикер';
       case 'audio':
         return '🎤 Голосовое сообщение';
       case 'video_circle':
@@ -1061,6 +1074,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final isMine = (m['sender_id'] as String?) == me;
     final text = (m['text'] as String?) ?? '';
     final msgType = (m['message_type'] as String?) ?? 'text';
+    final stickerImg = (m['image_url'] as String?)?.trim() ?? '';
     final canCopy = text.trim().isNotEmpty &&
         !text.startsWith(_storyDmPrefix) &&
         !text.startsWith(_postDmPrefix) &&
@@ -1070,7 +1084,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         msgType != 'image' &&
         msgType != 'gif' &&
         msgType != 'audio' &&
-        msgType != 'video_circle';
+        msgType != 'video_circle' &&
+        !(msgType == 'sticker' && stickerImg.isNotEmpty);
     final snippet = _dmMessageSnippetForActions(m);
     final timeLabel = _messageShortTime(m['created_at']);
     final chatStorage = context.read<ChatListStorage>();
@@ -1374,6 +1389,99 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _showWhatsAppStyleMessageMenu(m, messageId);
   }
 
+  /// WhatsApp-style read receipt SnackBar — свайп вправо по своему сообщению.
+  void _showReadReceiptSnackBar(Map<String, dynamic> message) {
+    final readAtRaw = message['read_at'];
+    String subtitle;
+    if (readAtRaw == null) {
+      subtitle = 'Не прочитано';
+    } else {
+      try {
+        final dt = DateTime.parse(readAtRaw.toString()).toLocal();
+        final now = DateTime.now();
+        final isToday = dt.year == now.year && dt.month == now.month && dt.day == now.day;
+        final isYesterday = dt.year == now.year && dt.month == now.month && dt.day == now.day - 1;
+        final timeStr = '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+        if (isToday) {
+          subtitle = 'Прочитано сегодня в $timeStr';
+        } else if (isYesterday) {
+          subtitle = 'Прочитано вчера в $timeStr';
+        } else {
+          subtitle = 'Прочитано ${dt.day}.${dt.month.toString().padLeft(2, '0')} в $timeStr';
+        }
+      } catch (_) {
+        subtitle = 'Прочитано';
+      }
+    }
+
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        duration: const Duration(seconds: 3),
+        content: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1F2937),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: const [
+              BoxShadow(color: Colors.black26, blurRadius: 12, offset: Offset(0, 4)),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
+                ),
+                child: Center(
+                  child: Icon(
+                    readAtRaw != null ? Icons.done_all_rounded : Icons.check_rounded,
+                    color: readAtRaw != null ? const Color(0xFF53BDEB) : Colors.white54,
+                    size: 22,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.peerName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: readAtRaw != null
+                            ? const Color(0xFF53BDEB)
+                            : Colors.white54,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Stream<List<Map<String, dynamic>>> _messagesStream(String? me) {
     if (me == null) return const Stream.empty();
     final peer = widget.peerId;
@@ -1613,6 +1721,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       );
     } finally {
       if (mounted) setState(() => _sending = false);
+    }
+    // Record streak activity (fire off separately — non-critical)
+    if (mounted) {
+      final streakStorage = context.read<ChatStreakStorage>();
+      unawaited(streakStorage.recordActivity(widget.peerId));
     }
   }
 
@@ -2096,6 +2209,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onPressed: _confirmDeleteAll,
                   ),
                 ] else ...[
+                  // Pet & streak button in AppBar
+                  _ChatPetAppBarButton(
+                    peerId: widget.peerId,
+                    currentUserId: sessionUid,
+                  ),
                   IconButton(
                     icon: const Icon(Icons.palette_outlined),
                     onPressed: _showThemePicker,
@@ -2285,6 +2403,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   _showDirectMessageActions(m, messageId);
                                 }
                               },
+                              onHorizontalDragEnd: isMe
+                                  ? (details) {
+                                      if ((details.primaryVelocity ?? 0) > 200) {
+                                        _showReadReceiptSnackBar(m);
+                                      }
+                                    }
+                                  : null,
                               child: Container(
                                 margin: const EdgeInsets.symmetric(vertical: 4),
                                 padding: useVideoShell
@@ -2390,12 +2515,26 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                       children: [
                                         Flexible(
                                           child: msgType == 'gif' &&
-                                                  imageUrl != null
+                                                  imageUrl != null &&
+                                                  imageUrl.isNotEmpty
                                               ? _GifMessageBubble(
                                                   key: ValueKey('gif_$messageId'),
                                                   gifUrl: imageUrl,
                                                   isMe: isMe,
                                                 )
+                                              : msgType == 'sticker'
+                                                  ? _StickerMessageBubble(
+                                                      key: ValueKey(
+                                                          'stk_$messageId'),
+                                                      text: text,
+                                                      imageUrl:
+                                                          imageUrl ?? '',
+                                                      isLocal: isLocalImage,
+                                                      isMe: isMe,
+                                                      isPending:
+                                                          m['_pending'] ==
+                                                              true,
+                                                    )
                                               : msgType == 'image' &&
                                                   imageUrl != null
                                               ? _ImageMessageBubble(
@@ -2654,6 +2793,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   onGifSelected: (url) {
                                     setState(() => _showEmojiPanel = false);
                                     _sendImageUrl(url, isGif: true);
+                                  },
+                                  onStickerEmojiSelected: (sticker) {
+                                    setState(() => _showEmojiPanel = false);
+                                    unawaited(_sendStickerEmoji(sticker));
+                                  },
+                                  onStickerImageSelected: (url) {
+                                    setState(() => _showEmojiPanel = false);
+                                    unawaited(_sendStickerImageUrl(url));
+                                  },
+                                  onCreateStickerFromGallery: () async {
+                                    setState(() => _showEmojiPanel = false);
+                                    await _createStickerFromGallery();
                                   },
                                 )
                               : const SizedBox.shrink(),
@@ -3154,6 +3305,175 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
               ? 'Не удалось отправить GIF. Проверьте сеть и что в Supabase применена миграция типов сообщений: $e'
               : 'Не удалось отправить изображение: $e',
         ),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  Future<void> _sendStickerEmoji(String emoji) async {
+    final e = emoji.trim();
+    if (e.isEmpty) return;
+    final uid = _me();
+    if (uid == null) return;
+    try {
+      await _client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': e,
+        'message_type': 'sticker',
+      });
+      if (mounted) {
+        _forceScrollToLatest = true;
+        setState(() {});
+      }
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          'Не удалось отправить стикер. Примените миграцию sticker в Supabase: $err',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  Future<void> _sendStickerImageUrl(String url) async {
+    final u = url.trim();
+    if (u.isEmpty) return;
+    final uid = _me();
+    if (uid == null) return;
+    try {
+      await _client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': '',
+        'message_type': 'sticker',
+        'image_url': u,
+      });
+      if (mounted) {
+        _forceScrollToLatest = true;
+        setState(() {});
+      }
+    } catch (err) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Не удалось отправить стикер: $err'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  Future<void> _createStickerFromGallery() async {
+    final uid = _me();
+    if (uid == null) return;
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (picked == null) return;
+    if (!mounted) return;
+    var stickerPath = picked.path;
+    try {
+      final cropped = await ImageCropper().cropImage(
+        sourcePath: picked.path,
+        compressFormat: ImageCompressFormat.png,
+        compressQuality: 92,
+        uiSettings: [
+          AndroidUiSettings(
+            toolbarTitle: 'Область стикера',
+            toolbarColor: Colors.black,
+            toolbarWidgetColor: Colors.white,
+            lockAspectRatio: false,
+            hideBottomControls: false,
+          ),
+          IOSUiSettings(
+            title: 'Область стикера',
+            aspectRatioLockEnabled: false,
+            resetAspectRatioEnabled: true,
+          ),
+          if (kIsWeb)
+            WebUiSettings(
+              context: context,
+              presentStyle: WebPresentStyle.dialog,
+              size: const CropperSize(width: 380, height: 520),
+            ),
+        ],
+      );
+      if (cropped == null) return;
+      stickerPath = cropped.path;
+    } on MissingPluginException {
+      // cropper недоступен — отправим исходное фото
+    } on PlatformException catch (_) {}
+    if (!mounted) return;
+
+    final tempId = 'tmp_st_${DateTime.now().millisecondsSinceEpoch}';
+    setState(() {
+      _optimisticMessages.add({
+        'id': tempId,
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': '',
+        'created_at': DateTime.now().toIso8601String(),
+        'message_type': 'sticker',
+        'image_url': stickerPath,
+        '_pending': true,
+        '_local': true,
+      });
+      _forceScrollToLatest = true;
+    });
+
+    try {
+      final file = File(stickerPath);
+      final bytes = await file.readAsBytes();
+      final lower = stickerPath.toLowerCase();
+      final ext = lower.endsWith('.webp')
+          ? 'webp'
+          : lower.endsWith('.jpg') || lower.endsWith('.jpeg')
+              ? 'jpg'
+              : 'png';
+      final contentType = ext == 'png'
+          ? 'image/png'
+          : ext == 'webp'
+              ? 'image/webp'
+              : 'image/jpeg';
+      final uploadPath =
+          'dm/$uid/sticker_${DateTime.now().millisecondsSinceEpoch}.$ext';
+      await _client.storage.from(SupabaseConstants.bucketChatMedia).uploadBinary(
+            uploadPath,
+            bytes,
+            fileOptions: FileOptions(contentType: contentType, upsert: false),
+          );
+      final publicUrl = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(uploadPath);
+
+      final inserted = await _client
+          .from(SupabaseConstants.messagesTable)
+          .insert({
+            'sender_id': uid,
+            'receiver_id': widget.peerId,
+            'text': '',
+            'message_type': 'sticker',
+            'image_url': publicUrl,
+          })
+          .select()
+          .maybeSingle();
+
+      _forceScrollToLatest = true;
+      if (mounted && inserted != null) {
+        setState(() {
+          final idx =
+              _optimisticMessages.indexWhere((m) => m['id'] == tempId);
+          if (idx >= 0) {
+            _optimisticMessages[idx] =
+                Map<String, dynamic>.from(inserted as Map);
+          }
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(
+          () => _optimisticMessages.removeWhere((m) => m['id'] == tempId));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Не удалось создать стикер: $e'),
         behavior: SnackBarBehavior.floating,
       ));
     }
@@ -4296,78 +4616,146 @@ class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
 
   @override
   Widget build(BuildContext context) {
-    const size = 180.0;
+    const size = 200.0;
+    final ringColor = widget.isMe
+        ? Colors.white
+        : Theme.of(context).colorScheme.primary;
+
     return GestureDetector(
       onTap: _togglePlay,
-      child: SizedBox(
-        width: size,
-        height: size,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            ClipOval(
-              child: _initialized && _ctrl != null
-                  ? AspectRatio(
-                      aspectRatio: 1,
-                      child: FittedBox(
-                        fit: BoxFit.cover,
-                        child: SizedBox(
-                          width: _ctrl!.value.size.width,
-                          height: _ctrl!.value.size.height,
-                          child: VideoPlayer(_ctrl!),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: size,
+            height: size,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                // Glow ring
+                Container(
+                  width: size,
+                  height: size,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: ringColor.withValues(alpha: 0.22),
+                        blurRadius: 18,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                ),
+                ClipOval(
+                  child: _initialized && _ctrl != null
+                      ? AspectRatio(
+                          aspectRatio: 1,
+                          child: FittedBox(
+                            fit: BoxFit.cover,
+                            child: SizedBox(
+                              width: _ctrl!.value.size.width,
+                              height: _ctrl!.value.size.height,
+                              child: VideoPlayer(_ctrl!),
+                            ),
+                          ),
+                        )
+                      : Container(
+                          width: size,
+                          height: size,
+                          color: Colors.black87,
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          ),
                         ),
-                      ),
-                    )
-                  : Container(
-                      width: size,
-                      height: size,
-                      color: Colors.black87,
-                      child: const Center(
-                        child: CircularProgressIndicator(
-                            color: Colors.white, strokeWidth: 2),
-                      ),
+                ),
+                // Play/pause button
+                if (_initialized && !_playing)
+                  Container(
+                    width: 54,
+                    height: 54,
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
                     ),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      color: Colors.white,
+                      size: 34,
+                    ),
+                  ),
+                // Progress ring
+                if (_initialized && _ctrl != null)
+                  SizedBox.expand(
+                    child: ValueListenableBuilder<VideoPlayerValue>(
+                      valueListenable: _ctrl!,
+                      builder: (_, val, unused) {
+                        final total = val.duration.inMilliseconds;
+                        final pos = val.position.inMilliseconds;
+                        final progress =
+                            total > 0 ? (pos / total).clamp(0.0, 1.0) : 0.0;
+                        return CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 3.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(ringColor),
+                          backgroundColor: Colors.white24,
+                        );
+                      },
+                    ),
+                  ),
+                // Duration badge
+                if (_initialized && _ctrl != null)
+                  Positioned(
+                    right: 8,
+                    bottom: 8,
+                    child: ValueListenableBuilder<VideoPlayerValue>(
+                      valueListenable: _ctrl!,
+                      builder: (context, val, _) {
+                        final remaining = val.duration - val.position;
+                        final secs = remaining.inSeconds.clamp(0, 999);
+                        final mm = (secs ~/ 60).toString();
+                        final ss = (secs % 60).toString().padLeft(2, '0');
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '$mm:$ss',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+              ],
             ),
-            // Кнопка play/pause поверх видео
-            if (_initialized && !_playing)
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: Colors.black45,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 30,
-                ),
-              ),
-            // Прогресс поверх кольца
-            if (_initialized && _ctrl != null)
-              SizedBox.expand(
-                child: ValueListenableBuilder<VideoPlayerValue>(
-                  valueListenable: _ctrl!,
-                  builder: (_, val, unused) {
-                    final total = val.duration.inMilliseconds;
-                    final pos = val.position.inMilliseconds;
-                    final progress =
-                        total > 0 ? (pos / total).clamp(0.0, 1.0) : 0.0;
-                    return CircularProgressIndicator(
-                      value: progress,
-                      strokeWidth: 3,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        widget.isMe
-                            ? Colors.white
-                            : Theme.of(context).colorScheme.primary,
-                      ),
-                      backgroundColor: Colors.white30,
-                    );
-                  },
+          ),
+          // "Видео-сообщение" label
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.videocam_rounded, size: 13,
+                  color: widget.isMe ? Colors.white70 : Colors.black45),
+              const SizedBox(width: 3),
+              Text(
+                'Видео-сообщение',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: widget.isMe ? Colors.white70 : Colors.black45,
                 ),
               ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -4624,9 +5012,15 @@ class _EmojiPanel extends StatefulWidget {
   const _EmojiPanel({
     required this.onEmojiSelected,
     required this.onGifSelected,
+    required this.onStickerEmojiSelected,
+    required this.onStickerImageSelected,
+    required this.onCreateStickerFromGallery,
   });
   final ValueChanged<String> onEmojiSelected;
   final ValueChanged<String> onGifSelected;
+  final ValueChanged<String> onStickerEmojiSelected;
+  final ValueChanged<String> onStickerImageSelected;
+  final Future<void> Function() onCreateStickerFromGallery;
 
   @override
   State<_EmojiPanel> createState() => _EmojiPanelState();
@@ -4679,7 +5073,7 @@ class _EmojiPanelState extends State<_EmojiPanel>
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 300,
+      height: 380,
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border(top: BorderSide(color: Colors.grey.shade200)),
@@ -4775,20 +5169,10 @@ class _EmojiPanelState extends State<_EmojiPanel>
                 _GifCatalogTab(onGifSelected: widget.onGifSelected),
 
                 // ── Стикеры ──
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text('🎭', style: TextStyle(fontSize: 48)),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Стикеры — скоро',
-                        style: TextStyle(
-                            color: Colors.grey.shade500,
-                            fontSize: 15),
-                      ),
-                    ],
-                  ),
+                ChatStickerPickerTab(
+                  onEmojiSticker: widget.onStickerEmojiSelected,
+                  onImageSticker: widget.onStickerImageSelected,
+                  onCreateFromGallery: widget.onCreateStickerFromGallery,
                 ),
               ],
             ),
@@ -4816,53 +5200,9 @@ class _GifCatalogTabState extends State<_GifCatalogTab> {
   String _query = '';
   int _categoryIndex = 0;
 
-  static const _categories = [
-    'Реакции', 'Привет', 'Смех', 'Любовь', 'Грусть', 'Огонь',
-  ];
-
-  static const _catalog = <String, List<Map<String, String>>>{
-    'Реакции': [
-      {'url': 'https://media.giphy.com/media/3oz8xLd9DJq2l2VFtu/giphy.gif', 'label': 'Танец'},
-      {'url': 'https://media.giphy.com/media/xUA7bdpLxQhsSQkFug/giphy.gif', 'label': 'Да!'},
-      {'url': 'https://media.giphy.com/media/3og0IFOzC2UFCVThUQ/giphy.gif', 'label': 'Нет'},
-      {'url': 'https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif', 'label': 'ОМГ'},
-      {'url': 'https://media.giphy.com/media/26BRrSl9M5N8D5ygM/giphy.gif', 'label': 'Хм'},
-      {'url': 'https://media.giphy.com/media/3ofT5sMBZImpHzH1FO/giphy.gif', 'label': 'Ура'},
-    ],
-    'Привет': [
-      {'url': 'https://media.giphy.com/media/xT9IgG50Lg7rusyxxB/giphy.gif', 'label': 'Привет'},
-      {'url': 'https://media.giphy.com/media/ASd0Ukj0y3qMM/giphy.gif', 'label': 'Пока'},
-      {'url': 'https://media.giphy.com/media/IThjAlJnD9WNO/giphy.gif', 'label': 'Вау'},
-      {'url': 'https://media.giphy.com/media/l0MYGb1LuZ3n7dRnO/giphy.gif', 'label': 'Йоу'},
-    ],
-    'Смех': [
-      {'url': 'https://media.giphy.com/media/GRkmel8wEIoTe/giphy.gif', 'label': 'Смех'},
-      {'url': 'https://media.giphy.com/media/5C0a8IItAWRebylDRX/giphy.gif', 'label': 'Ха-ха'},
-      {'url': 'https://media.giphy.com/media/l3diU7InEOZLELEco/giphy.gif', 'label': 'LOL'},
-      {'url': 'https://media.giphy.com/media/ZqlvCTNHpqrio/giphy.gif', 'label': 'Кека'},
-    ],
-    'Любовь': [
-      {'url': 'https://media.giphy.com/media/26BRrSl9M5N8D5ygM/giphy.gif', 'label': 'Сердце'},
-      {'url': 'https://media.giphy.com/media/l0MYGb1LuZ3n7dRnO/giphy.gif', 'label': 'Обнимашки'},
-      {'url': 'https://media.giphy.com/media/26BRv0ThflsHhWp9O/giphy.gif', 'label': 'Люблю'},
-      {'url': 'https://media.giphy.com/media/3oz8xAFtqoOUUrsh7W/giphy.gif', 'label': 'Kiss'},
-    ],
-    'Грусть': [
-      {'url': 'https://media.giphy.com/media/3d3woRW2bSbDjBy2HD/giphy.gif', 'label': 'Плач'},
-      {'url': 'https://media.giphy.com/media/OPU6wzx8JrHna/giphy.gif', 'label': 'Ой'},
-      {'url': 'https://media.giphy.com/media/2vA33ikUb0Qz6/giphy.gif', 'label': 'Грустно'},
-    ],
-    'Огонь': [
-      {'url': 'https://media.giphy.com/media/l1J9FEYgASQxjRLLO/giphy.gif', 'label': 'Огонь'},
-      {'url': 'https://media.giphy.com/media/xUA7bdwsRuAstb8L7q/giphy.gif', 'label': 'Взрыв'},
-      {'url': 'https://media.giphy.com/media/3oriNZoNvn73MZaFYk/giphy.gif', 'label': 'Топ'},
-      {'url': 'https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif', 'label': 'Круто'},
-    ],
-  };
-
   List<Map<String, String>> get _currentGifs {
-    final cat = _categories[_categoryIndex];
-    final all = _catalog[cat] ?? [];
+    final cat = kChatGiphyCategories[_categoryIndex];
+    final all = kChatGiphyCatalog[cat] ?? [];
     if (_query.isEmpty) return all;
     final q = _query.toLowerCase();
     return all.where((g) => (g['label'] ?? '').toLowerCase().contains(q)).toList();
@@ -4906,7 +5246,7 @@ class _GifCatalogTabState extends State<_GifCatalogTab> {
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 8),
-            itemCount: _categories.length,
+            itemCount: kChatGiphyCategories.length,
             itemBuilder: (_, i) {
               final selected = i == _categoryIndex;
               return GestureDetector(
@@ -4927,7 +5267,7 @@ class _GifCatalogTabState extends State<_GifCatalogTab> {
                     ),
                   ),
                   child: Text(
-                    _categories[i],
+                    kChatGiphyCategories[i],
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
@@ -5201,6 +5541,115 @@ class _EventMessageBubble extends StatelessWidget {
   }
 }
 
+class _StickerMessageBubble extends StatelessWidget {
+  const _StickerMessageBubble({
+    super.key,
+    required this.text,
+    required this.imageUrl,
+    required this.isLocal,
+    required this.isMe,
+    required this.isPending,
+  });
+
+  final String text;
+  final String imageUrl;
+  final bool isLocal;
+  final bool isMe;
+  final bool isPending;
+
+  @override
+  Widget build(BuildContext context) {
+    const radius = Radius.circular(16);
+    final borderRadius = isMe
+        ? const BorderRadius.only(
+            topLeft: radius,
+            topRight: radius,
+            bottomLeft: radius,
+            bottomRight: Radius.circular(4),
+          )
+        : const BorderRadius.only(
+            topLeft: radius,
+            topRight: radius,
+            bottomLeft: Radius.circular(4),
+            bottomRight: radius,
+          );
+    final maxSide = math.min(
+      MediaQuery.sizeOf(context).width * 0.52,
+      280.0,
+    );
+    final url = imageUrl.trim();
+
+    late final Widget core;
+    if (url.isNotEmpty) {
+      core = ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: maxSide,
+          maxHeight: maxSide,
+        ),
+        child: isLocal
+            ? Image.file(
+                File(url),
+                fit: BoxFit.contain,
+              )
+            : CachedNetworkImage(
+                imageUrl: url,
+                fit: BoxFit.contain,
+                placeholder: (ctx, u) => Container(
+                  color: Colors.grey.shade200,
+                  child: const Center(child: CircularProgressIndicator()),
+                ),
+                errorWidget: (ctx, u, e) => Icon(
+                  Icons.broken_image_rounded,
+                  size: 48,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+      );
+    } else {
+      final emoji = text.trim();
+      if (emoji.isEmpty) {
+        core = Icon(
+          Icons.sentiment_satisfied_alt,
+          size: 48,
+          color: Colors.grey.shade400,
+        );
+      } else {
+        core = Text(
+          emoji,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: math.min(maxSide * 0.55, 132),
+            height: 1.05,
+          ),
+        );
+      }
+    }
+
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.bottomRight,
+        children: [
+          core,
+          if (isPending)
+            Positioned(
+              bottom: 4,
+              right: 6,
+              child: Icon(
+                Icons.access_time_rounded,
+                size: 14,
+                color: isMe
+                    ? Colors.white.withValues(alpha: 0.85)
+                    : Colors.black38,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GifMessageBubble extends StatelessWidget {
   const _GifMessageBubble({
     super.key,
@@ -5227,31 +5676,35 @@ class _GifMessageBubble extends StatelessWidget {
             bottomLeft: Radius.circular(4),
             bottomRight: radius,
           );
+    final side = math.min(
+      MediaQuery.sizeOf(context).width * 0.52,
+      280.0,
+    );
     return ClipRRect(
       borderRadius: borderRadius,
       child: Stack(
         alignment: Alignment.bottomLeft,
         children: [
           ConstrainedBox(
-            constraints: const BoxConstraints(
-                maxWidth: 200, maxHeight: 200, minWidth: 100),
+            constraints: BoxConstraints(
+                maxWidth: side, maxHeight: side, minWidth: 100),
             // Image.network animate GIFs natively on mobile
             child: Image.network(
               gifUrl,
               fit: BoxFit.cover,
-              width: 200,
+              width: side,
               loadingBuilder: (ctx, child, progress) {
                 if (progress == null) return child;
                 return Container(
-                  width: 200,
-                  height: 140,
+                  width: side,
+                  height: side * 0.7,
                   color: Colors.grey.shade200,
                   child: const Center(child: CircularProgressIndicator()),
                 );
               },
               errorBuilder: (ctx, err, st) => Container(
-                width: 200,
-                height: 100,
+                width: side,
+                height: side * 0.5,
                 color: Colors.grey.shade200,
                 child: const Icon(Icons.gif_box_rounded,
                     color: Colors.grey, size: 40),
@@ -5497,6 +5950,137 @@ class _LocationBubble extends StatelessWidget {
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// AppBar button showing the active pet + streak flame.
+/// Tapping it opens the pet shop.
+class _ChatPetAppBarButton extends StatefulWidget {
+  const _ChatPetAppBarButton({
+    required this.peerId,
+    required this.currentUserId,
+  });
+
+  final String peerId;
+  final String currentUserId;
+
+  @override
+  State<_ChatPetAppBarButton> createState() => _ChatPetAppBarButtonState();
+}
+
+class _ChatPetAppBarButtonState extends State<_ChatPetAppBarButton>
+    with SingleTickerProviderStateMixin {
+  ChatStreakStorage get _streakStorage => context.read<ChatStreakStorage>();
+  ChatPetsStorage get _petsStorage => context.read<ChatPetsStorage>();
+
+  late final AnimationController _tapAnim;
+  late final Animation<double> _tapScale;
+
+  @override
+  void initState() {
+    super.initState();
+    _tapAnim = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 360),
+    );
+    _tapScale = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 1, end: 0.86)
+            .chain(CurveTween(curve: Curves.easeInCubic)),
+        weight: 28,
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(begin: 0.86, end: 1.06)
+            .chain(CurveTween(curve: Curves.elasticOut)),
+        weight: 72,
+      ),
+    ]).animate(_tapAnim);
+  }
+
+  @override
+  void dispose() {
+    _tapAnim.dispose();
+    super.dispose();
+  }
+
+  int get _streakCount => _streakStorage.getStreak(widget.peerId);
+  String? get _activePetId => _petsStorage.getActivePet(widget.peerId);
+
+  Future<void> _openShop() async {
+    await _tapAnim.forward(from: 0);
+    if (!mounted) return;
+    await ChatPetShopSheet.show(
+      context,
+      peerId: widget.peerId,
+      currentUserId: widget.currentUserId,
+    );
+    if (mounted) setState(() {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final streak = _streakCount;
+    final activePetId = _activePetId;
+    final activePet = activePetId != null ? petById(activePetId) : null;
+
+    return GestureDetector(
+      onTap: _openShop,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: AnimatedBuilder(
+          animation: _tapScale,
+          builder: (context, child) => Transform.scale(
+            scale: _tapScale.value,
+            child: child,
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  gradient: activePet != null
+                      ? LinearGradient(
+                          colors: activePet.gradientColors,
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
+                      : const LinearGradient(
+                          colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                        ),
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (activePet?.gradientColors.last ??
+                              const Color(0xFF8B5CF6))
+                          .withValues(alpha: 0.4),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Text(
+                    activePet?.emoji ?? '🏪',
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ),
+              ),
+              if (streak >= 3) ...[
+                const SizedBox(height: 2),
+                Text(
+                  '🔥$streak',
+                  style: const TextStyle(fontSize: 9, height: 1),
+                ),
+              ],
             ],
           ),
         ),
