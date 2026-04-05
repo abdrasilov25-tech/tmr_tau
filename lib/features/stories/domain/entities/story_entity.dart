@@ -15,6 +15,10 @@ class StoryEntity extends Equatable {
     this.originalPostAuthorId,
     this.originalPostAuthorName,
     this.originalPostPreviewUrl,
+    this.videoDurationSeconds = 0,
+    this.musicTitle,
+    this.musicArtist,
+    this.musicExternalUrl,
   });
 
   final String id;
@@ -30,6 +34,14 @@ class StoryEntity extends Equatable {
   final String? originalPostAuthorId;
   final String? originalPostAuthorName;
   final String? originalPostPreviewUrl;
+  /// Длительность видео (сек), для отображения в карточке репоста.
+  final int videoDurationSeconds;
+  final String? musicTitle;
+  final String? musicArtist;
+  final String? musicExternalUrl;
+
+  bool get isRepostOfPost =>
+      originalPostId != null && originalPostId!.trim().isNotEmpty;
 
   bool get isExpired => DateTime.now().isAfter(expiresAt);
 
@@ -47,5 +59,9 @@ class StoryEntity extends Equatable {
         originalPostAuthorId,
         originalPostAuthorName,
         originalPostPreviewUrl,
+        videoDurationSeconds,
+        musicTitle,
+        musicArtist,
+        musicExternalUrl,
       ];
 }

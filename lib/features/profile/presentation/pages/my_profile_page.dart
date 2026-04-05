@@ -326,11 +326,15 @@ class _MyProfilePageState extends State<MyProfilePage> {
       final postsFuture = postRepo
           .getPostsByUser(uid, currentUserId: uid)
           .timeout(const Duration(seconds: 12));
-      final verifiedFlag = await verifiedFuture;
-      final profile = await profileFuture;
+      final primary = await Future.wait<Object?>([
+        verifiedFuture,
+        profileFuture,
+        postsFuture,
+      ]);
       if (!mounted || requestId != _loadRequestId) return;
-      final posts = await postsFuture;
-      if (!mounted || requestId != _loadRequestId) return;
+      final verifiedFlag = primary[0]! as bool;
+      final profile = primary[1] as SellerProfileEntity?;
+      final posts = primary[2]! as List<PostEntity>;
       final newsPosts = posts
           .where(
             (p) => p.kind.trim().toLowerCase() == 'news' && !_isVideoPost(p),
@@ -344,33 +348,33 @@ class _MyProfilePageState extends State<MyProfilePage> {
           )
           .toList(growable: false);
       final videoPosts = posts.where(_isVideoPost).toList(growable: false);
-      if (publicationPosts.isEmpty) {
-        if (!mounted) return;
-        final publicationFeed = await postRepo
-            .searchPublicationsByCursor(
-              query: '',
-              limit: 100,
-              currentUserId: uid,
-            )
-            .timeout(const Duration(seconds: 12));
-        publicationPosts = publicationFeed
-            .where((p) => p.userId == uid && !_isVideoPost(p))
-            .toList(growable: false);
+      final publicationPostsEmpty = publicationPosts.isEmpty;
+      final publicationsFallbackFuture = publicationPostsEmpty
+          ? postRepo
+              .searchPublicationsByCursor(
+                query: '',
+                limit: 100,
+                currentUserId: uid,
+              )
+              .timeout(const Duration(seconds: 12))
+              .then(
+                (feed) => feed
+                    .where((p) => p.userId == uid && !_isVideoPost(p))
+                    .toList(growable: false),
+              )
+          : Future<List<PostEntity>>.value(const <PostEntity>[]);
+      final secondary = await Future.wait<Object?>([
+        repo.getFollowingUsers(uid).timeout(const Duration(seconds: 10)),
+        _loadMyStoryNote(uid),
+        publicationsFallbackFuture,
+      ]);
+      if (!mounted || requestId != _loadRequestId) return;
+      final followingCount =
+          (secondary[0]! as List<SellerProfileEntity>).length;
+      final myStoryNote = secondary[1]! as String;
+      if (publicationPostsEmpty) {
+        publicationPosts = secondary[2]! as List<PostEntity>;
       }
-      // Подсчитываем актуальное количество подписок через followers.
-      final followingUsers = await repo
-          .getFollowingUsers(uid)
-          .timeout(const Duration(seconds: 10));
-      final followingCount = followingUsers.length;
-      var myStoryNote = '';
-      try {
-        final me = await supa.Supabase.instance.client
-            .from(SupabaseConstants.userStorySettingsTable)
-            .select('story_note')
-            .eq('user_id', uid)
-            .maybeSingle();
-        myStoryNote = (me?['story_note'] ?? '').toString().trim();
-      } catch (_) {}
       await _loadProfileStories(
         uid,
         showLoading: false,
@@ -496,6 +500,19 @@ class _MyProfilePageState extends State<MyProfilePage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось обновить био')),
       );
+    }
+  }
+
+  Future<String> _loadMyStoryNote(String uid) async {
+    try {
+      final me = await supa.Supabase.instance.client
+          .from(SupabaseConstants.userStorySettingsTable)
+          .select('story_note')
+          .eq('user_id', uid)
+          .maybeSingle();
+      return (me?['story_note'] ?? '').toString().trim();
+    } catch (_) {
+      return '';
     }
   }
 
@@ -849,6 +866,18 @@ class _MyProfilePageState extends State<MyProfilePage> {
           unawaited(_load(showLoading: false));
         },
         child: BlocBuilder<AuthBloc, AuthState>(
+          buildWhen: (prev, curr) {
+            bool authed(AuthState s) => s is AuthAuthenticated;
+            if (!authed(prev) && !authed(curr)) return false;
+            if (authed(prev) != authed(curr)) return true;
+            final p = (prev as AuthAuthenticated).user;
+            final c = (curr as AuthAuthenticated).user;
+            return p.id != c.id ||
+                p.avatarUrl != c.avatarUrl ||
+                p.name != c.name ||
+                p.username != c.username ||
+                p.email != c.email;
+          },
           builder: (context, state) {
             final user = state is AuthAuthenticated ? state.user : null;
             if (user == null) {

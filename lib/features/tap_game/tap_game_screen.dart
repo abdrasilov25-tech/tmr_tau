@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,8 +9,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/cached_avatar.dart';
 import '../../features/auth/presentation/bloc/auth_bloc.dart';
+import '../product/presentation/bloc/payment_cubit.dart';
 import 'domain/entities/tap_game_leaderboard_entry.dart';
+import 'domain/entities/tap_game_local_hall_entry.dart';
 import 'domain/entities/tap_game_session_info.dart';
+import 'domain/repositories/tap_game_local_hall_repository.dart';
 import 'domain/repositories/tap_game_repository.dart';
 
 /// «Тап судьбы» — соревнование по тапам с Qarmet-бустами и лидербордом.
@@ -21,7 +25,7 @@ class TapGameScreen extends StatefulWidget {
 }
 
 class _TapGameScreenState extends State<TapGameScreen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   /// Совпадает с default на сервере (миграция tap_game_stamina).
   static const int kSessionFreeTaps = 180;
   static const int _boostCost = 8;
@@ -31,12 +35,15 @@ class _TapGameScreenState extends State<TapGameScreen>
   static const int _maxTapsPerSecond = 10;
 
   TapGameRepository get _repo => context.read<TapGameRepository>();
+  TapGameLocalHallRepository get _localHallRepo =>
+      context.read<TapGameLocalHallRepository>();
 
   String? _sessionId;
   TapGameSessionInfo? _session;
   int _displayScore = 0;
   int _stamina = kSessionFreeTaps;
   List<TapGameLeaderboardEntry> _leaderboard = const [];
+  List<TapGameLocalHallEntry> _localHall = const [];
   bool _loading = true;
   String? _error;
   bool _finalized = false;
@@ -48,6 +55,8 @@ class _TapGameScreenState extends State<TapGameScreen>
   Timer? _pollTimer;
   Timer? _tickTimer;
   late final AnimationController _pulse;
+  late final AnimationController _rimSpin;
+  late final AnimationController _tapJolt;
 
   // ── Combo system ───────────────────────────────────────────
   int _comboCount = 0;
@@ -69,8 +78,19 @@ class _TapGameScreenState extends State<TapGameScreen>
       lowerBound: 0.92,
       upperBound: 1,
     )..value = 1;
+    _rimSpin = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 11),
+    )..repeat();
+    _tapJolt = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 280),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_userId != null) unawaited(_bootstrap());
+      if (_userId != null) {
+        unawaited(context.read<PaymentCubit>().refreshWallet(silent: true));
+        unawaited(_bootstrap());
+      }
     });
   }
 
@@ -80,7 +100,67 @@ class _TapGameScreenState extends State<TapGameScreen>
     _tickTimer?.cancel();
     _comboResetTimer?.cancel();
     _pulse.dispose();
+    _rimSpin.dispose();
+    _tapJolt.dispose();
     super.dispose();
+  }
+
+  Future<void> _reloadLocalHall() async {
+    try {
+      final list = await _localHallRepo.getTop50();
+      if (mounted) setState(() => _localHall = list);
+    } catch (_) {}
+  }
+
+  Future<void> _mergeLeaderboardIntoLocalHall() async {
+    if (_leaderboard.isEmpty) return;
+    try {
+      await _localHallRepo.mergeFromLeaderboard(_leaderboard);
+      await _reloadLocalHall();
+    } catch (_) {}
+  }
+
+  void _recordLocalBestFromCurrentScore() {
+    if (_displayScore <= 0) return;
+    final uid = _userId;
+    if (uid == null) return;
+    final auth = context.read<AuthBloc>().state;
+    if (auth is! AuthAuthenticated) return;
+    unawaited(
+      _localHallRepo
+          .recordMyBestScore(
+            userId: uid,
+            displayName:
+                auth.user.name ?? auth.user.username ?? auth.user.email,
+            avatarUrl: auth.user.avatarUrl,
+            score: _displayScore,
+          )
+          .then((_) => _reloadLocalHall()),
+    );
+  }
+
+  void _notifyInsufficientQarmet() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Недостаточно Qarmet — пополните кошелёк'),
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Купить',
+          onPressed: () => context.push('/qarmet-wallet'),
+        ),
+      ),
+    );
+  }
+
+  bool _isInsufficientQarmet(Object e) {
+    final s = e.toString().toLowerCase();
+    if (e is PostgrestException) {
+      final m = e.message.toLowerCase();
+      return m.contains('insufficient') || s.contains('insufficient_qarmet');
+    }
+    return s.contains('insufficient_qarmet') ||
+        (s.contains('insufficient') && s.contains('qarmet'));
   }
 
   Future<void> _bootstrap() async {
@@ -99,6 +179,7 @@ class _TapGameScreenState extends State<TapGameScreen>
       });
       await _refreshLeaderboard();
       await _syncMyPlayState();
+      await _reloadLocalHall();
       _startTimers();
     } catch (e, st) {
       debugPrint('TapGame bootstrap $e\n$st');
@@ -134,9 +215,10 @@ class _TapGameScreenState extends State<TapGameScreen>
     final sid = _sessionId;
     if (sid == null) return;
     try {
-      final list = await _repo.fetchLeaderboard(sid);
+      final list = await _repo.fetchLeaderboard(sid, limit: 50);
       if (!mounted) return;
       setState(() => _leaderboard = list);
+      unawaited(_mergeLeaderboardIntoLocalHall());
     } catch (e, st) {
       debugPrint('TapGame leaderboard $e\n$st');
     }
@@ -154,12 +236,14 @@ class _TapGameScreenState extends State<TapGameScreen>
           _displayScore = 0;
           _stamina = kSessionFreeTaps;
         });
+        _recordLocalBestFromCurrentScore();
         return;
       }
       setState(() {
         _displayScore = row.score;
         _stamina = row.staminaRemaining;
       });
+      _recordLocalBestFromCurrentScore();
     } catch (_) {}
   }
 
@@ -212,6 +296,7 @@ class _TapGameScreenState extends State<TapGameScreen>
     final need = _boostActive ? 2 : 1;
     if (_stamina < need) {
       HapticFeedback.selectionClick();
+      _notifyInsufficientQarmet();
       context.push('/qarmet-wallet');
       return;
     }
@@ -248,6 +333,10 @@ class _TapGameScreenState extends State<TapGameScreen>
     if (sid == null) return;
     final delta = _boostActive ? 2 : 1;
     HapticFeedback.lightImpact();
+    unawaited(_tapJolt.forward(from: 0));
+    if (_comboMultiplier >= 3) {
+      HapticFeedback.mediumImpact();
+    }
     unawaited(_pulse.forward(from: _pulse.lowerBound).then((_) {
       if (mounted) _pulse.reverse();
     }));
@@ -258,6 +347,7 @@ class _TapGameScreenState extends State<TapGameScreen>
         _displayScore = r.score;
         _stamina = r.staminaRemaining;
       });
+      _recordLocalBestFromCurrentScore();
     } catch (e) {
       final msg = e.toString();
       if (msg.contains('no_boost')) {
@@ -268,6 +358,7 @@ class _TapGameScreenState extends State<TapGameScreen>
             _displayScore = r.score;
             _stamina = r.staminaRemaining;
           });
+          _recordLocalBestFromCurrentScore();
         } catch (_) {}
       }
       if (msg.contains('insufficient_stamina')) {
@@ -313,12 +404,16 @@ class _TapGameScreenState extends State<TapGameScreen>
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_humanError(e)),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (_isInsufficientQarmet(e)) {
+        _notifyInsufficientQarmet();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_humanError(e)),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -340,12 +435,16 @@ class _TapGameScreenState extends State<TapGameScreen>
       unawaited(_syncMyPlayState());
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_humanError(e)),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (_isInsufficientQarmet(e)) {
+        _notifyInsufficientQarmet();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_humanError(e)),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -366,12 +465,16 @@ class _TapGameScreenState extends State<TapGameScreen>
       await _refreshLeaderboard();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_humanError(e)),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      if (_isInsufficientQarmet(e)) {
+        _notifyInsufficientQarmet();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_humanError(e)),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -396,12 +499,16 @@ class _TapGameScreenState extends State<TapGameScreen>
     } catch (e) {
       if (mounted) {
         setState(() => _buyingStamina = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_humanError(e)),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        if (_isInsufficientQarmet(e)) {
+          _notifyInsufficientQarmet();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(_humanError(e)),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
       }
     }
   }
@@ -528,6 +635,13 @@ class _TapGameScreenState extends State<TapGameScreen>
       appBar: AppBar(
         title: const Text('Тап судьбы 🔥'),
         centerTitle: true,
+        actions: [
+          IconButton(
+            tooltip: 'Кошелёк Qarmet',
+            onPressed: () => context.push('/qarmet-wallet'),
+            icon: const Icon(Icons.account_balance_wallet_rounded),
+          ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -548,13 +662,78 @@ class _TapGameScreenState extends State<TapGameScreen>
                     ),
                   ),
                 )
-              : RefreshIndicator(
-                  onRefresh: () async {
-                    await _refreshLeaderboard();
-                    await _syncMyPlayState();
-                  },
-                  child: ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    BlocSelector<PaymentCubit, PaymentUiState, int>(
+                      selector: (s) => s.balance,
+                      builder: (context, bal) {
+                        if (bal >= 15) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                          child: Material(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .tertiaryContainer
+                                .withValues(alpha: 0.65),
+                            borderRadius: BorderRadius.circular(14),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(14),
+                              onTap: () => context.push('/qarmet-wallet'),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.monetization_on_rounded,
+                                      color: Colors.amber.shade800,
+                                      size: 26,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Баланс $bal Qarmet — пополните, чтобы брать бусты и энергию.',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                          fontSize: 13,
+                                          height: 1.25,
+                                        ),
+                                      ),
+                                    ),
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 14,
+                                          vertical: 8,
+                                        ),
+                                      ),
+                                      onPressed: () =>
+                                          context.push('/qarmet-wallet'),
+                                      child: const Text('Купить'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    Expanded(
+                      child: RefreshIndicator(
+                        onRefresh: () async {
+                          final wallet = context.read<PaymentCubit>();
+                          await _refreshLeaderboard();
+                          await _syncMyPlayState();
+                          if (!mounted) return;
+                          await wallet.refreshWallet(silent: true);
+                        },
+                        child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
                     children: [
                       if (_session != null) _SessionHeader(
                         remaining: _remaining,
@@ -607,71 +786,23 @@ class _TapGameScreenState extends State<TapGameScreen>
                             ),
                           ),
                         ),
-                      const SizedBox(height: 20),
+                      const SizedBox(height: 12),
                       Center(
-                        child: ScaleTransition(
-                          scale: _pulse,
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: canTap
-                                  ? _throttleOrTap
-                                  : _sessionOpen
-                                      ? () => context.push('/qarmet-wallet')
-                                      : null,
-                              customBorder: const CircleBorder(),
-                              child: Ink(
-                                width: 200,
-                                height: 200,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  gradient: LinearGradient(
-                                    colors: canTap
-                                        ? _comboMultiplier >= 4
-                                            ? const [Color(0xFFFFD700), Color(0xFFFF6B35)]
-                                            : _comboMultiplier >= 2
-                                                ? const [Color(0xFFFF6B35), Color(0xFFAA00FF)]
-                                                : const [Color(0xFFFF6B35), Color(0xFFF72585)]
-                                        : [
-                                            Colors.grey.shade400,
-                                            Colors.grey.shade600,
-                                          ],
-                                  ),
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: (canTap
-                                              ? _comboMultiplier >= 4
-                                                  ? const Color(0xFFFFD700)
-                                                  : const Color(0xFFF72585)
-                                              : Colors.grey)
-                                          .withValues(alpha: _comboMultiplier >= 2 ? 0.6 : 0.35),
-                                      blurRadius: _comboMultiplier >= 2 ? 40 : 24,
-                                      offset: const Offset(0, 10),
-                                    ),
-                                  ],
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    !_sessionOpen
-                                        ? 'Стоп'
-                                        : !canTap
-                                            ? '💳\nПополнить'
-                                            : _comboMultiplier >= 4
-                                                ? '🔥\nТАП!'
-                                                : 'ТАП!',
-                                    textAlign: TextAlign.center,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 26,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 1.0,
-                                      height: 1.05,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
+                        child: _FateTapWheel(
+                          rimSpin: _rimSpin,
+                          tapJolt: _tapJolt,
+                          pulse: _pulse,
+                          canTap: canTap,
+                          sessionOpen: _sessionOpen,
+                          comboMultiplier: _comboMultiplier,
+                          onTap: canTap
+                              ? _throttleOrTap
+                              : _sessionOpen
+                                  ? () {
+                                      _notifyInsufficientQarmet();
+                                      context.push('/qarmet-wallet');
+                                    }
+                                  : null,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -731,9 +862,9 @@ class _TapGameScreenState extends State<TapGameScreen>
                           child: const Text('Проверить награду'),
                         ),
                       ],
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 20),
                       Text(
-                        'Топ-10',
+                        'Онлайн этой сессии',
                         style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
@@ -754,8 +885,359 @@ class _TapGameScreenState extends State<TapGameScreen>
                           ),
                         ),
                     ],
+                        ),
+                      ),
+                    ),
+                    _LocalHallPanel(
+                      entries: _localHall,
+                      myUserId: uid,
+                    ),
+                  ],
+                ),
+    );
+  }
+}
+
+class _FateTapWheel extends StatelessWidget {
+  const _FateTapWheel({
+    required this.rimSpin,
+    required this.tapJolt,
+    required this.pulse,
+    required this.canTap,
+    required this.sessionOpen,
+    required this.comboMultiplier,
+    required this.onTap,
+  });
+
+  final AnimationController rimSpin;
+  final AnimationController tapJolt;
+  final AnimationController pulse;
+  final bool canTap;
+  final bool sessionOpen;
+  final int comboMultiplier;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 248,
+      height: 248,
+      child: Stack(
+        alignment: Alignment.center,
+        clipBehavior: Clip.none,
+        children: [
+          AnimatedBuilder(
+            animation: rimSpin,
+            builder: (context, _) {
+              return Transform.rotate(
+                angle: rimSpin.value * 2 * math.pi,
+                child: CustomPaint(
+                  size: const Size(248, 248),
+                  painter: _FateRimPainter(
+                    alive: canTap,
+                    comboTier: comboMultiplier,
                   ),
                 ),
+              );
+            },
+          ),
+          Positioned(
+            child: AnimatedBuilder(
+              animation: Listenable.merge([pulse, tapJolt, rimSpin]),
+              builder: (context, _) {
+                final j = CurvedAnimation(
+                  parent: tapJolt,
+                  curve: Curves.easeOutCubic,
+                );
+                final bump = 1.0 + 0.14 * j.value;
+                final scale = pulse.value * bump;
+                final colors = !sessionOpen
+                    ? [Colors.grey.shade500, Colors.grey.shade700]
+                    : comboMultiplier >= 4
+                        ? const [Color(0xFFFFE066), Color(0xFFFF6B35)]
+                        : comboMultiplier >= 2
+                            ? const [Color(0xFFFF6B35), Color(0xFF9D4EDD)]
+                            : const [Color(0xFFFF1744), Color(0xFF7B2CBF)];
+                final glow = !sessionOpen
+                    ? Colors.grey
+                    : comboMultiplier >= 4
+                        ? const Color(0xFFFFD700)
+                        : const Color(0xFFE040FB);
+                return Transform.scale(
+                  scale: scale,
+                  child: Material(
+                    color: Colors.transparent,
+                    elevation: canTap ? 12 : 2,
+                    shadowColor: glow.withValues(alpha: 0.55),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: onTap,
+                      child: Ink(
+                        width: 168,
+                        height: 168,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: SweepGradient(
+                            colors: [
+                              colors[0],
+                              colors[1],
+                              colors[0],
+                            ],
+                            stops: const [0.0, 0.55, 1.0],
+                            transform: GradientRotation(rimSpin.value * math.pi),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: glow.withValues(
+                                alpha: canTap ? 0.55 : 0.2,
+                              ),
+                              blurRadius: canTap ? 36 : 12,
+                              spreadRadius: canTap ? 2 : 0,
+                            ),
+                          ],
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.35),
+                            width: 3,
+                          ),
+                        ),
+                        child: Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                !sessionOpen
+                                    ? '⏱'
+                                    : !canTap
+                                        ? '💎'
+                                        : comboMultiplier >= 4
+                                            ? '🔥'
+                                            : '✨',
+                                style: const TextStyle(fontSize: 36),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                !sessionOpen
+                                    ? 'ПАУЗА'
+                                    : !canTap
+                                        ? 'QARMET'
+                                        : comboMultiplier >= 4
+                                            ? 'ЖАРИ!'
+                                            : 'ТАП!',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.2,
+                                  height: 1.0,
+                                  shadows: [
+                                    Shadow(
+                                      blurRadius: 8,
+                                      color: Colors.black45,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FateRimPainter extends CustomPainter {
+  _FateRimPainter({required this.alive, required this.comboTier});
+
+  final bool alive;
+  final int comboTier;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = Offset(size.width / 2, size.height / 2);
+    final r = size.width / 2;
+    const segments = 12;
+    final paint = Paint()..style = PaintingStyle.stroke;
+    for (var i = 0; i < segments; i++) {
+      final t = i / segments;
+      paint.strokeWidth = 5;
+      if (!alive) {
+        paint.color = Color.lerp(Colors.grey.shade500, Colors.grey.shade700, t)!;
+      } else {
+        final hue = comboTier >= 3 ? 0.08 + t * 0.22 : 0.88 - t * 0.42;
+        paint.color = HSVColor.fromAHSV(1, hue * 360, 0.88, 0.98).toColor();
+      }
+      final a0 = (i * 2 * math.pi / segments) - math.pi / 2;
+      final a1 = ((i + 1) * 2 * math.pi / segments) - math.pi / 2;
+      canvas.drawArc(
+        Rect.fromCircle(center: c, radius: r - 10),
+        a0,
+        a1 - a0,
+        false,
+        paint,
+      );
+    }
+    final tick = Paint()
+      ..color = Colors.white.withValues(alpha: alive ? 0.5 : 0.25)
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    for (var i = 0; i < 24; i++) {
+      final a = (i * math.pi / 12) - math.pi / 2;
+      final inner = r - 22;
+      final outer = r - 14;
+      canvas.drawLine(
+        Offset(c.dx + inner * math.cos(a), c.dy + inner * math.sin(a)),
+        Offset(c.dx + outer * math.cos(a), c.dy + outer * math.sin(a)),
+        tick,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _FateRimPainter oldDelegate) =>
+      oldDelegate.alive != alive || oldDelegate.comboTier != comboTier;
+}
+
+class _LocalHallPanel extends StatelessWidget {
+  const _LocalHallPanel({
+    required this.entries,
+    required this.myUserId,
+  });
+
+  final List<TapGameLocalHallEntry> entries;
+  final String myUserId;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 8,
+      shadowColor: Colors.black38,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.95),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 12, 6),
+              child: Row(
+                children: [
+                  Icon(Icons.emoji_events_rounded, color: Colors.amber.shade800),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Зал славы (на устройстве)',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w900,
+                          ),
+                    ),
+                  ),
+                  Text(
+                    'Топ-${TapGameLocalHallRepository.maxEntries}',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              'Лучшие очки сохраняются локально и не сбрасываются при выходе.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurface.withValues(alpha: 0.6),
+                  ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 168,
+              child: entries.isEmpty
+                  ? Center(
+                      child: Text(
+                        'Играйте — рекорды появятся здесь',
+                        style: TextStyle(
+                          color: scheme.onSurface.withValues(alpha: 0.45),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                      itemCount: entries.length,
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
+                      itemBuilder: (context, i) {
+                        final e = entries[i];
+                        final me = e.userId == myUserId;
+                        return ListTile(
+                          dense: true,
+                          visualDensity: VisualDensity.compact,
+                          leading: CircleAvatar(
+                            radius: 18,
+                            backgroundColor: scheme.primaryContainer,
+                            child: Text(
+                              '${i + 1}',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                color: scheme.onPrimaryContainer,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          title: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  e.displayName,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontWeight:
+                                        me ? FontWeight.w900 : FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              if (me)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: Text(
+                                    'ВЫ',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                      color: scheme.primary,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          trailing: Text(
+                            '${e.bestScore}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -876,11 +1358,11 @@ class _MotivationStrip extends StatelessWidget {
           'тогда 500 Qarmet твои (если никто не обгонит).';
     } else if (myRank > 0) {
       line =
-          'Ты №$myRank в топ-10. До лидера «${leader.displayName}»: примерно '
+          'Ты №$myRank в топе сессии. До лидера «${leader.displayName}»: примерно '
           '$gapClamped очков — добей разницу тапами или JUMP.';
     } else {
       line =
-          'Тебя ещё нет в топ-10. Лидер на ${leader.score} очках — '
+          'Тебя ещё нет в топе сессии. Лидер на ${leader.score} очках — '
           'тапай и догоняй, иначе награда уйдёт другим.';
     }
 

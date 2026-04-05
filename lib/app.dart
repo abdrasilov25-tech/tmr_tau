@@ -61,7 +61,9 @@ import 'features/live_battle/data/repositories/live_battle_repository_impl.dart'
 import 'features/live_battle/domain/repositories/live_battle_repository.dart';
 import 'features/live_streaming/data/repositories/live_streaming_repository_impl.dart';
 import 'features/live_streaming/domain/repositories/live_streaming_repository.dart';
+import 'features/tap_game/data/tap_game_local_hall_repository_impl.dart';
 import 'features/tap_game/data/tap_game_repository_impl.dart';
+import 'features/tap_game/domain/repositories/tap_game_local_hall_repository.dart';
 import 'features/tap_game/domain/repositories/tap_game_repository.dart';
 
 class TmrTauApp extends StatefulWidget {
@@ -280,6 +282,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
           value: _liveStreamingRepository,
         ),
         RepositoryProvider<TapGameRepository>.value(value: _tapGameRepository),
+        RepositoryProvider<TapGameLocalHallRepository>.value(
+          value: TapGameLocalHallRepositoryImpl(),
+        ),
         RepositoryProvider<GeoService>.value(value: _geoService),
         ChangeNotifierProvider<SearchTabActivationController>.value(
           value: _searchTabActivation,

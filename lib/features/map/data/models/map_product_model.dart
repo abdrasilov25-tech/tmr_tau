@@ -1,5 +1,16 @@
 import '../../domain/entities/map_product.dart';
 
+MapBoostLevel _boostLevelFromInt(dynamic raw) {
+  switch (raw) {
+    case 1:
+      return MapBoostLevel.boost;
+    case 2:
+      return MapBoostLevel.topZone;
+    default:
+      return MapBoostLevel.none;
+  }
+}
+
 List<String> _imageUrlsFromJson(Map<String, dynamic> json) {
   final rawUrlsCol = json['image_urls'];
   if (rawUrlsCol is List && rawUrlsCol.isNotEmpty) {
@@ -29,11 +40,15 @@ class MapProductModel extends MapProduct {
     super.isTop,
     super.sellerRatingAverage,
     super.sellerRatingCount,
+    super.mapBoostLevel,
+    super.mapBoostExpiresAt,
+    super.mapMarkerSticker,
   });
 
   factory MapProductModel.fromJson(Map<String, dynamic> json) {
     final urls = _imageUrlsFromJson(json);
     final user = json['users'];
+    final expiresRaw = json['map_boost_expires_at'] as String?;
     return MapProductModel(
       id: json['id'] as String,
       title: json['title'] as String,
@@ -49,6 +64,10 @@ class MapProductModel extends MapProduct {
       isTop: json['is_top'] == true,
       sellerRatingAverage: (json['seller_rating_avg'] as num?)?.toDouble() ?? 0,
       sellerRatingCount: (json['seller_rating_count'] as num?)?.toInt() ?? 0,
+      mapBoostLevel: _boostLevelFromInt(json['map_boost_level']),
+      mapBoostExpiresAt:
+          expiresRaw != null ? DateTime.tryParse(expiresRaw)?.toUtc() : null,
+      mapMarkerSticker: json['map_marker_sticker'] as String?,
     );
   }
 }

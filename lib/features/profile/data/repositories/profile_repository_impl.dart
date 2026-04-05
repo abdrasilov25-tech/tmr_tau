@@ -1,5 +1,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/following/following_change_bus.dart';
 import '../../../product/data/models/product_model.dart';
 import '../../domain/entities/creator_monthly_stats.dart';
 import '../../domain/entities/seller_profile_entity.dart';
@@ -400,11 +401,15 @@ class ProfileRepositoryImpl implements ProfileRepository {
           });
         } catch (_) {}
       }
+      FollowingChangeBus.instance.notify();
     } on PostgrestException catch (e) {
-      if (e.code != '23505') {
-        // ignore: avoid_print
-        print('Postgrest toggleFollow error: $e');
+      if (e.code == '23505') {
+        // Уже есть строка подписки — приведём ленту/профиль к актуальному виду.
+        FollowingChangeBus.instance.notify();
+        return;
       }
+      // ignore: avoid_print
+      print('Postgrest toggleFollow error: $e');
     } catch (e) {
       // ignore: avoid_print
       print('Unknown toggleFollow error: $e');

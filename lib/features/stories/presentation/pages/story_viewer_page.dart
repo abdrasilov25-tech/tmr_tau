@@ -317,7 +317,6 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
   final _replyFocusNode = FocusNode();
   bool _sendingReply = false;
   bool _showReplyComposer = false;
-  bool _isFastForward = false;
   final Set<String> _markedViewedIds = <String>{};
   int _viewsCount = 0;
   bool _viewsLoading = false;
@@ -377,36 +376,6 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     if (!_replyFocusNode.hasFocus && !_showReplyComposer) {
       widget.onResume();
     }
-  }
-
-  void _togglePauseResume() {
-    if (widget.isPaused) {
-      widget.onResume();
-    } else {
-      widget.onPause();
-    }
-  }
-
-  void _handleRightZoneTap() {
-    final hasVideo = (_currentStory.videoUrl ?? '').isNotEmpty;
-    if (!hasVideo) {
-      widget.onNext();
-      return;
-    }
-    widget.onNext();
-  }
-
-  void _startRightHoldFastForward() {
-    final hasVideo = (_currentStory.videoUrl ?? '').isNotEmpty;
-    if (!hasVideo) {
-      return;
-    }
-    setState(() => _isFastForward = true);
-  }
-
-  void _stopRightHoldFastForward() {
-    if (!_isFastForward) return;
-    setState(() => _isFastForward = false);
   }
 
   Future<void> _loadViewsCount() async {
@@ -857,7 +826,6 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           onPageChanged: (i) {
             setState(() => _currentIndex = i);
             _showReplyComposer = false;
-            _isFastForward = false;
             _replyFocusNode.unfocus();
             _markCurrentStoryViewed();
             _loadViewsCount();
@@ -866,14 +834,10 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
             return _StoryContent(
               story: widget.group.stories[index],
               onTapLeft: widget.onPrev,
-              onTapRight: _handleRightZoneTap,
-              onTapCenter: _togglePauseResume,
+              onTapRight: widget.onNext,
               onHoldStart: widget.onPause,
               onHoldEnd: widget.onResume,
-              onRightHoldStart: _startRightHoldFastForward,
-              onRightHoldEnd: _stopRightHoldFastForward,
               isPaused: widget.isPaused,
-              isFastForward: _isFastForward,
             );
           },
         ),
@@ -1304,74 +1268,45 @@ class _ProgressBarsState extends State<_ProgressBars>
   }
 }
 
+/// Жесты как в Instagram: тап слева — назад, тап справа/по центру — вперёд;
+/// удержание пальца — пауза (таймер + видео).
 class _StoryContent extends StatelessWidget {
   const _StoryContent({
     required this.story,
     required this.onTapLeft,
     required this.onTapRight,
-    required this.onTapCenter,
     required this.onHoldStart,
     required this.onHoldEnd,
-    required this.onRightHoldStart,
-    required this.onRightHoldEnd,
     required this.isPaused,
-    required this.isFastForward,
   });
 
   final StoryEntity story;
   final VoidCallback onTapLeft;
   final VoidCallback onTapRight;
-  final VoidCallback onTapCenter;
   final VoidCallback onHoldStart;
   final VoidCallback onHoldEnd;
-  final VoidCallback onRightHoldStart;
-  final VoidCallback onRightHoldEnd;
   final bool isPaused;
-  final bool isFastForward;
+
+  static const double _backZoneFraction = 0.35;
+
+  void _onTapUp(BuildContext context, TapUpDetails details) {
+    final w = MediaQuery.sizeOf(context).width;
+    final dx = details.localPosition.dx;
+    if (dx < w * _backZoneFraction) {
+      onTapLeft();
+    } else {
+      onTapRight();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final hasVideo = story.videoUrl != null && story.videoUrl!.isNotEmpty;
     return GestureDetector(
-      onLongPressStart: (details) {
-        final w = MediaQuery.sizeOf(context).width;
-        final dx = details.localPosition.dx;
-        final isRightZone = dx > w * 0.85;
-        if (isRightZone && hasVideo) {
-          onRightHoldStart();
-          return;
-        }
-        onHoldStart();
-      },
-      onLongPressEnd: (details) {
-        final w = MediaQuery.sizeOf(context).width;
-        final dx = details.localPosition.dx;
-        final isRightZone = dx > w * 0.85;
-        if (isRightZone && hasVideo) {
-          onRightHoldEnd();
-          return;
-        }
-        onHoldEnd();
-      },
-      onLongPressCancel: () {
-        onRightHoldEnd();
-        onHoldEnd();
-      },
-      onTapDown: (details) {
-        if (hasVideo) {
-          onTapCenter();
-          return;
-        }
-        final w = MediaQuery.sizeOf(context).width;
-        final dx = details.localPosition.dx;
-        if (dx < w * 0.15) {
-          onTapLeft();
-        } else if (dx > w * 0.85) {
-          onTapRight();
-        } else {
-          onTapCenter();
-        }
-      },
+      onLongPressStart: (_) => onHoldStart(),
+      onLongPressEnd: (_) => onHoldEnd(),
+      onLongPressCancel: onHoldEnd,
+      onTapUp: (details) => _onTapUp(context, details),
       child: Center(
         child: AspectRatio(
           aspectRatio: _storyAspectRatio,
@@ -1380,7 +1315,6 @@ class _StoryContent extends StatelessWidget {
                 ? _StoryVideoContent(
                     videoUrl: story.videoUrl!,
                     paused: isPaused,
-                    fastForward: isFastForward,
                   )
                 : story.imageUrl.isNotEmpty
                     ? CachedNetworkImage(
@@ -1411,12 +1345,10 @@ class _StoryVideoContent extends StatefulWidget {
   const _StoryVideoContent({
     required this.videoUrl,
     required this.paused,
-    required this.fastForward,
   });
 
   final String videoUrl;
   final bool paused;
-  final bool fastForward;
 
   @override
   State<_StoryVideoContent> createState() => _StoryVideoContentState();
@@ -1489,9 +1421,6 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
         c.play();
       }
     }
-    if (oldWidget.fastForward != widget.fastForward) {
-      c.setPlaybackSpeed(widget.fastForward ? 2.0 : 1.0);
-    }
   }
 
   @override
@@ -1519,29 +1448,6 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
               fit: StackFit.expand,
               children: [
                 VideoPlayer(c),
-                if (widget.fastForward)
-                  const Align(
-                    alignment: Alignment.topRight,
-                    child: Padding(
-                      padding: EdgeInsets.all(12),
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.all(Radius.circular(10)),
-                        ),
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          child: Text(
-                            '2x',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
                 Positioned(
                   right: 12,
                   bottom: 12,

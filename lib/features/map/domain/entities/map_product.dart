@@ -1,5 +1,9 @@
 import 'package:equatable/equatable.dart';
 
+/// Map boost levels for seller visibility on the map.
+/// 0 = none, 1 = Boost (50 Qarmet/24h), 2 = Top Zone (150 Qarmet/24h).
+enum MapBoostLevel { none, boost, topZone }
+
 class MapProduct extends Equatable {
   const MapProduct({
     required this.id,
@@ -16,6 +20,9 @@ class MapProduct extends Equatable {
     this.isTop = false,
     this.sellerRatingAverage = 0,
     this.sellerRatingCount = 0,
+    this.mapBoostLevel = MapBoostLevel.none,
+    this.mapBoostExpiresAt,
+    this.mapMarkerSticker,
   });
 
   final String id;
@@ -32,6 +39,14 @@ class MapProduct extends Equatable {
   final bool isTop;
   final double sellerRatingAverage;
   final int sellerRatingCount;
+  final MapBoostLevel mapBoostLevel;
+  final DateTime? mapBoostExpiresAt;
+  final String? mapMarkerSticker;
+
+  bool get isBoosted =>
+      mapBoostLevel != MapBoostLevel.none &&
+      (mapBoostExpiresAt == null ||
+          mapBoostExpiresAt!.isAfter(DateTime.now().toUtc()));
 
   String get priceFormatted => '${price.toStringAsFixed(0)} ₸';
 
@@ -46,5 +61,8 @@ class MapProduct extends Equatable {
         isTop,
         sellerRatingAverage,
         sellerRatingCount,
+        mapBoostLevel,
+        mapBoostExpiresAt,
+        mapMarkerSticker,
       ];
 }

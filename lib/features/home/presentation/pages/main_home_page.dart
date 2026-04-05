@@ -7,6 +7,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:video_player/video_player.dart';
 
+import '../../../../core/following/following_change_bus.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/app_loading.dart';
@@ -114,6 +115,8 @@ class _MainHomePageState extends State<MainHomePage> {
   String? _followingIdsCacheUserId;
   Future<List<String>>? _followingIdsLoadFuture;
 
+  StreamSubscription<void>? _followingChangeSub;
+
   /// Последний индекс, для которого уже вызывали precache соседей (избегаем лишней работы при скролле).
   int? _lastPrecachedFeedIndex;
 
@@ -123,9 +126,19 @@ class _MainHomePageState extends State<MainHomePage> {
     _pageRecommendationsController = PageController();
     _pageSubscriptionsController = PageController();
 
-    // Текущий userId берём из AuthBloc (в проекте так принято).
+    // Текущий userId: AuthBloc; если ещё не успел эмитнуть — fallback на сессию Supabase.
     final authState = context.read<AuthBloc>().state;
-    _currentUserId = authState is AuthAuthenticated ? authState.user.id : null;
+    _currentUserId = authState is AuthAuthenticated
+        ? authState.user.id
+        : null;
+    _currentUserId ??= supa.Supabase.instance.client.auth.currentUser?.id;
+
+    _followingChangeSub =
+        FollowingChangeBus.instance.stream.listen((_) {
+      if (!mounted) return;
+      _invalidateFollowingIdsCache();
+      unawaited(_syncFollowFlagsAfterFollowingChange());
+    });
 
     debugPrint('[MainHomePage] opened (currentUserId=${_currentUserId ?? 'null'})');
     final cache = _warmCache;
@@ -220,6 +233,7 @@ class _MainHomePageState extends State<MainHomePage> {
 
   @override
   void dispose() {
+    _followingChangeSub?.cancel();
     _cancelImpressionTimer();
     _pageRecommendationsController.dispose();
     _pageSubscriptionsController.dispose();
@@ -464,7 +478,8 @@ class _MainHomePageState extends State<MainHomePage> {
     final authState = context.read<AuthBloc>().state;
     final activeUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
-    _currentUserId = activeUserId;
+    _currentUserId =
+        activeUserId ?? supa.Supabase.instance.client.auth.currentUser?.id;
     _feedTab = _FeedTab.recommendations;
     _invalidateFollowingIdsCache();
     if (showLoading) {
@@ -711,6 +726,33 @@ class _MainHomePageState extends State<MainHomePage> {
     _followingIdsCache = null;
     _followingIdsCacheUserId = null;
     _followingIdsLoadFuture = null;
+  }
+
+  void _reconcileFollowFlagsInLists(Set<String> followingIds) {
+    final uid = _currentUserId;
+    void reconcile(List<PostEntity> list) {
+      for (var i = 0; i < list.length; i++) {
+        final p = list[i];
+        if (uid != null && p.userId == uid) continue;
+        final should = followingIds.contains(p.userId);
+        if (p.isFollowingAuthor != should) {
+          list[i] = p.copyWith(isFollowingAuthor: should);
+        }
+      }
+    }
+
+    reconcile(_postsRecommendations);
+    reconcile(_postsSubscriptions);
+  }
+
+  Future<void> _syncFollowFlagsAfterFollowingChange() async {
+    final uid = _currentUserId;
+    if (uid == null || !mounted) return;
+    try {
+      final ids = await _getFollowingUserIdsCached();
+      if (!mounted) return;
+      setState(() => _reconcileFollowFlagsInLists(ids.toSet()));
+    } catch (_) {}
   }
 
   Future<List<String>> _getFollowingUserIdsCached() async {

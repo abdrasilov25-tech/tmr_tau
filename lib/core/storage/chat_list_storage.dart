@@ -29,6 +29,8 @@ class ChatListStorage {
   String _declinedKey(String peerId) => '${_base}declined_$peerId';
   String _declinedMsgEpochKey(String peerId) => '${_base}declined_msg_$peerId';
   String _hiddenMessagesKey(String peerId) => '${_base}hidden_messages_$peerId';
+  String _starredDmMessagesKey(String peerId) =>
+      '${_base}dm_starred_messages_$peerId';
 
   String _cityChatRulesKey(String groupId) =>
       '${_base}city_rules_seen_${groupId.trim()}';
@@ -157,6 +159,39 @@ class ChatListStorage {
     await _prefs.remove(_declinedKey(prefsPeer));
     await _prefs.remove(_declinedMsgEpochKey(prefsPeer));
     await _prefs.remove(_hiddenMessagesKey(prefsPeer));
+    await _prefs.remove(_starredDmMessagesKey(prefsPeer));
+  }
+
+  /// Локальные «избранные» сообщения в диалоге с [peerId] (id сообщений).
+  Set<String> getStarredDmMessageIds(String peerId) {
+    final list = _prefs.getStringList(_starredDmMessagesKey(peerId));
+    return list != null ? list.toSet() : <String>{};
+  }
+
+  bool isDmMessageStarred(String peerId, String messageId) {
+    if (messageId.isEmpty) return false;
+    return getStarredDmMessageIds(peerId).contains(messageId);
+  }
+
+  Future<void> toggleStarredDmMessage(String peerId, String messageId) async {
+    if (_activeAccountId.isEmpty || messageId.isEmpty) return;
+    final set = getStarredDmMessageIds(peerId);
+    if (set.contains(messageId)) {
+      set.remove(messageId);
+    } else {
+      set.add(messageId);
+      const maxStarred = 600;
+      if (set.length > maxStarred) {
+        final list = set.toList();
+        set
+          ..clear()
+          ..addAll(list.skip(list.length - maxStarred));
+      }
+    }
+    await _prefs.setStringList(
+      _starredDmMessagesKey(peerId),
+      set.toList(growable: false),
+    );
   }
 
   Set<String> getHiddenMessageIds(String peerId) {

@@ -24,6 +24,10 @@ abstract class StoriesRepository {
     String? originalPostAuthorId,
     String? originalPostAuthorName,
     String? originalPostPreviewUrl,
+    int videoDurationSeconds = 0,
+    String? musicTitle,
+    String? musicArtist,
+    String? musicExternalUrl,
   });
   Future<void> updateStory(String storyId, {String? caption});
   Future<void> deleteStory(String storyId, String userId);

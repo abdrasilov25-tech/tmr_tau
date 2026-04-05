@@ -3,24 +3,49 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../data/datasources/map_remote_datasource.dart';
 import '../../domain/entities/map_product.dart';
 import '../../../../features/product/domain/entities/product_entity.dart';
+import 'map_boost_sheet.dart';
+import 'sticker_pack_sheet.dart';
 
 class MapProductSheet extends StatelessWidget {
-  const MapProductSheet({super.key, required this.product});
+  const MapProductSheet({
+    super.key,
+    required this.product,
+    this.dataSource,
+    this.onBoostPurchased,
+    this.onMessagedSeller,
+  });
 
   final MapProduct product;
+  final MapRemoteDataSource? dataSource;
+  final VoidCallback? onBoostPurchased;
+  final VoidCallback? onMessagedSeller;
 
   @override
   Widget build(BuildContext context) {
-    return _MapProductSheetBody(product: product);
+    return _MapProductSheetBody(
+      product: product,
+      dataSource: dataSource,
+      onBoostPurchased: onBoostPurchased,
+      onMessagedSeller: onMessagedSeller,
+    );
   }
 }
 
 class _MapProductSheetBody extends StatefulWidget {
-  const _MapProductSheetBody({required this.product});
+  const _MapProductSheetBody({
+    required this.product,
+    this.dataSource,
+    this.onBoostPurchased,
+    this.onMessagedSeller,
+  });
 
   final MapProduct product;
+  final MapRemoteDataSource? dataSource;
+  final VoidCallback? onBoostPurchased;
+  final VoidCallback? onMessagedSeller;
 
   @override
   State<_MapProductSheetBody> createState() => _MapProductSheetBodyState();
@@ -29,6 +54,44 @@ class _MapProductSheetBody extends StatefulWidget {
 class _MapProductSheetBodyState extends State<_MapProductSheetBody> {
   bool _ratingLoading = false;
   int _myStars = 0;
+
+  bool get _isOwner {
+    final uid = Supabase.instance.client.auth.currentUser?.id;
+    return uid != null && uid == widget.product.sellerId;
+  }
+
+  void _openStickerSheet() {
+    final ds = widget.dataSource;
+    if (ds == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StickerPackSheet(
+        dataSource: ds,
+        productId: widget.product.id,
+        productTitle: widget.product.title,
+        currentSticker: widget.product.mapMarkerSticker,
+        onStickerSet: widget.onBoostPurchased, // reuse reload callback
+      ),
+    );
+  }
+
+  void _openBoostSheet() {
+    final ds = widget.dataSource;
+    if (ds == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MapBoostSheet(
+        productId: widget.product.id,
+        productTitle: widget.product.title,
+        dataSource: ds,
+        onBoostPurchased: widget.onBoostPurchased,
+      ),
+    );
+  }
 
   Future<void> _rateBusiness(int stars) async {
     final client = Supabase.instance.client;
@@ -197,6 +260,84 @@ class _MapProductSheetBodyState extends State<_MapProductSheetBody> {
             ),
           ),
           const SizedBox(height: 16),
+          // Sticker + Boost row — visible only to the product owner
+          if (_isOwner && widget.dataSource != null) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openStickerSheet,
+                    icon: Text(
+                      product.mapMarkerSticker ?? '🎨',
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    label: Text(
+                      product.mapMarkerSticker != null ? 'Стикер' : 'Добавить стикер',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openBoostSheet,
+                    icon: Icon(Icons.bolt_rounded,
+                        size: 18,
+                        color: product.isBoosted
+                            ? const Color(0xFFF59E0B)
+                            : const Color(0xFF2563EB)),
+                    label: Text(
+                      product.isBoosted ? 'Буст активен' : 'Буст',
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: product.isBoosted
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFF2563EB)),
+                    ),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                          color: product.isBoosted
+                              ? const Color(0xFFF59E0B)
+                              : const Color(0xFF2563EB)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+          // Message seller button — only for non-owners
+          if (!_isOwner && product.sellerId.isNotEmpty) ...[
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () {
+                  widget.onMessagedSeller?.call();
+                  Navigator.of(context).pop();
+                  context.push(
+                    '/chat/${product.sellerId}?name=${Uri.encodeComponent(product.sellerName ?? 'Продавец')}',
+                  );
+                },
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                label: const Text('Написать продавцу'),
+                style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
           SizedBox(
             width: double.infinity,
             child: FilledButton(

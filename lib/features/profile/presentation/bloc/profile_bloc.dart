@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
 
@@ -19,9 +20,11 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
       ProfileLoadRequested event, Emitter<ProfileState> emit) async {
     emit(ProfileLoading());
     try {
+      final sessionUid = Supabase.instance.client.auth.currentUser?.id;
+      final viewerId = event.currentUserId ?? sessionUid;
       final profile = await _repository.getSellerProfile(
         event.sellerId,
-        currentUserId: event.currentUserId,
+        currentUserId: viewerId,
       );
       if (!isClosed) {
         emit(profile != null

@@ -77,6 +77,32 @@ String _displayTextForDirectThread(String rawText) {
   return 'Ответ на сторис: $payload';
 }
 
+/// Превью последнего сообщения в списке диалогов (учитывает message_type).
+String _dmThreadPreviewText(Map<String, dynamic> json) {
+  final type = json['message_type'] as String? ?? 'text';
+  final text = json['text'] as String? ?? '';
+  switch (type) {
+    case 'image':
+      return '📷 Фото';
+    case 'gif':
+      return 'GIF';
+    case 'audio':
+      return '🎤 Голосовое сообщение';
+    case 'video_circle':
+      return '📹 Видеосообщение';
+    case 'file':
+      final n = (json['file_name'] as String?)?.trim();
+      if (n != null && n.isNotEmpty) return '📎 $n';
+      return '📎 Файл';
+    case 'event':
+      return '📅 Мероприятие';
+    case 'location':
+      return '📍 Геолокация';
+    default:
+      return _displayTextForDirectThread(text);
+  }
+}
+
 /// Сборка списка диалогов из сырых сообщений (без Supabase/SharedPreferences).
 List<_ChatThread> _computeDirectThreadsFromRows(
   _DirectThreadsComputeArgs args,
@@ -93,7 +119,7 @@ List<_ChatThread> _computeDirectThreadsFromRows(
     final senderId = json['sender_id'] as String;
     final receiverId = json['receiver_id'] as String;
     final peerId = senderId == currentUserId ? receiverId : senderId;
-    final text = _displayTextForDirectThread(json['text'] as String? ?? '');
+    final text = _dmThreadPreviewText(json);
     final createdAt = DateTime.parse(json['created_at'] as String);
 
     if (!threadsByPeer.containsKey(peerId)) {

@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../utils/story_media_permissions.dart';
 
 /// Результат съёмки сторис-камеры.
@@ -323,7 +324,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                   // Закрыть
                   _IconBtn(
                     icon: Icons.close,
-                    onTap: () => context.pop(),
+                    onTap: () => context.popOrGoHomeFeed(),
                   ),
                   if (!_initializing && _permissionGranted)
                     _IconBtn(

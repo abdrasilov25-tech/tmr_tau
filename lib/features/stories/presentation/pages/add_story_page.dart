@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../domain/repositories/stories_repository.dart';
 import '../utils/story_media_permissions.dart';
 
@@ -418,7 +419,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Публикация добавлена')),
         );
-        context.pop(true);
+        context.popOrGoHomeFeed(true);
         return;
       }
 
@@ -483,7 +484,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('История добавлена')),
       );
-      context.pop(true);
+      context.popOrGoHomeFeed(true);
     } catch (e) {
       if (!mounted) return;
       String message = 'Ошибка: $e';
@@ -736,7 +737,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeFeed(),
         ),
         title: Text(
           _isLiveMode
@@ -813,31 +814,44 @@ class _CreationModeBar extends StatelessWidget {
       top: false,
       child: Container(
         color: Colors.black,
-        padding: const EdgeInsets.fromLTRB(8, 6, 8, 10),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            modeChip(
-              label: 'Публикация',
-              active: activeMode == _CreateMode.publication,
-              onTap: () => onModeChanged(_CreateMode.publication),
-            ),
-            modeChip(
-              label: 'История',
-              active: activeMode == _CreateMode.story,
-              onTap: () => onModeChanged(_CreateMode.story),
-            ),
-            modeChip(
-              label: 'Видео',
-              active: activeMode == _CreateMode.video,
-              onTap: () => onModeChanged(_CreateMode.video),
-            ),
-            modeChip(
-              label: 'Прямой эфир',
-              active: activeMode == _CreateMode.live,
-              onTap: () => onModeChanged(_CreateMode.live),
-            ),
-          ],
+        padding: const EdgeInsets.fromLTRB(0, 6, 0, 10),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth - 16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    modeChip(
+                      label: 'Публикация',
+                      active: activeMode == _CreateMode.publication,
+                      onTap: () => onModeChanged(_CreateMode.publication),
+                    ),
+                    modeChip(
+                      label: 'История',
+                      active: activeMode == _CreateMode.story,
+                      onTap: () => onModeChanged(_CreateMode.story),
+                    ),
+                    modeChip(
+                      label: 'Видео',
+                      active: activeMode == _CreateMode.video,
+                      onTap: () => onModeChanged(_CreateMode.video),
+                    ),
+                    modeChip(
+                      label: 'Прямой эфир',
+                      active: activeMode == _CreateMode.live,
+                      onTap: () => onModeChanged(_CreateMode.live),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
         ),
       ),
     );

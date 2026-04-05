@@ -168,6 +168,10 @@ class StoriesRepositoryImpl implements StoriesRepository {
     String? originalPostAuthorId,
     String? originalPostAuthorName,
     String? originalPostPreviewUrl,
+    int videoDurationSeconds = 0,
+    String? musicTitle,
+    String? musicArtist,
+    String? musicExternalUrl,
   }) async {
     await _client.from(SupabaseConstants.storiesTable).insert({
       'user_id': userId,
@@ -178,6 +182,10 @@ class StoriesRepositoryImpl implements StoriesRepository {
       'original_post_author_id': originalPostAuthorId,
       'original_post_author_name': originalPostAuthorName,
       'original_post_preview_url': originalPostPreviewUrl,
+      'video_duration_seconds': videoDurationSeconds,
+      'music_title': musicTitle,
+      'music_artist': musicArtist,
+      'music_external_url': musicExternalUrl,
       'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
     });
   }

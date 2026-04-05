@@ -1465,20 +1465,30 @@ alter table public.messages add column if not exists video_url text;
 alter table public.messages add column if not exists duration_seconds int not null default 0;
 alter table public.messages add column if not exists read_at timestamptz;
 alter table public.messages add column if not exists forward_of uuid references public.messages(id) on delete set null;
+alter table public.messages add column if not exists image_url text;
+alter table public.messages add column if not exists file_url text;
+alter table public.messages add column if not exists file_name text;
+alter table public.messages add column if not exists reply_to uuid references public.messages (id) on delete set null;
 
-do $$
-begin
-  if not exists (
-    select 1
-    from pg_constraint
-    where conname = 'messages_message_type_allowed'
-      and conrelid = 'public.messages'::regclass
-  ) then
-    alter table public.messages
-      add constraint messages_message_type_allowed
-      check (message_type in ('text', 'audio', 'video_circle'));
-  end if;
-end $$;
+create index if not exists idx_messages_reply_to on public.messages (reply_to)
+  where reply_to is not null;
+
+alter table public.messages drop constraint if exists messages_message_type_allowed;
+
+alter table public.messages
+  add constraint messages_message_type_allowed
+  check (
+    message_type in (
+      'text',
+      'audio',
+      'video_circle',
+      'image',
+      'gif',
+      'file',
+      'event',
+      'location'
+    )
+  );
 
 create index if not exists idx_messages_dm_unread
   on public.messages (receiver_id, sender_id)

@@ -45,12 +45,22 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
     final saved = prefs.getString(_cityPrefKey);
     if (!mounted) return;
     setState(() => _selectedCity = saved);
-    // Перезагружаем ленту с сохранённым городом
+    if (!mounted) return;
+    final bloc = context.read<NewsBloc>();
+    final s = bloc.state;
+    // Уже загружено для этого фильтра (например после NewsLoaded из AuthBloc) —
+    // не делаем второй полный запрос и не показываем лоадер снова.
+    if (s is NewsSuccess && s.selectedCity == saved) {
+      return;
+    }
     final userId = _currentUserId(context);
-    // ignore: use_build_context_synchronously
-    context.read<NewsBloc>().add(
-          NewsLoaded(currentUserId: userId, cityFilter: saved),
-        );
+    bloc.add(
+      NewsLoaded(
+        currentUserId: userId,
+        cityFilter: saved,
+        silent: s is NewsSuccess,
+      ),
+    );
   }
 
   String? _currentUserId(BuildContext context) {
@@ -105,11 +115,6 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
 
   @override
   Widget build(BuildContext context) {
-    final authState = context.watch<AuthBloc>().state;
-    final userId = authState is AuthAuthenticated
-        ? authState.user.id
-        : context.read<AuthRepository>().currentUser?.id;
-
     return Builder(
       builder: (nested) {
         return Scaffold(
@@ -122,23 +127,40 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
-                child: _NewsComposer(
-                  avatarUrl: authState is AuthAuthenticated
-                      ? authState.user.avatarUrl
-                      : null,
-                  displayName: authState is AuthAuthenticated
-                      ? (authState.user.name ?? authState.user.email)
-                      : null,
-                  isLoggedIn: userId != null,
-                  selectedCity: _selectedCity,
-                  onTap: () => _openAddNews(nested, userId),
-                ),
+              BlocSelector<
+                  AuthBloc,
+                  AuthState,
+                  ({String? id, String? avatarUrl, String? displayName})>(
+                selector: (s) {
+                  if (s is AuthAuthenticated) {
+                    final u = s.user;
+                    return (
+                      id: u.id,
+                      avatarUrl: u.avatarUrl,
+                      displayName: u.name ?? u.email,
+                    );
+                  }
+                  return (id: null, avatarUrl: null, displayName: null);
+                },
+                builder: (context, slice) {
+                  final userId = slice.id ??
+                      context.read<AuthRepository>().currentUser?.id;
+                  return Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+                    child: _NewsComposer(
+                      avatarUrl: slice.avatarUrl,
+                      displayName: slice.displayName,
+                      isLoggedIn: userId != null,
+                      selectedCity: _selectedCity,
+                      onTap: () => _openAddNews(nested, userId),
+                    ),
+                  );
+                },
               ),
               Expanded(
                 child: BlocBuilder<NewsBloc, NewsState>(
                   builder: (context, state) {
+                    final userId = _currentUserId(context);
                     if (state is NewsLoading) {
                       return const Center(child: AppLoading());
                     }

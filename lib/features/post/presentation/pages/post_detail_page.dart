@@ -5,10 +5,12 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import '../../../../core/following/following_change_bus.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/media/global_video_audio_state.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../profile/domain/repositories/profile_repository.dart';
 import '../../domain/entities/post_comment_entity.dart';
 import '../../domain/entities/post_entity.dart';
 import '../../domain/exceptions/post_comment_exceptions.dart';
@@ -48,10 +50,12 @@ class _PostDetailPageState extends State<PostDetailPage> {
   bool? _isFollowing;
   bool _followLoading = false;
 
+  StreamSubscription<void>? _followingChangeSub;
+
   String? get _currentUserId {
     final auth = context.read<AuthBloc>().state;
-    if (auth is! AuthAuthenticated) return null;
-    return auth.user.id;
+    if (auth is AuthAuthenticated) return auth.user.id;
+    return Supabase.instance.client.auth.currentUser?.id;
   }
 
   bool get _isOwnPost => _currentUserId == _post.userId;
@@ -62,6 +66,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
     _post = widget.post;
     _loadComments();
     _loadFollowState();
+    _followingChangeSub =
+        FollowingChangeBus.instance.stream.listen((_) {
+      if (!mounted) return;
+      unawaited(_loadFollowState());
+    });
   }
 
   Future<void> _loadFollowState() async {
@@ -84,30 +93,11 @@ class _PostDetailPageState extends State<PostDetailPage> {
     if (uid == null || _followLoading) return;
     setState(() => _followLoading = true);
     try {
-      final client = Supabase.instance.client;
       final wasFollowing = _isFollowing ?? false;
-      if (wasFollowing) {
-        await client
-            .from('followers')
-            .delete()
-            .eq('follower_id', uid)
-            .eq('following_id', _post.userId);
-      } else {
-        await client.from('followers').insert({
-          'follower_id': uid,
-          'following_id': _post.userId,
-        });
-        // Уведомление автору
-        await client.from('notifications').insert({
-          'user_id': _post.userId,
-          'actor_id': uid,
-          'type': 'follow',
-          'title': 'Новый подписчик',
-          'body': 'Подписался на вас',
-        });
-      }
+      await context.read<ProfileRepository>().toggleFollow(uid, _post.userId);
       if (mounted) setState(() => _isFollowing = !wasFollowing);
     } catch (_) {
+      if (mounted) await _loadFollowState();
     } finally {
       if (mounted) setState(() => _followLoading = false);
     }
@@ -115,6 +105,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
 
   @override
   void dispose() {
+    _followingChangeSub?.cancel();
     _commentController.dispose();
     _commentFocusNode.dispose();
     _scrollController.dispose();

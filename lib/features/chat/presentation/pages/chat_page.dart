@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
@@ -80,6 +83,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Timer? _presenceTimer;
 
   static const Duration _onlineThreshold = Duration(minutes: 2);
+  /// Полоса реакций как в WhatsApp (плюс кнопка «ещё» открывает сетку).
+  static const List<String> _waBarReactionEmojis = [
+    '👍',
+    '❤️',
+    '😂',
+    '😮',
+    '😢',
+    '🙏',
+    '🔥',
+  ];
+
   static const List<String> _quickReactionEmojis = [
     '❤️',
     '👍',
@@ -90,6 +104,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     '🔥',
     '👏',
   ];
+
+  /// Ответ на сообщение (reply_to на сервере).
+  String? _replyingToMessageId;
+  String? _replyingToSnippet;
 
   // ── Голосовые сообщения ────────────────────────────────────
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -712,6 +730,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final text = source['text'] as String? ?? '';
     final audioUrl = source['audio_url'] as String?;
     final videoUrl = source['video_url'] as String?;
+    final imageUrl = source['image_url'] as String?;
+    final fileUrl = source['file_url'] as String?;
+    final fileName = source['file_name'] as String?;
     final durationSec = (source['duration_seconds'] as int?) ?? 0;
     setState(() => _sending = true);
     try {
@@ -727,6 +748,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       }
       if (videoUrl != null && videoUrl.isNotEmpty) {
         row['video_url'] = videoUrl;
+      }
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        row['image_url'] = imageUrl;
+      }
+      if (fileUrl != null && fileUrl.isNotEmpty) {
+        row['file_url'] = fileUrl;
+      }
+      if (fileName != null && fileName.isNotEmpty) {
+        row['file_name'] = fileName;
+      }
+      final replyTo = source['reply_to'] as String?;
+      if (replyTo != null && replyTo.isNotEmpty) {
+        row['reply_to'] = replyTo;
       }
       if (srcId.isNotEmpty) {
         row['forward_of'] = srcId;
@@ -746,11 +780,232 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
-  void _showDirectMessageActions(Map<String, dynamic> m, String messageId) {
+  String _dmMessageSnippetForActions(Map<String, dynamic> m) {
+    final type = (m['message_type'] as String?) ?? 'text';
+    final raw = m['text'] as String? ?? '';
+    switch (type) {
+      case 'image':
+        return '📷 Фото';
+      case 'gif':
+        return 'GIF';
+      case 'audio':
+        return '🎤 Голосовое сообщение';
+      case 'video_circle':
+        return '📹 Видеосообщение';
+      case 'file':
+        final n = (m['file_name'] as String?)?.trim();
+        return (n != null && n.isNotEmpty) ? '📎 $n' : '📎 Файл';
+      case 'event':
+        return '📅 Мероприятие';
+      case 'location':
+        return '📍 Геолокация';
+      default:
+        break;
+    }
+    if (raw.isEmpty) return 'Сообщение';
+    if (raw.startsWith(_storyDmPrefix)) return 'Сторис';
+    if (raw.startsWith(_postDmPrefix)) return 'Публикация';
+    if (raw.length > 200) return '${raw.substring(0, 197)}…';
+    return raw;
+  }
+
+  String _messageShortTime(dynamic createdAt) {
+    final t = _parseTs(createdAt);
+    if (t == null) return '';
+    final l = t.toLocal();
+    return '${l.hour.toString().padLeft(2, '0')}:'
+        '${l.minute.toString().padLeft(2, '0')}';
+  }
+
+  List<String> _allPickableReactionEmojis() {
+    final set = <String>{
+      ..._waBarReactionEmojis,
+      ..._quickReactionEmojis,
+      '🫶',
+      '🤝',
+      '💯',
+      '✨',
+      '⭐',
+      '🎉',
+      '💪',
+      '😍',
+      '🥰',
+      '😘',
+      '🤩',
+      '🙌',
+      '👋',
+      '✌️',
+      '👌',
+      '😊',
+      '😉',
+      '😭',
+      '🤔',
+      '😱',
+      '💔',
+      '🖤',
+      '💋',
+      '🎂',
+      '☀️',
+      '☕',
+      '🍕',
+      '⚽',
+      '✈️',
+      '🏠',
+    };
+    return set.toList(growable: false);
+  }
+
+  void _showExtendedReactionEmojisForDm(
+    BuildContext dialogContext,
+    String messageId,
+  ) {
+    final emojis = _allPickableReactionEmojis();
+    showModalBottomSheet<void>(
+      context: dialogContext,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.48,
+          minChildSize: 0.32,
+          maxChildSize: 0.88,
+          builder: (_, scrollCtrl) {
+            return Material(
+              borderRadius:
+                  const BorderRadius.vertical(top: Radius.circular(18)),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  const SizedBox(height: 10),
+                  Text(
+                    'Выберите реакцию',
+                    style: Theme.of(sheetContext).textTheme.titleSmall,
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: GridView.builder(
+                      controller: scrollCtrl,
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 16),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 8,
+                        mainAxisSpacing: 6,
+                        crossAxisSpacing: 6,
+                      ),
+                      itemCount: emojis.length,
+                      itemBuilder: (_, i) {
+                        final e = emojis[i];
+                        return InkWell(
+                          onTap: () {
+                            Navigator.pop(sheetContext);
+                            Navigator.pop(dialogContext);
+                            unawaited(_setReactionForMessage(messageId, e));
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Center(
+                            child: Text(e, style: const TextStyle(fontSize: 28)),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmDeleteOrHideDm(
+    Map<String, dynamic> m,
+    String messageId,
+    bool isMine,
+  ) async {
+    final uid = _me();
+    if (uid == null) return;
+    final chatStorage = context.read<ChatListStorage>();
+    final unreadController = context.read<ChatUnreadBadgeController>();
+    if (isMine) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Удалить сообщение?'),
+          content: const Text(
+            'Сообщение будет удалено у всех. Это действие нельзя отменить.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Удалить'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      try {
+        await _client
+            .from(SupabaseConstants.messagesTable)
+            .delete()
+            .eq('id', messageId)
+            .or(
+              'and(sender_id.eq.$uid,receiver_id.eq.${widget.peerId}),'
+              'and(sender_id.eq.${widget.peerId},receiver_id.eq.$uid)',
+            );
+        if (!mounted) return;
+        setState(() {});
+        unreadController.refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Сообщение удалено')),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось удалить: $e')),
+        );
+      }
+    } else {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Скрыть сообщение?'),
+          content: const Text(
+            'Сообщение будет скрыто только у вас в этом чате.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Скрыть'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      await chatStorage.addHiddenMessageIds(widget.peerId, [messageId]);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сообщение скрыто')),
+      );
+    }
+  }
+
+  void _showDmMoreActionsSheet(
+    Map<String, dynamic> m,
+    String messageId,
+    bool canCopy,
+  ) {
     final text = (m['text'] as String?) ?? '';
-    final canCopy = text.trim().isNotEmpty &&
-        !text.startsWith(_storyDmPrefix) &&
-        !text.startsWith(_postDmPrefix);
     showModalBottomSheet<void>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -762,23 +1017,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           children: [
             ListTile(
               leading: const Icon(Icons.mood_outlined),
-              title: const Text('Реакция'),
+              title: const Text('Другие реакции'),
               onTap: () {
                 Navigator.pop(ctx);
                 _showReactionPickerSheet(messageId);
               },
             ),
             ListTile(
-              leading: const Icon(Icons.forward_rounded),
-              title: const Text('Переслать'),
-              onTap: () {
-                Navigator.pop(ctx);
-                unawaited(_openForwardPeerPicker(m));
-              },
-            ),
-            ListTile(
               leading: const Icon(Icons.checklist_rtl_outlined),
-              title: const Text('Выбрать'),
+              title: const Text('Выбрать несколько'),
               onTap: () {
                 Navigator.pop(ctx);
                 _toggleSelectionMode(true);
@@ -805,8 +1052,326 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _onQuickDoubleTapReaction(String messageId) async {
-    await _setReactionForMessage(messageId, '❤️');
+  void _showWhatsAppStyleMessageMenu(
+    Map<String, dynamic> m,
+    String messageId,
+  ) {
+    final me = _me();
+    if (me == null || messageId.isEmpty) return;
+    final isMine = (m['sender_id'] as String?) == me;
+    final text = (m['text'] as String?) ?? '';
+    final msgType = (m['message_type'] as String?) ?? 'text';
+    final canCopy = text.trim().isNotEmpty &&
+        !text.startsWith(_storyDmPrefix) &&
+        !text.startsWith(_postDmPrefix) &&
+        msgType != 'location' &&
+        msgType != 'event' &&
+        msgType != 'file' &&
+        msgType != 'image' &&
+        msgType != 'gif' &&
+        msgType != 'audio' &&
+        msgType != 'video_circle';
+    final snippet = _dmMessageSnippetForActions(m);
+    final timeLabel = _messageShortTime(m['created_at']);
+    final chatStorage = context.read<ChatListStorage>();
+
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 200),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return FadeTransition(
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+          ),
+          child: StatefulBuilder(
+            builder: (ctx, setModalState) {
+              final starred =
+                  chatStorage.isDmMessageStarred(widget.peerId, messageId);
+              return Material(
+                color: Colors.transparent,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Positioned.fill(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () => Navigator.pop(dialogContext),
+                        child: ClipRect(
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+                            child: Container(
+                              color: Colors.black.withValues(alpha: 0.28),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SafeArea(
+                      child: Column(
+                        children: [
+                          const Spacer(flex: 2),
+                          Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 20),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 16,
+                                  offset: Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  for (final e in _waBarReactionEmojis)
+                                    Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 4),
+                                      child: InkWell(
+                                        onTap: () {
+                                          Navigator.pop(dialogContext);
+                                          unawaited(
+                                              _setReactionForMessage(
+                                                  messageId, e));
+                                        },
+                                        borderRadius: BorderRadius.circular(20),
+                                        child: Padding(
+                                          padding: const EdgeInsets.all(6),
+                                          child: Text(
+                                            e,
+                                            style:
+                                                const TextStyle(fontSize: 28),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  Material(
+                                    color: Colors.grey.shade200,
+                                    shape: const CircleBorder(),
+                                    child: InkWell(
+                                      customBorder: const CircleBorder(),
+                                      onTap: () => _showExtendedReactionEmojisForDm(
+                                        dialogContext,
+                                        messageId,
+                                      ),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(10),
+                                        child: Icon(Icons.add, size: 22),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 24),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 340),
+                              child: Container(
+                                padding: const EdgeInsets.fromLTRB(
+                                    14, 12, 14, 10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black26,
+                                      blurRadius: 12,
+                                      offset: Offset(0, 3),
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      snippet,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        height: 1.35,
+                                        color: Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Text(
+                                        timeLabel,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const Spacer(flex: 3),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                            child: Material(
+                              color: Theme.of(ctx).colorScheme.surface,
+                              elevation: 8,
+                              shadowColor: Colors.black26,
+                              borderRadius: BorderRadius.circular(16),
+                              clipBehavior: Clip.antiAlias,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ListTile(
+                                    leading: const Icon(Icons.reply_rounded),
+                                    title: const Text('Ответить'),
+                                    onTap: () {
+                                      Navigator.pop(dialogContext);
+                                      if (messageId.startsWith('tmp_')) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(
+                                          const SnackBar(
+                                            content: Text(
+                                              'Дождитесь отправки сообщения',
+                                            ),
+                                          ),
+                                        );
+                                        return;
+                                      }
+                                      setState(() {
+                                        _replyingToMessageId = messageId;
+                                        _replyingToSnippet = snippet;
+                                      });
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading:
+                                        const Icon(Icons.forward_rounded),
+                                    title: const Text('Переслать'),
+                                    onTap: () {
+                                      Navigator.pop(dialogContext);
+                                      unawaited(_openForwardPeerPicker(m));
+                                    },
+                                  ),
+                                  if (canCopy)
+                                    ListTile(
+                                      leading: const Icon(Icons.copy_rounded),
+                                      title: const Text('Копировать'),
+                                      onTap: () async {
+                                        Navigator.pop(dialogContext);
+                                        await Clipboard.setData(
+                                            ClipboardData(text: text));
+                                        if (mounted) {
+                                          ScaffoldMessenger.of(context)
+                                              .showSnackBar(
+                                            const SnackBar(
+                                              content: Text('Скопировано'),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                    ),
+                                  ListTile(
+                                    leading: Icon(
+                                      starred
+                                          ? Icons.star_rounded
+                                          : Icons.star_outline_rounded,
+                                      color: starred
+                                          ? Theme.of(ctx).colorScheme.primary
+                                          : null,
+                                    ),
+                                    title: Text(
+                                      starred
+                                          ? 'Убрать из избранного'
+                                          : 'В избранное',
+                                    ),
+                                    onTap: () async {
+                                      final messenger =
+                                          ScaffoldMessenger.of(context);
+                                      await chatStorage.toggleStarredDmMessage(
+                                        widget.peerId,
+                                        messageId,
+                                      );
+                                      setModalState(() {});
+                                      if (!mounted) return;
+                                      final now = chatStorage
+                                          .isDmMessageStarred(
+                                              widget.peerId, messageId);
+                                      messenger.showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            now
+                                                ? 'Добавлено в избранное'
+                                                : 'Убрано из избранного',
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  ListTile(
+                                    leading: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: Colors.red,
+                                    ),
+                                    title: const Text(
+                                      'Удалить',
+                                      style: TextStyle(color: Colors.red),
+                                    ),
+                                    onTap: () {
+                                      Navigator.pop(dialogContext);
+                                      unawaited(_confirmDeleteOrHideDm(
+                                        m,
+                                        messageId,
+                                        isMine,
+                                      ));
+                                    },
+                                  ),
+                                  const Divider(height: 1),
+                                  ListTile(
+                                    leading: const Icon(Icons.more_horiz_rounded),
+                                    title: const Text('Ещё…'),
+                                    onTap: () {
+                                      Navigator.pop(dialogContext);
+                                      _showDmMoreActionsSheet(
+                                        m,
+                                        messageId,
+                                        canCopy,
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  void _showDirectMessageActions(Map<String, dynamic> m, String messageId) {
+    FocusScope.of(context).unfocus();
+    _showWhatsAppStyleMessageMenu(m, messageId);
   }
 
   Stream<List<Map<String, dynamic>>> _messagesStream(String? me) {
@@ -976,6 +1541,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final uid = _me();
     if (text.isEmpty || uid == null || _sending) return;
 
+    final replyToId = _replyingToMessageId;
+    final replySnippet = _replyingToSnippet;
+    final replyToValid = replyToId != null &&
+        replyToId.isNotEmpty &&
+        !replyToId.startsWith('tmp_');
+
     // ── Оптимистичный UI: сообщение видно мгновенно ──────────
     final tempId = 'tmp_${DateTime.now().millisecondsSinceEpoch}';
     final optimistic = <String, dynamic>{
@@ -986,10 +1557,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       'created_at': DateTime.now().toIso8601String(),
       'message_type': 'text',
       '_pending': true,
+      if (replyToValid) 'reply_to': replyToId,
     };
     setState(() {
       _optimisticMessages.add(optimistic);
       _sending = true;
+      _replyingToMessageId = null;
+      _replyingToSnippet = null;
     });
     // Очищаем поле и скроллим сразу — не ждём сервер
     _controller.clear();
@@ -998,13 +1572,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     // ─────────────────────────────────────────────────────────
 
     try {
+      final insertPayload = <String, dynamic>{
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': text,
+        if (replyToValid) 'reply_to': replyToId,
+      };
       final inserted = await _client
           .from(SupabaseConstants.messagesTable)
-          .insert({
-            'sender_id': uid,
-            'receiver_id': widget.peerId,
-            'text': text,
-          })
+          .insert(insertPayload)
           .select()
           .maybeSingle();
       // Подменяем tmp на строку с сервера — нет «дыры» до события Realtime.
@@ -1022,7 +1598,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (!mounted) return;
       setState(() {
         _optimisticMessages.removeWhere((m) => m['id'] == tempId);
+        if (replyToValid) {
+          _replyingToMessageId = replyToId;
+          _replyingToSnippet = replySnippet;
+        }
       });
+      _controller.text = text;
+      _textHasContent.value = text.trim().isNotEmpty;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Не удалось отправить: $e'),
@@ -1636,11 +2218,33 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           final audioUrl = m['audio_url'] as String?;
                           final videoUrl = m['video_url'] as String?;
                           final imageUrl = m['image_url'] as String?;
+                          final fileUrl = m['file_url'] as String?;
+                          final fileName = (m['file_name'] as String?) ?? '';
                           final isLocalImage = m['_local'] == true;
                           final durationSec = (m['duration_seconds'] as int?) ?? 0;
                           final structured = _parseStoryDirectMessage(text);
                           final postStructured = _parsePostDirectMessage(text);
-                          final locationData = _parseLocationMessage(text);
+                          final locationData =
+                              _parseLocationMessage(text, msgType);
+                          final eventData =
+                              _parseEventPayload(text, msgType);
+                          final replyToRaw = m['reply_to'];
+                          final replyToId = replyToRaw is String
+                              ? replyToRaw.trim()
+                              : '';
+                          String? replyQuote;
+                          if (replyToId.isNotEmpty) {
+                            Map<String, dynamic>? parent;
+                            for (final x in messages) {
+                              if ((x['id'] ?? '').toString() == replyToId) {
+                                parent = x;
+                                break;
+                              }
+                            }
+                            replyQuote = parent != null
+                                ? _dmMessageSnippetForActions(parent)
+                                : 'Сообщение';
+                          }
                           final isMe = senderId == me;
                           final isSelected =
                               messageId.isNotEmpty &&
@@ -1667,10 +2271,13 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                 ? Alignment.centerRight
                                 : Alignment.centerLeft,
                             child: GestureDetector(
-                              onDoubleTap: _selectionMode
-                                  ? null
-                                  : () =>
-                                      unawaited(_onQuickDoubleTapReaction(messageId)),
+                              onTap: () {
+                                if (_selectionMode) {
+                                  _toggleMessageSelection(messageId);
+                                } else {
+                                  _showDirectMessageActions(m, messageId);
+                                }
+                              },
                               onLongPress: () {
                                 if (_selectionMode) {
                                   _toggleMessageSelection(messageId);
@@ -1678,9 +2285,6 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   _showDirectMessageActions(m, messageId);
                                 }
                               },
-                              onTap: _selectionMode
-                                  ? () => _toggleMessageSelection(messageId)
-                                  : null,
                               child: Container(
                                 margin: const EdgeInsets.symmetric(vertical: 4),
                                 padding: useVideoShell
@@ -1739,6 +2343,46 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                           ],
                                         ),
                                       ),
+                                    if (replyQuote != null)
+                                      Container(
+                                        width: double.infinity,
+                                        margin:
+                                            const EdgeInsets.only(bottom: 8),
+                                        padding: const EdgeInsets.fromLTRB(
+                                            10, 8, 10, 8),
+                                        decoration: BoxDecoration(
+                                          color: isMe
+                                              ? Colors.white
+                                                  .withValues(alpha: 0.22)
+                                              : Colors.black
+                                                  .withValues(alpha: 0.06),
+                                          borderRadius:
+                                              BorderRadius.circular(10),
+                                          border: Border(
+                                            left: BorderSide(
+                                              color: isMe
+                                                  ? Colors.white70
+                                                  : Theme.of(context)
+                                                      .colorScheme
+                                                      .primary,
+                                              width: 3,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          replyQuote,
+                                          maxLines: 3,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            height: 1.25,
+                                            color: isMe
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.95)
+                                                : Colors.black87,
+                                          ),
+                                        ),
+                                      ),
                                     Row(
                                       mainAxisSize: MainAxisSize.min,
                                       crossAxisAlignment:
@@ -1761,16 +2405,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                                   isMe: isMe,
                                                   isPending: m['_pending'] == true,
                                                 )
-                                              : locationData != null
-                                                  ? _LocationBubble(
-                                                      key: ValueKey('loc_$messageId'),
-                                                      lat: locationData.lat,
-                                                      lng: locationData.lng,
-                                                      address: locationData.address,
+                                              : msgType == 'file' &&
+                                                      fileUrl != null &&
+                                                      fileUrl.isNotEmpty
+                                                  ? _FileMessageBubble(
+                                                      key: ValueKey(
+                                                          'file_$messageId'),
+                                                      fileUrl: fileUrl,
+                                                      fileName: fileName,
                                                       isMe: isMe,
                                                     )
-                                                  : msgType == 'audio' &&
-                                                          audioUrl != null
+                                                  : msgType == 'event' &&
+                                                          eventData != null
+                                                      ? _EventMessageBubble(
+                                                          key: ValueKey(
+                                                              'evt_$messageId'),
+                                                          title: eventData.title,
+                                                          when: eventData.when,
+                                                          place: eventData.place,
+                                                          isMe: isMe,
+                                                        )
+                                                      : locationData != null
+                                                          ? _LocationBubble(
+                                                              key: ValueKey(
+                                                                  'loc_$messageId'),
+                                                              lat: locationData.lat,
+                                                              lng: locationData.lng,
+                                                              address: locationData.address,
+                                                              isMe: isMe,
+                                                            )
+                                                          : msgType == 'audio' &&
+                                                                  audioUrl != null
                                                       ? _VoiceMessageBubble(
                                                           key: ValueKey('audio_$messageId'),
                                                           audioUrl: audioUrl,
@@ -1933,6 +2598,32 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        if (_replyingToMessageId != null)
+                          Material(
+                            color: ThemedContentSurface.scaffoldElevated,
+                            elevation: 1,
+                            shadowColor: Colors.black12,
+                            child: ListTile(
+                              dense: true,
+                              leading: Icon(
+                                Icons.reply_rounded,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              title: Text(
+                                _replyingToSnippet ?? '',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.close_rounded),
+                                onPressed: () => setState(() {
+                                  _replyingToMessageId = null;
+                                  _replyingToSnippet = null;
+                                }),
+                              ),
+                            ),
+                          ),
                         // ── Панель эмодзи (анимированная) ──
                         AnimatedSize(
                           duration: const Duration(milliseconds: 200),
@@ -2339,7 +3030,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         },
         onDocument: () {
           Navigator.pop(sheetCtx);
-          _showComingSoon('Документы');
+          unawaited(_pickAndSendDocument());
         },
         onPoll: () {
           Navigator.pop(sheetCtx);
@@ -2347,7 +3038,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         },
         onEvent: () {
           Navigator.pop(sheetCtx);
-          _showComingSoon('Мероприятия');
+          _showEventComposer();
         },
       ),
     );
@@ -2451,8 +3142,203 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'message_type': isGif ? 'gif' : 'image',
         'image_url': url,
       });
-      _forceScrollToLatest = true;
-    } catch (_) {}
+      if (mounted) {
+        _forceScrollToLatest = true;
+        setState(() {});
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+          isGif
+              ? 'Не удалось отправить GIF. Проверьте сеть и что в Supabase применена миграция типов сообщений: $e'
+              : 'Не удалось отправить изображение: $e',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
+  }
+
+  Future<void> _pickAndSendDocument() async {
+    final uid = _me();
+    if (uid == null || _sending) return;
+    setState(() => _sending = true);
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        withData: true,
+        allowMultiple: false,
+      );
+      if (res == null || res.files.isEmpty) return;
+      final f = res.files.single;
+      final displayName = f.name.trim().isEmpty ? 'file' : f.name.trim();
+      List<int>? bytes;
+      if (f.bytes != null && f.bytes!.isNotEmpty) {
+        bytes = f.bytes;
+      } else if (f.path != null && f.path!.isNotEmpty) {
+        bytes = await File(f.path!).readAsBytes();
+      }
+      if (bytes == null || bytes.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Не удалось прочитать файл'),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        return;
+      }
+      final pathForMime = f.path ?? displayName;
+      final mime = _mimeTypeForFilePath(pathForMime);
+      final extFromName =
+          displayName.contains('.') ? displayName.split('.').last : 'bin';
+      final uploadPath =
+          'dm/$uid/doc_${DateTime.now().millisecondsSinceEpoch}.$extFromName';
+      await _client.storage.from(SupabaseConstants.bucketChatMedia).uploadBinary(
+            uploadPath,
+            Uint8List.fromList(bytes),
+            fileOptions: FileOptions(contentType: mime, upsert: false),
+          );
+      final url = _client.storage
+          .from(SupabaseConstants.bucketChatMedia)
+          .getPublicUrl(uploadPath);
+      await _client.from(SupabaseConstants.messagesTable).insert({
+        'sender_id': uid,
+        'receiver_id': widget.peerId,
+        'text': '',
+        'message_type': 'file',
+        'file_url': url,
+        'file_name': displayName,
+      });
+      if (mounted) _forceScrollToLatest = true;
+    } catch (e) {
+      if (!mounted) return;
+      await _showSoftChatDialog(
+        title: 'Файл не отправился',
+        message: _userFacingChatStorageError(e),
+      );
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  void _showEventComposer() {
+    final titleCtrl = TextEditingController();
+    final placeCtrl = TextEditingController();
+    var startsAt = DateTime.now().add(const Duration(hours: 1));
+    startsAt = DateTime(
+      startsAt.year,
+      startsAt.month,
+      startsAt.day,
+      startsAt.hour,
+      (startsAt.minute ~/ 15) * 15,
+    );
+
+    showDialog<void>(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (dialogContext, setDlg) => AlertDialog(
+          title: const Text('Мероприятие'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Название',
+                    border: OutlineInputBorder(),
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Дата и время'),
+                  subtitle: Text(
+                    '${startsAt.day.toString().padLeft(2, '0')}.'
+                    '${startsAt.month.toString().padLeft(2, '0')}.'
+                    '${startsAt.year} '
+                    '${startsAt.hour.toString().padLeft(2, '0')}:'
+                    '${startsAt.minute.toString().padLeft(2, '0')}',
+                  ),
+                  trailing: const Icon(Icons.event_rounded),
+                  onTap: () async {
+                    final d = await showDatePicker(
+                      context: dialogContext,
+                      initialDate: startsAt,
+                      firstDate:
+                          DateTime.now().subtract(const Duration(days: 1)),
+                      lastDate:
+                          DateTime.now().add(const Duration(days: 365 * 2)),
+                    );
+                    if (d == null || !dialogContext.mounted) return;
+                    final t = await showTimePicker(
+                      context: dialogContext,
+                      initialTime: TimeOfDay(
+                        hour: startsAt.hour,
+                        minute: startsAt.minute,
+                      ),
+                    );
+                    if (t == null || !dialogContext.mounted) return;
+                    setDlg(() {
+                      startsAt =
+                          DateTime(d.year, d.month, d.day, t.hour, t.minute);
+                    });
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: placeCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Место (необязательно)',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dlgCtx),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final title = titleCtrl.text.trim();
+                if (title.isEmpty) return;
+                final uid = _me();
+                if (uid == null) return;
+                Navigator.pop(dlgCtx);
+                final place = placeCtrl.text.trim();
+                final payload = jsonEncode({
+                  'title': title,
+                  'starts_at': startsAt.toIso8601String(),
+                  if (place.isNotEmpty) 'place': place,
+                });
+                try {
+                  await _client.from(SupabaseConstants.messagesTable).insert({
+                    'sender_id': uid,
+                    'receiver_id': widget.peerId,
+                    'text': payload,
+                    'message_type': 'event',
+                  });
+                  if (mounted) {
+                    _forceScrollToLatest = true;
+                    setState(() {});
+                  }
+                } catch (e) {
+                  if (!mounted || !context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text('Не удалось отправить мероприятие: $e'),
+                    behavior: SnackBarBehavior.floating,
+                  ));
+                }
+              },
+              child: const Text('Отправить'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _sendCurrentLocation() async {
@@ -2501,36 +3387,55 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         }
       } catch (_) {}
 
-      final encoded = Uri.encodeComponent(address);
-      final text = '__location__|${pos.latitude}|${pos.longitude}|$encoded';
+      final payload = jsonEncode({
+        'lat': pos.latitude,
+        'lng': pos.longitude,
+        if (address.isNotEmpty) 'label': address,
+      });
       final tempId = 'tmp_loc_${DateTime.now().millisecondsSinceEpoch}';
       setState(() {
         _optimisticMessages.add({
           'id': tempId,
           'sender_id': uid,
           'receiver_id': widget.peerId,
-          'text': text,
+          'text': payload,
           'created_at': DateTime.now().toIso8601String(),
-          'message_type': 'text',
+          'message_type': 'location',
           '_pending': true,
         });
         _forceScrollToLatest = true;
       });
-      final inserted = await _client
-          .from(SupabaseConstants.messagesTable)
-          .insert({
-            'sender_id': uid,
-            'receiver_id': widget.peerId,
-            'text': text,
-          })
-          .select()
-          .maybeSingle();
+      Map<String, dynamic>? inserted;
+      try {
+        final raw = await _client
+            .from(SupabaseConstants.messagesTable)
+            .insert({
+              'sender_id': uid,
+              'receiver_id': widget.peerId,
+              'text': payload,
+              'message_type': 'location',
+            })
+            .select()
+            .maybeSingle();
+        if (raw != null) {
+          inserted = Map<String, dynamic>.from(raw as Map);
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() =>
+              _optimisticMessages.removeWhere((m) => m['id'] == tempId));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Не удалось отправить геолокацию: $e'),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        return;
+      }
       if (mounted && inserted != null) {
         setState(() {
           final idx = _optimisticMessages.indexWhere((m) => m['id'] == tempId);
           if (idx >= 0) {
-            _optimisticMessages[idx] =
-                Map<String, dynamic>.from(inserted as Map);
+            _optimisticMessages[idx] = Map<String, dynamic>.from(inserted!);
           }
         });
       }
@@ -2596,7 +3501,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     );
   }
 
-  ({double lat, double lng, String address})? _parseLocationMessage(String text) {
+  ({double lat, double lng, String address})? _parseLocationMessage(
+    String text,
+    String messageType,
+  ) {
+    if (messageType == 'location') {
+      try {
+        final m = jsonDecode(text) as Map<String, dynamic>;
+        final lat = (m['lat'] as num?)?.toDouble();
+        final lng = (m['lng'] as num?)?.toDouble();
+        if (lat == null || lng == null) return null;
+        final label = (m['label'] as String?) ?? '';
+        return (lat: lat, lng: lng, address: label);
+      } catch (_) {
+        return null;
+      }
+    }
     if (!text.startsWith('__location__|')) return null;
     final parts = text.split('|');
     if (parts.length < 3) return null;
@@ -2604,9 +3524,49 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final lng = double.tryParse(parts[2]);
     if (lat == null || lng == null) return null;
     final address = parts.length >= 4
-        ? Uri.decodeComponent(parts[3])
+        ? Uri.decodeComponent(parts.sublist(3).join('|'))
         : '';
     return (lat: lat, lng: lng, address: address);
+  }
+
+  ({String title, DateTime? when, String place})? _parseEventPayload(
+    String text,
+    String messageType,
+  ) {
+    if (messageType != 'event') return null;
+    try {
+      final m = jsonDecode(text) as Map<String, dynamic>;
+      final title = (m['title'] as String?)?.trim() ?? '';
+      if (title.isEmpty) return null;
+      final whenRaw = m['starts_at'];
+      final when = whenRaw is String ? DateTime.tryParse(whenRaw) : null;
+      final place = (m['place'] as String?)?.trim() ?? '';
+      return (title: title, when: when, place: place);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String _mimeTypeForFilePath(String path) {
+    final l = path.toLowerCase();
+    if (l.endsWith('.pdf')) return 'application/pdf';
+    if (l.endsWith('.doc')) return 'application/msword';
+    if (l.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+    if (l.endsWith('.xls')) return 'application/vnd.ms-excel';
+    if (l.endsWith('.xlsx')) {
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+    if (l.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+    if (l.endsWith('.pptx')) {
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    }
+    if (l.endsWith('.txt')) return 'text/plain';
+    if (l.endsWith('.zip')) return 'application/zip';
+    if (l.endsWith('.rar')) return 'application/x-rar-compressed';
+    if (l.endsWith('.json')) return 'application/json';
+    return 'application/octet-stream';
   }
 
   // ─────────────────────────────────────────────────────────────
@@ -4003,27 +4963,31 @@ class _GifCatalogTabState extends State<_GifCatalogTab> {
                   itemBuilder: (_, i) {
                     final gif = gifs[i];
                     final url = gif['url']!;
-                    return GestureDetector(
-                      onTap: () => widget.onGifSelected(url),
-                      child: ClipRRect(
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => widget.onGifSelected(url),
                         borderRadius: BorderRadius.circular(8),
-                        child: CachedNetworkImage(
-                          imageUrl: url,
-                          fit: BoxFit.cover,
-                          placeholder: (context, url) => Container(
-                            color: Colors.grey.shade100,
-                            child: const Center(
-                              child: SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: CachedNetworkImage(
+                            imageUrl: url,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => Container(
+                              color: Colors.grey.shade100,
+                              child: const Center(
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
                               ),
                             ),
-                          ),
-                          errorWidget: (context, url, error) => Container(
-                            color: Colors.grey.shade200,
-                            child: Icon(Icons.gif_box_outlined,
-                                color: Colors.grey.shade400),
+                            errorWidget: (context, url, error) => Container(
+                              color: Colors.grey.shade200,
+                              child: Icon(Icons.gif_box_outlined,
+                                  color: Colors.grey.shade400),
+                            ),
                           ),
                         ),
                       ),
@@ -4124,6 +5088,118 @@ class _ImageMessageBubble extends StatelessWidget {
 // ══════════════════════════════════════════════════════════════
 // _GifMessageBubble — анимиро��анный GIF
 // ══════════════════════════════════════════════════════════════
+
+class _FileMessageBubble extends StatelessWidget {
+  const _FileMessageBubble({
+    super.key,
+    required this.fileUrl,
+    required this.fileName,
+    required this.isMe,
+  });
+
+  final String fileUrl;
+  final String fileName;
+  final bool isMe;
+
+  Future<void> _open() async {
+    final u = Uri.tryParse(fileUrl);
+    if (u == null) return;
+    if (await canLaunchUrl(u)) {
+      await launchUrl(u, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final name = fileName.trim().isEmpty ? 'Файл' : fileName.trim();
+    final fg = isMe ? Colors.white : Colors.black87;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _open,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.insert_drive_file_rounded, color: fg, size: 26),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  name,
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: fg,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EventMessageBubble extends StatelessWidget {
+  const _EventMessageBubble({
+    super.key,
+    required this.title,
+    required this.when,
+    required this.place,
+    required this.isMe,
+  });
+
+  final String title;
+  final DateTime? when;
+  final String place;
+  final bool isMe;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = isMe ? Colors.white : Colors.black87;
+    final sub = isMe ? Colors.white70 : Colors.black54;
+    var whenStr = '—';
+    final w = when;
+    if (w != null) {
+      whenStr =
+          '${w.day.toString().padLeft(2, '0')}.${w.month.toString().padLeft(2, '0')}.${w.year} '
+          '${w.hour.toString().padLeft(2, '0')}:${w.minute.toString().padLeft(2, '0')}';
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.event_available_rounded, size: 22, color: fg),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 15,
+                  color: fg,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(whenStr, style: TextStyle(color: sub, fontSize: 13)),
+        if (place.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(place, style: TextStyle(color: sub, fontSize: 13)),
+        ],
+      ],
+    );
+  }
+}
 
 class _GifMessageBubble extends StatelessWidget {
   const _GifMessageBubble({

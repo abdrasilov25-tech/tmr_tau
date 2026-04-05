@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/following/following_change_bus.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
@@ -53,9 +57,12 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
   static const Duration _warmCacheTtl = Duration(minutes: 3);
   static _PublicationFeedWarmCache? _warmCache;
 
+  StreamSubscription<void>? _followingChangeSub;
+
   String? get _currentUserId {
     final state = context.read<AuthBloc>().state;
-    return state is AuthAuthenticated ? state.user.id : null;
+    if (state is AuthAuthenticated) return state.user.id;
+    return Supabase.instance.client.auth.currentUser?.id;
   }
 
   PostRepository get _postRepo => context.read<PostRepository>();
@@ -66,6 +73,11 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
   @override
   void initState() {
     super.initState();
+    _followingChangeSub =
+        FollowingChangeBus.instance.stream.listen((_) {
+      if (!mounted) return;
+      unawaited(_reconcileFollowFlagsFromServer());
+    });
     final cache = _warmCache;
     final uid = _currentUserId ?? '';
     if (cache != null &&
@@ -86,6 +98,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
 
   @override
   void dispose() {
+    _followingChangeSub?.cancel();
     _scrollController
       ..removeListener(_onScroll)
       ..dispose();
@@ -303,6 +316,27 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
         _posts = copy;
       }
     });
+  }
+
+  Future<void> _reconcileFollowFlagsFromServer() async {
+    final uid = _currentUserId;
+    if (uid == null) return;
+    try {
+      final following =
+          await context.read<ProfileRepository>().getFollowingUsers(uid);
+      final set = following.map((p) => p.id).toSet();
+      if (!mounted) return;
+      setState(() {
+        _posts = _posts
+            .map((p) {
+              if (p.userId == uid) return p;
+              final should = set.contains(p.userId);
+              if (p.isFollowingAuthor == should) return p;
+              return p.copyWith(isFollowingAuthor: should);
+            })
+            .toList(growable: false);
+      });
+    } catch (_) {}
   }
 
   // ── Follow ─────────────────────────────────────────────────

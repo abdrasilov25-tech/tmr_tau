@@ -9,11 +9,23 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../product/data/services/payment_service.dart';
+import '../../data/datasources/map_remote_datasource.dart';
+import '../../domain/entities/featured_seller.dart';
 import '../../domain/entities/map_product.dart';
+import '../../domain/entities/map_quest.dart';
+import '../../domain/entities/map_zone.dart';
+import '../../domain/entities/mystery_spot.dart';
 import '../bloc/map_bloc.dart';
 import '../bloc/map_event.dart';
 import '../bloc/map_state.dart';
+import '../widgets/featured_bid_sheet.dart';
+import '../widgets/featured_seller_banner.dart';
 import '../widgets/map_product_sheet.dart';
+import '../widgets/map_quest_sheet.dart';
+import '../widgets/map_leaderboard_sheet.dart';
+import '../widgets/mystery_spot_sheet.dart';
+import '../widgets/zone_banner.dart';
+import '../widgets/zone_purchase_sheet.dart';
 
 class MapPage extends StatefulWidget {
   const MapPage({super.key});
@@ -26,7 +38,22 @@ class _MapPageState extends State<MapPage> {
   static const MethodChannel _mapsConfigChannel =
       MethodChannel('tmr_tau/maps_config');
   GoogleMapController? _mapController;
+  late final MapRemoteDataSource _mapDataSource =
+      MapRemoteDataSourceImpl(Supabase.instance.client);
   double _radiusKm = 10;
+  FeaturedSeller? _featuredSeller;
+  bool _featuredLoading = false;
+  int? _myFeaturedBid;
+  MapQuestProgress _questProgress = const MapQuestProgress(
+    completedIds: {},
+    totalEarnedToday: 0,
+    hasQuestPass: false,
+  );
+  int _listingsViewedToday = 0;
+  List<MapZone> _activeZones = const [];
+  MapZone? _currentZone;
+  bool _zoneDismissed = false;
+  MysterySpot? _mysterySpot;
   bool _mapsConfigured = true;
   bool _accessLoading = true;
   bool _hasOfficialPageAccess = false;
@@ -49,8 +76,13 @@ class _MapPageState extends State<MapPage> {
     _checkMapsConfig();
     _checkOfficialPageAccess();
     _loadShareLocationStatus();
+    _loadFeaturedSeller();
+    _loadQuestProgress();
+    _loadActiveZones();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadCosmeticsStickerAccess();
+      // Auto-complete "open map" quest
+      _tryCompleteQuest(MapQuestId.openMap);
     });
   }
 
@@ -60,21 +92,296 @@ class _MapPageState extends State<MapPage> {
     super.dispose();
   }
 
+  Future<void> _loadMysterySpot(LatLng pos) async {
+    try {
+      final spot = await _mapDataSource.getTodayMysterySpot(
+        latitude: pos.latitude,
+        longitude: pos.longitude,
+      );
+      if (!mounted) return;
+      setState(() => _mysterySpot = spot);
+    } catch (_) {}
+  }
+
+  Marker? _buildMysteryMarker() {
+    final spot = _mysterySpot;
+    if (spot == null) return null;
+    final label = spot.alreadyClaimed ? '🔒' : '❓';
+    return Marker(
+      markerId: const MarkerId('mystery_spot'),
+      position: LatLng(spot.latitude, spot.longitude),
+      icon: spot.alreadyClaimed
+          ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet)
+          : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow),
+      zIndexInt: 3,
+      infoWindow: InfoWindow(
+        title: '$label Mystery Spot',
+        snippet: spot.alreadyClaimed
+            ? 'Уже открыт'
+            : '+${spot.qarmetReward} Qarmet — нажми чтобы открыть',
+      ),
+      onTap: () => _openMysterySpotSheet(spot),
+    );
+  }
+
+  void _openMysterySpotSheet(MysterySpot spot) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MysterySpotRevealSheet(
+        spot: spot,
+        dataSource: _mapDataSource,
+        onRevealed: () {
+          // Mark as claimed locally
+          setState(() {
+            _mysterySpot = MysterySpot(
+              id: spot.id,
+              latitude: spot.latitude,
+              longitude: spot.longitude,
+              qarmetReward: spot.qarmetReward,
+              alreadyClaimed: true,
+              isSellerSponsored: spot.isSellerSponsored,
+              sellerName: spot.sellerName,
+              sellerOffer: spot.sellerOffer,
+              sellerId: spot.sellerId,
+              productId: spot.productId,
+            );
+          });
+          // Also complete quest
+          _tryCompleteQuest(MapQuestId.openMap);
+        },
+      ),
+    );
+  }
+
+  Set<Circle> _buildZoneCircles() {
+    return _activeZones.map((zone) {
+      final isActive = _currentZone?.id == zone.id;
+      return Circle(
+        circleId: CircleId(zone.id),
+        center: LatLng(zone.latitude, zone.longitude),
+        radius: zone.radiusMeters.toDouble(),
+        fillColor: zone.brandColor.withValues(alpha: isActive ? 0.18 : 0.10),
+        strokeColor: zone.brandColor.withValues(alpha: isActive ? 0.7 : 0.4),
+        strokeWidth: isActive ? 2 : 1,
+        onTap: () => _openZoneDetail(zone),
+      );
+    }).toSet();
+  }
+
+  Future<void> _loadActiveZones() async {
+    try {
+      final zones = await _mapDataSource.getActiveZones();
+      if (!mounted) return;
+      setState(() => _activeZones = zones);
+      if (_myPosition != null) _checkCurrentZone(_myPosition!);
+    } catch (_) {}
+  }
+
+  void _checkCurrentZone(LatLng pos) {
+    final zone = _activeZones.cast<MapZone?>().firstWhere(
+          (z) => z!.containsPoint(pos.latitude, pos.longitude),
+          orElse: () => null,
+        );
+    if (zone?.id != _currentZone?.id) {
+      setState(() {
+        _currentZone = zone;
+        _zoneDismissed = false;
+      });
+    }
+  }
+
+  void _openLeaderboard() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MapLeaderboardSheet(dataSource: _mapDataSource),
+    );
+  }
+
+  void _openZonePurchaseSheet() {
+    final pos = _myPosition;
+    if (pos == null) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ZonePurchaseSheet(
+        dataSource: _mapDataSource,
+        currentLat: pos.latitude,
+        currentLng: pos.longitude,
+        onPurchased: _loadActiveZones,
+      ),
+    );
+  }
+
+  void _openZoneDetail(MapZone zone) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => ZoneDetailSheet(zone: zone),
+    );
+  }
+
+  Future<void> _loadQuestProgress() async {
+    try {
+      final progress = await _mapDataSource.getTodayQuestProgress();
+      if (!mounted) return;
+      setState(() => _questProgress = progress);
+    } catch (_) {}
+  }
+
+  Future<void> _tryCompleteQuest(MapQuestId questId) async {
+    if (_questProgress.isCompleted(questId)) return;
+    try {
+      final result = await _mapDataSource.completeMapQuest(questId);
+      if (!mounted || result.alreadyDone || result.qarmetAwarded == 0) return;
+      setState(() {
+        _questProgress = MapQuestProgress(
+          completedIds: {
+            ..._questProgress.completedIds,
+            questId.rpcId,
+          },
+          totalEarnedToday:
+              _questProgress.totalEarnedToday + result.qarmetAwarded,
+          hasQuestPass: _questProgress.hasQuestPass,
+        );
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Text('⚡ ', style: TextStyle(fontSize: 16)),
+              Text(
+                'Квест выполнен! +${result.qarmetAwarded} Qarmet',
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+          backgroundColor: const Color(0xFF16A34A),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (_) {}
+  }
+
+  void _onListingViewed() {
+    if (_questProgress.isCompleted(MapQuestId.view3Listings)) return;
+    _listingsViewedToday++;
+    if (_listingsViewedToday >= 3) {
+      _tryCompleteQuest(MapQuestId.view3Listings);
+    }
+  }
+
+  void _onMessagedSeller() => _tryCompleteQuest(MapQuestId.messageSeller);
+
+  void _onAuctionBidPlaced() => _tryCompleteQuest(MapQuestId.placeAuctionBid);
+
+  void _onLocationShared() => _tryCompleteQuest(MapQuestId.shareLocationFriend);
+
+  void _openQuestSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => MapQuestSheet(
+        progress: _questProgress,
+        onQuestPassTap: () {
+          Navigator.of(context).pop();
+          context.push('/qarmet-wallet');
+        },
+      ),
+    );
+  }
+
+  Future<void> _loadFeaturedSeller() async {
+    setState(() => _featuredLoading = true);
+    try {
+      final featured = await _mapDataSource.getTodayFeatured();
+      if (!mounted) return;
+      final uid = Supabase.instance.client.auth.currentUser?.id;
+      setState(() {
+        _featuredSeller = featured;
+        _myFeaturedBid = (uid != null && featured?.userId == uid) ? featured?.bidAmount : null;
+        _featuredLoading = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _featuredLoading = false);
+    }
+  }
+
+  void _openFeaturedBidSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: FeaturedBidSheet(
+          dataSource: _mapDataSource,
+          currentFeatured: _featuredSeller,
+          myCurrentBid: _myFeaturedBid,
+          onBidPlaced: (newBalance) {
+            _loadFeaturedSeller();
+            _onAuctionBidPlaced();
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openFeaturedSellerProfile() {
+    final featured = _featuredSeller;
+    if (featured == null) return;
+    context.push('/profile/${featured.userId}');
+  }
+
   Set<Marker> _buildMarkers(List<MapProduct> products) {
-    return products.where((p) {
+    // Sort so boosted markers render on top (set preserves insertion order for GoogleMaps z-index).
+    final sorted = [...products]..sort((a, b) => b.mapBoostLevel.index.compareTo(a.mapBoostLevel.index));
+
+    return sorted.where((p) {
       final latOk = p.latitude >= -90 && p.latitude <= 90;
       final lngOk = p.longitude >= -180 && p.longitude <= 180;
       return latOk && lngOk;
     }).map((p) {
+      final BitmapDescriptor icon;
+      if (p.isBoosted && p.mapBoostLevel == MapBoostLevel.topZone) {
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueYellow);
+      } else if (p.isBoosted && p.mapBoostLevel == MapBoostLevel.boost) {
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueCyan);
+      } else if (p.isTop) {
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange);
+      } else if (p.isUrgent) {
+        icon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose);
+      } else {
+        icon = BitmapDescriptor.defaultMarker;
+      }
+
+      final stickerPrefix =
+          p.mapMarkerSticker != null ? '${p.mapMarkerSticker} ' : '';
+      final boostSuffix = p.isBoosted
+          ? (p.mapBoostLevel == MapBoostLevel.topZone ? ' ⭐' : ' 🚀')
+          : '';
+
       return Marker(
         markerId: MarkerId(p.id),
         position: LatLng(p.latitude, p.longitude),
-        icon: p.isTop
-            ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange)
-            : (p.isUrgent
-                ? BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRose)
-                : BitmapDescriptor.defaultMarker),
-        infoWindow: InfoWindow(title: p.title, snippet: p.priceFormatted),
+        icon: icon,
+        zIndexInt: p.mapBoostLevel == MapBoostLevel.topZone
+            ? 2
+            : p.mapBoostLevel == MapBoostLevel.boost
+                ? 1
+                : 0,
+        infoWindow: InfoWindow(
+          title: '$stickerPrefix${p.title}$boostSuffix',
+          snippet: p.priceFormatted,
+        ),
         onTap: () {
           if (!_ensureOfficialPageAccess()) return;
           _showProductSheet(p);
@@ -99,11 +406,17 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _showProductSheet(MapProduct product) {
+    _onListingViewed();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => MapProductSheet(product: product),
+      builder: (_) => MapProductSheet(
+        product: product,
+        dataSource: _mapDataSource,
+        onBoostPurchased: () => context.read<MapBloc>().add(MapRadiusChanged(_radiusKm)),
+        onMessagedSeller: _onMessagedSeller,
+      ),
     );
   }
 
@@ -144,6 +457,7 @@ class _MapPageState extends State<MapPage> {
     setState(() => _shareMyLocation = enabled);
     if (enabled && _myPosition != null) {
       await _syncMyLiveLocation(_myPosition!);
+      _onLocationShared();
     }
     await _loadFriendsLocations();
   }
@@ -559,6 +873,16 @@ class _MapPageState extends State<MapPage> {
                 icon: const Icon(Icons.trending_up_rounded),
                 label: const Text('Продвигать'),
               ),
+              OutlinedButton.icon(
+                onPressed: _openZonePurchaseSheet,
+                icon: const Icon(Icons.radar_rounded),
+                label: const Text('Zone Takeover'),
+              ),
+              OutlinedButton.icon(
+                onPressed: _openLeaderboard,
+                icon: const Icon(Icons.leaderboard_rounded),
+                label: const Text('Рейтинг'),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -833,7 +1157,9 @@ class _MapPageState extends State<MapPage> {
             final pos =
                 state is MapLoaded ? state.position : (state as MapLoading).position;
             _myPosition = pos;
+            _checkCurrentZone(pos);
             unawaited(_syncMyLiveLocation(pos));
+            if (_mysterySpot == null) unawaited(_loadMysterySpot(pos));
             final radiusKm =
                 state is MapLoaded ? state.radiusKm : (state as MapLoading).radiusKm;
             WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -898,7 +1224,12 @@ class _MapPageState extends State<MapPage> {
                   target: position ?? const LatLng(51.1694, 71.4491), // Астана
                   zoom: _zoomForRadius(_radiusKm),
                 ),
-                markers: {..._buildMarkers(products), ..._buildFriendMarkers()},
+                markers: {
+                  ..._buildMarkers(products),
+                  ..._buildFriendMarkers(),
+                  if (_buildMysteryMarker() != null) _buildMysteryMarker()!,
+                },
+                circles: _buildZoneCircles(),
                 // Avoid plugin crashes when location permission/service isn't ready yet.
                 myLocationEnabled: hasValidPosition,
                 myLocationButtonEnabled: false,
@@ -1074,6 +1405,38 @@ class _MapPageState extends State<MapPage> {
                   ),
                 ),
 
+              // Zone banner (shown when inside an active zone)
+              if (_currentZone != null && !_zoneDismissed)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 166,
+                  child: ZoneBanner(
+                    zone: _currentZone!,
+                    onTap: () => _openZoneDetail(_currentZone!),
+                    onDismiss: () => setState(() => _zoneDismissed = true),
+                  ),
+                ),
+
+              // Featured Seller banner (above radius selector)
+              if (!_featuredLoading)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 110,
+                  child: _featuredSeller != null
+                      ? FeaturedSellerBanner(
+                          featured: _featuredSeller!,
+                          currentUserId:
+                              Supabase.instance.client.auth.currentUser?.id,
+                          onBidTap: _openFeaturedBidSheet,
+                          onSellerTap: _openFeaturedSellerProfile,
+                        )
+                      : FeaturedSellerEmptyBanner(
+                          onBidTap: _openFeaturedBidSheet,
+                        ),
+                ),
+
               // Bottom radius selector
               Positioned(
                 left: 0,
@@ -1147,6 +1510,16 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
 
+              // Quest FAB (left side)
+              Positioned(
+                left: 16,
+                bottom: 130,
+                child: _QuestFab(
+                  progress: _questProgress,
+                  onTap: _openQuestSheet,
+                ),
+              ),
+
               // My location FAB
               Positioned(
                 right: 16,
@@ -1179,6 +1552,59 @@ class _MapPageState extends State<MapPage> {
       ),
     );
   }
+}
+
+/// Compact quest progress FAB shown on the left of the map.
+class _QuestFab extends StatelessWidget {
+  const _QuestFab({required this.progress, required this.onTap});
+
+  final MapQuestProgress progress;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final done = progress.freeCompletedCount;
+    final total = progress.freeTotal;
+    final allFreeDone = done >= total;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: allFreeDone ? const Color(0xFF16A34A) : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              allFreeDown ? '✅' : '⚡',
+              style: const TextStyle(fontSize: 14),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '$done/$total квестов',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: allFreeDown ? Colors.white : const Color(0xFF1A1A1A),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool get allFreeDown => progress.freeCompletedCount >= progress.freeTotal;
 }
 
 class _OfficialPageSubscriptionSheet extends StatefulWidget {

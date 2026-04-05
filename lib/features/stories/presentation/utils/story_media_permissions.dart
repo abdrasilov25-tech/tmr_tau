@@ -22,12 +22,12 @@ abstract final class StoryMediaPermissions {
   /// Галерея: фото или видео. Не вызывает [openAppSettings] — только возвращает статус.
   static Future<StoryGalleryAccess> galleryAccess({required bool forVideo}) async {
     if (Platform.isIOS) {
-      var s = await Permission.photos.status;
-      if (s.isGranted || s.isLimited) return StoryGalleryAccess.ok;
-      s = await Permission.photos.request();
-      if (s.isGranted || s.isLimited) return StoryGalleryAccess.ok;
-      if (s.isPermanentlyDenied) return StoryGalleryAccess.needsSettings;
-      return StoryGalleryAccess.deniedInDialog;
+      // На iOS 14+ [ImagePicker] открывает системный PHPicker: полный доступ к
+      // медиатеке не обязателен (достаточно «Выбрать фото…» / limited).
+      // permission_handler без макроса PERMISSION_PHOTOS в Podfile или нюансы
+      // статуса давали ложный permanentlyDenied и лишний экран «Открыть настройки».
+      // Как в Instagram: сразу открываем выбор — система сама покажет запрос при необходимости.
+      return StoryGalleryAccess.ok;
     }
 
     // Android: сначала photos (и для видео — часто достаточно для picker).

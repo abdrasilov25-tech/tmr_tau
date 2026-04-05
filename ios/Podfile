@@ -1,6 +1,5 @@
 platform :ios, '15.0'
 
-# CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
 
 project 'Runner', {
@@ -19,7 +18,7 @@ def flutter_root
     matches = line.match(/FLUTTER_ROOT\=(.*)/)
     return matches[1].strip if matches
   end
-  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+  raise "FLUTTER_ROOT not found"
 end
 
 require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
@@ -27,7 +26,10 @@ require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelpe
 flutter_ios_podfile_setup
 
 target 'Runner' do
+  use_modular_headers!  # ✅ ВАЖНО (фикс твоей ошибки)
+
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+
   target 'RunnerTests' do
     inherit! :search_paths
   end
@@ -36,24 +38,32 @@ end
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+
     target.build_configurations.each do |config|
       min_ios = '15.0'
       current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+
       if current.nil? || Gem::Version.new(current) < Gem::Version.new(min_ios)
         config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = min_ios
       end
 
-      # permission_handler: без этих макросов на iOS камера/микрофон не запрашиваются.
+      # permissions
       gcc = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS']
       gcc = ['$(inherited)'] if gcc.nil?
       gcc = [gcc] unless gcc.is_a?(Array)
-      %w[PERMISSION_CAMERA=1 PERMISSION_MICROPHONE=1].each do |flag|
+
+      %w[
+        PERMISSION_CAMERA=1
+        PERMISSION_MICROPHONE=1
+        PERMISSION_PHOTOS=1
+      ].each do |flag|
         gcc << flag unless gcc.include?(flag)
       end
+
       config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = gcc
     end
 
-    # geocoding_ios podspec lists PrivacyInfo.xcprivacy as a source; Xcode then tries to compile it.
+    # fix geocoding_ios bug
     if target.name == 'geocoding_ios'
       target.source_build_phase.files.to_a.each do |build_file|
         path = build_file.file_ref&.path.to_s
@@ -64,7 +74,9 @@ post_install do |installer|
 
   installer.aggregate_targets.each do |aggregate_target|
     aggregate_target.xcconfigs.each do |_, config_file|
-      config_file.attributes['LIBRARY_SEARCH_PATHS'] = '$(inherited) "${PODS_CONFIGURATION_BUILD_DIR}" ' + (config_file.attributes['LIBRARY_SEARCH_PATHS'] || '')
+      config_file.attributes['LIBRARY_SEARCH_PATHS'] =
+        '$(inherited) "${PODS_CONFIGURATION_BUILD_DIR}" ' +
+        (config_file.attributes['LIBRARY_SEARCH_PATHS'] || '')
     end
   end
 end

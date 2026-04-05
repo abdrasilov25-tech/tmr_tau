@@ -15,6 +15,10 @@ class StoryModel extends StoryEntity {
     super.originalPostAuthorId,
     super.originalPostAuthorName,
     super.originalPostPreviewUrl,
+    super.videoDurationSeconds = 0,
+    super.musicTitle,
+    super.musicArtist,
+    super.musicExternalUrl,
   });
 
   factory StoryModel.fromJson(Map<String, dynamic> json) {
@@ -32,6 +36,10 @@ class StoryModel extends StoryEntity {
       originalPostAuthorId: json['original_post_author_id'] as String?,
       originalPostAuthorName: json['original_post_author_name'] as String?,
       originalPostPreviewUrl: json['original_post_preview_url'] as String?,
+      videoDurationSeconds: (json['video_duration_seconds'] as num?)?.toInt() ?? 0,
+      musicTitle: json['music_title'] as String?,
+      musicArtist: json['music_artist'] as String?,
+      musicExternalUrl: json['music_external_url'] as String?,
     );
   }
 

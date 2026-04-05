@@ -245,16 +245,24 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
     }
   }
 
+  String? _viewerUserId(BuildContext context) {
+    final authState = context.read<AuthBloc>().state;
+    if (authState is AuthAuthenticated) return authState.user.id;
+    return Supabase.instance.client.auth.currentUser?.id;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final currentUserId = context.read<AuthBloc>().state is AuthAuthenticated
-        ? (context.read<AuthBloc>().state as AuthAuthenticated).user.id
-        : null;
+    final currentUserId = _viewerUserId(context);
     return BlocProvider(
+      key: ValueKey(widget.sellerId),
       create: (c) =>
           ProfileBloc(c.read<ProfileRepository>())
             ..add(
-              ProfileLoadRequested(widget.sellerId, currentUserId: currentUserId),
+              ProfileLoadRequested(
+                widget.sellerId,
+                currentUserId: currentUserId,
+              ),
             ),
       child: Scaffold(
         appBar: AppBar(
@@ -288,7 +296,10 @@ class _SellerProfilePageState extends State<SellerProfilePage> {
               return AppErrorView(
                 message: state.message,
                 onRetry: () => context.read<ProfileBloc>().add(
-                  ProfileLoadRequested(widget.sellerId),
+                  ProfileLoadRequested(
+                    widget.sellerId,
+                    currentUserId: _viewerUserId(context),
+                  ),
                 ),
               );
             }
@@ -367,6 +378,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
     if (authState is AuthAuthenticated) {
       _currentUserId = authState.user.id;
     }
+    _currentUserId ??= Supabase.instance.client.auth.currentUser?.id;
     _loadPublications();
     _loadFollowState();
     _loadCommonFollowers();
@@ -823,11 +835,8 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                       foregroundColor: Colors.white,
                                     ),
                                     onPressed: () async {
-                                      final uid =
-                                          (context.read<AuthBloc>().state
-                                                  as AuthAuthenticated)
-                                              .user
-                                              .id;
+                                      final uid = _currentUserId;
+                                      if (uid == null) return;
                                       context.read<ProfileBloc>().add(
                                         ProfileToggleFollow(
                                           followerId: uid,
@@ -853,11 +862,8 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                                       foregroundColor: Colors.white,
                                     ),
                                     onPressed: () async {
-                                      final uid =
-                                          (context.read<AuthBloc>().state
-                                                  as AuthAuthenticated)
-                                              .user
-                                              .id;
+                                      final uid = _currentUserId;
+                                      if (uid == null) return;
                                       context.read<ProfileBloc>().add(
                                         ProfileToggleFollow(
                                           followerId: uid,
