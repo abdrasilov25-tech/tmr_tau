@@ -19,6 +19,7 @@ class StoryEntity extends Equatable {
     this.musicTitle,
     this.musicArtist,
     this.musicExternalUrl,
+    this.overlaysJson,
   });
 
   final String id;
@@ -39,6 +40,8 @@ class StoryEntity extends Equatable {
   final String? musicTitle;
   final String? musicArtist;
   final String? musicExternalUrl;
+  /// JSON-массив стикеров (см. [StoryOverlayItem]).
+  final String? overlaysJson;
 
   bool get isRepostOfPost =>
       originalPostId != null && originalPostId!.trim().isNotEmpty;
@@ -63,5 +66,6 @@ class StoryEntity extends Equatable {
         musicTitle,
         musicArtist,
         musicExternalUrl,
+        overlaysJson,
       ];
 }

@@ -55,6 +55,7 @@ import '../../features/feed/domain/repositories/feed_repository.dart';
 import '../../features/profile/domain/repositories/profile_repository.dart';
 import '../../features/stories/presentation/pages/add_story_page.dart';
 import '../../features/stories/presentation/pages/story_camera_page.dart';
+import '../../features/stories/presentation/story_camera_intent.dart';
 import '../../features/live_streaming/presentation/pages/live_broadcast_page.dart';
 import '../../features/live_streaming/presentation/pages/live_watch_page.dart';
 import '../../features/stories/presentation/pages/live_stream_page.dart';
@@ -251,7 +252,13 @@ class AppRouter {
         builder: (context, state) {
           final videoMode =
               state.uri.queryParameters['mode'] == 'video';
-          return StoryCameraPage(isVideoMode: videoMode);
+          final extra = state.extra;
+          final recordOnOpen = extra is StoryCameraStartIntent &&
+              extra.recordVideoOnOpen;
+          return StoryCameraPage(
+            isVideoMode: videoMode,
+            recordVideoOnOpen: recordOnOpen,
+          );
         },
       ),
       GoRoute(

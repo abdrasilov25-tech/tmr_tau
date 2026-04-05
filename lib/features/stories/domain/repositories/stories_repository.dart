@@ -28,6 +28,7 @@ abstract class StoriesRepository {
     String? musicTitle,
     String? musicArtist,
     String? musicExternalUrl,
+    String? overlaysJson,
   });
   Future<void> updateStory(String storyId, {String? caption});
   Future<void> deleteStory(String storyId, String userId);

@@ -19,6 +19,7 @@ class StoryModel extends StoryEntity {
     super.musicTitle,
     super.musicArtist,
     super.musicExternalUrl,
+    super.overlaysJson,
   });
 
   factory StoryModel.fromJson(Map<String, dynamic> json) {
@@ -40,6 +41,7 @@ class StoryModel extends StoryEntity {
       musicTitle: json['music_title'] as String?,
       musicArtist: json['music_artist'] as String?,
       musicExternalUrl: json['music_external_url'] as String?,
+      overlaysJson: json['overlays_json'] as String?,
     );
   }
 

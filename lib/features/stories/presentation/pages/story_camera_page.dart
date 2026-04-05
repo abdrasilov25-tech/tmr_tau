@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../core/router/go_router_pop_safe.dart';
+import '../utils/story_collage_merger.dart';
 import '../utils/story_media_permissions.dart';
 
 /// Результат съёмки сторис-камеры.
@@ -25,10 +26,17 @@ class StoryCameraResult {
 ///
 /// После захвата делает `context.go('/add-story', extra: StoryCameraResult(...))`.
 class StoryCameraPage extends StatefulWidget {
-  const StoryCameraPage({super.key, this.isVideoMode = false});
+  const StoryCameraPage({
+    super.key,
+    this.isVideoMode = false,
+    this.recordVideoOnOpen = false,
+  });
 
   /// Подсветка «ВИДЕО» в нижней полосе режимов (как Reels).
   final bool isVideoMode;
+
+  /// Сразу начать запись после инициализации (длинное нажатие на пустом экране сторис).
+  final bool recordVideoOnOpen;
 
   @override
   State<StoryCameraPage> createState() => _StoryCameraPageState();
@@ -45,9 +53,14 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   bool _permissionGranted = false;
   bool _isRecording = false;
   bool _handsFree = false;
+  bool _toolsExpanded = true;
+  bool _boomerangMode = false;
+  int _filterIndex = 0;
+  bool _appliedRecordIntent = false;
 
   late final AnimationController _progressCtrl;
   static const Duration _maxRecordDuration = Duration(seconds: 60);
+  static const Duration _boomerangDuration = Duration(seconds: 3);
 
   Timer? _recordTimer;
   int _recordedSeconds = 0;
@@ -182,6 +195,17 @@ class _StoryCameraPageState extends State<StoryCameraPage>
       if (!ctrl.value.isInitialized || !mounted) return;
       await ctrl.setFlashMode(_flashMode);
       setState(() => _initializing = false);
+      if (widget.recordVideoOnOpen &&
+          !_appliedRecordIntent &&
+          !_isRecording &&
+          mounted) {
+        _appliedRecordIntent = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Future<void>.delayed(const Duration(milliseconds: 450), () {
+            if (mounted) unawaited(_startRecording());
+          });
+        });
+      }
     } catch (_) {
       if (mounted) setState(() => _initializing = false);
     }
@@ -222,6 +246,8 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     final ctrl = _cameraCtrl;
     if (ctrl == null || !ctrl.value.isInitialized || _isRecording) return;
     try {
+      _progressCtrl.duration =
+          _boomerangMode ? _boomerangDuration : _maxRecordDuration;
       await ctrl.startVideoRecording();
       _progressCtrl.forward(from: 0);
       _recordedSeconds = 0;
@@ -332,10 +358,58 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     );
   }
 
-  void _stubSoon(String label) {
+  void _toggleBoomerang() {
+    setState(() => _boomerangMode = !_boomerangMode);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$label — скоро')),
+      SnackBar(
+        content: Text(
+          _boomerangMode
+              ? 'Бумеранг: до 3 сек, зацикленное видео'
+              : 'Обычная запись до 60 сек',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _cycleFilter() {
+    setState(() => _filterIndex = (_filterIndex + 1) % 3);
+  }
+
+  Future<void> _openCollage() async {
+    if (_isRecording) return;
+    final access =
+        await StoryMediaPermissions.galleryAccess(forVideo: false);
+    switch (access) {
+      case StoryGalleryAccess.ok:
+        break;
+      case StoryGalleryAccess.deniedInDialog:
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Разрешите доступ к фото в системном запросе или попробуйте снова.',
+            ),
+          ),
+        );
+        return;
+      case StoryGalleryAccess.needsSettings:
+        if (!mounted) return;
+        await StoryMediaPermissions.offerOpenSettings(
+          context,
+          message: 'Нужен доступ к фото для коллажа.',
+        );
+        return;
+    }
+    final imgs = await ImagePicker().pickMultiImage(limit: 4);
+    if (imgs.isEmpty || !mounted) return;
+    final files = imgs.map((x) => File(x.path)).toList();
+    final merged = await mergeCollageImages(files);
+    if (merged == null || !mounted) return;
+    context.go(
+      '/add-story',
+      extra: StoryCameraResult(file: merged, isVideo: false),
     );
   }
 
@@ -378,7 +452,41 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     if (_handsFree) {
       return 'Нажми на круг — начать или остановить запись';
     }
+    if (_boomerangMode) {
+      return 'Бумеранг: удерживай до 3 сек — зацикленное видео';
+    }
     return 'Нажми — фото  •  Удерживай — видео';
+  }
+
+  Widget _filteredPreview(CameraController controller) {
+    Widget w = _CameraPreviewFill(controller: controller);
+    switch (_filterIndex) {
+      case 1:
+        w = ColorFiltered(
+          colorFilter: const ColorFilter.matrix([
+            0.2126, 0.7152, 0.0722, 0, 0,
+            0.2126, 0.7152, 0.0722, 0, 0,
+            0.2126, 0.7152, 0.0722, 0, 0,
+            0, 0, 0, 1, 0,
+          ]),
+          child: w,
+        );
+        break;
+      case 2:
+        w = ColorFiltered(
+          colorFilter: const ColorFilter.matrix([
+            0.393, 0.769, 0.189, 0, 0,
+            0.349, 0.686, 0.168, 0, 0,
+            0.272, 0.534, 0.131, 0, 0,
+            0, 0, 0, 1, 0,
+          ]),
+          child: w,
+        );
+        break;
+      default:
+        break;
+    }
+    return w;
   }
 
   @override
@@ -402,7 +510,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
               ),
             )
           else if (_cameraCtrl != null && _cameraCtrl!.value.isInitialized)
-            _CameraPreviewFill(controller: _cameraCtrl!)
+            _filteredPreview(_cameraCtrl!)
           else
             const Center(
               child: Text(
@@ -420,6 +528,15 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                     icon: Icons.close,
                     onTap: _onClosePressed,
                   ),
+                  if (!_initializing &&
+                      _permissionGranted &&
+                      _cameras.length > 1) ...[
+                    const SizedBox(width: 6),
+                    _IconBtn(
+                      icon: Icons.cameraswitch_outlined,
+                      onTap: _switchCamera,
+                    ),
+                  ],
                   const Spacer(),
                   if (!_initializing && _permissionGranted) ...[
                     _IconBtn(
@@ -442,7 +559,8 @@ class _StoryCameraPageState extends State<StoryCameraPage>
           if (!_initializing &&
               _permissionGranted &&
               _cameraCtrl != null &&
-              _cameraCtrl!.value.isInitialized)
+              _cameraCtrl!.value.isInitialized &&
+              _toolsExpanded)
             Positioned(
               left: 4,
               top: 72,
@@ -460,12 +578,13 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                       _CameraToolTile(
                         icon: Icons.loop_rounded,
                         label: 'Бумеранг',
-                        onTap: () => _stubSoon('Бумеранг'),
+                        active: _boomerangMode,
+                        onTap: _toggleBoomerang,
                       ),
                       _CameraToolTile(
                         icon: Icons.grid_view_rounded,
                         label: 'Коллаж',
-                        onTap: () => _stubSoon('Коллаж'),
+                        onTap: _openCollage,
                       ),
                       _CameraToolTile(
                         icon: Icons.front_hand_rounded,
@@ -473,8 +592,28 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                         active: _handsFree,
                         onTap: _toggleHandsFree,
                       ),
+                      _CameraToolTile(
+                        icon: Icons.expand_less_rounded,
+                        label: 'Свернуть',
+                        onTap: () => setState(() => _toolsExpanded = false),
+                      ),
                     ],
                   ),
+                ),
+              ),
+            ),
+          if (!_initializing &&
+              _permissionGranted &&
+              _cameraCtrl != null &&
+              _cameraCtrl!.value.isInitialized &&
+              !_toolsExpanded)
+            Positioned(
+              left: 4,
+              top: 88,
+              child: SafeArea(
+                child: _IconBtn(
+                  icon: Icons.expand_more_rounded,
+                  onTap: () => setState(() => _toolsExpanded = true),
                 ),
               ),
             ),
@@ -536,7 +675,18 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      if (!_isRecording)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 10),
+                          child: _FilterLensButton(
+                            filterIndex: _filterIndex,
+                            onTap: _cycleFilter,
+                          ),
+                        )
+                      else
+                        const SizedBox(width: 46),
                       _CaptureButton(
                         progress: _progressCtrl,
                         isRecording: _isRecording,
@@ -545,6 +695,15 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                         onHoldStart: _startRecording,
                         onHoldEnd: _stopRecording,
                       ),
+                      if (!_isRecording)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 10),
+                          child: _GalleryShortcuts(
+                            onPickGallery: _pickFromGallery,
+                          ),
+                        )
+                      else
+                        const SizedBox(width: 46),
                     ],
                   ),
                   const SizedBox(height: 14),
@@ -719,6 +878,115 @@ class _GalleryThumb extends StatelessWidget {
           color: Colors.white,
           size: 22,
         ),
+      ),
+    );
+  }
+}
+
+class _FilterLensButton extends StatelessWidget {
+  const _FilterLensButton({
+    required this.filterIndex,
+    required this.onTap,
+  });
+
+  final int filterIndex;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFFF6B9D),
+              Color(0xFFC471F7),
+              Color(0xFF12C2E9),
+            ],
+          ),
+          border: Border.all(color: Colors.white38, width: 1.5),
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(
+              Icons.auto_fix_high_rounded,
+              color: Colors.white.withValues(alpha: 0.95),
+              size: 22,
+            ),
+            if (filterIndex > 0)
+              Positioned(
+                right: 4,
+                bottom: 4,
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '$filterIndex',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GalleryShortcuts extends StatelessWidget {
+  const _GalleryShortcuts({required this.onPickGallery});
+
+  final VoidCallback onPickGallery;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _MiniGalleryDot(icon: Icons.image_rounded, onTap: onPickGallery),
+        const SizedBox(width: 6),
+        _MiniGalleryDot(icon: Icons.video_library_rounded, onTap: onPickGallery),
+      ],
+    );
+  }
+}
+
+class _MiniGalleryDot extends StatelessWidget {
+  const _MiniGalleryDot({
+    required this.icon,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Colors.white.withValues(alpha: 0.22),
+          border: Border.all(color: Colors.white38),
+        ),
+        child: Icon(icon, color: Colors.white, size: 18),
       ),
     );
   }

@@ -12,10 +12,12 @@ import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/media/global_video_audio_state.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/story_entity.dart';
+import '../../domain/entities/story_overlay_item.dart';
 import '../../domain/entities/story_group_entity.dart';
 import '../../domain/repositories/stories_repository.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../widgets/story_music_sticker.dart';
+import '../widgets/story_overlays_stack.dart';
 
 /// Единый формат сторис (как в Instagram — вертикальный 9:16).
 const double _storyAspectRatio = 9 / 16;
@@ -1375,6 +1377,15 @@ class _StoryContent extends StatelessWidget {
                                   size: 64, color: Colors.white54),
                             ),
                 ),
+                if (StoryOverlayItem.listFromJson(story.overlaysJson)
+                    .isNotEmpty)
+                  Positioned.fill(
+                    child: StoryOverlaysStack(
+                      items:
+                          StoryOverlayItem.listFromJson(story.overlaysJson),
+                      editable: false,
+                    ),
+                  ),
                 if (hasMusicAudio)
                   _StoryMusicAmbientPlayer(
                     key: ValueKey<String>('${story.id}_music'),

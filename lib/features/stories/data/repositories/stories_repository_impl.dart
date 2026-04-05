@@ -172,6 +172,7 @@ class StoriesRepositoryImpl implements StoriesRepository {
     String? musicTitle,
     String? musicArtist,
     String? musicExternalUrl,
+    String? overlaysJson,
   }) async {
     await _client.from(SupabaseConstants.storiesTable).insert({
       'user_id': userId,
@@ -186,6 +187,7 @@ class StoriesRepositoryImpl implements StoriesRepository {
       'music_title': musicTitle,
       'music_artist': musicArtist,
       'music_external_url': musicExternalUrl,
+      'overlays_json': overlaysJson,
       'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
     });
   }

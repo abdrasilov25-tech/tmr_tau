@@ -17,11 +17,16 @@ import '../../../post/domain/repositories/post_repository.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/router/go_router_pop_safe.dart';
 import '../../domain/entities/story_music_track.dart';
+import '../../domain/entities/story_overlay_item.dart';
 import '../../domain/repositories/stories_repository.dart';
 import '../../domain/repositories/story_music_search_repository.dart';
 import '../utils/story_media_permissions.dart';
 import '../widgets/story_music_picker_sheet.dart';
+import '../widgets/story_empty_capture_button.dart';
 import '../widgets/story_music_sticker.dart';
+import '../widgets/story_overlays_stack.dart';
+import '../widgets/story_preview_tray_hint.dart';
+import '../widgets/story_stickers_tray_sheet.dart';
 
 /// Единый формат сторис 9:16 (как в Instagram).
 const double _storyAspectRatio = 9 / 16;
@@ -49,7 +54,6 @@ class _AddStoryPageState extends State<AddStoryPage> {
   bool _loading = false;
   final _captionController = TextEditingController();
   static const int _maxVideoSeconds = 120;
-  bool _autoGalleryOpened = false;
   late _CreateMode _activeMode;
   StoryMusicTrack? _selectedMusic;
   Offset _musicStickerDrag = Offset.zero;
@@ -60,6 +64,8 @@ class _AddStoryPageState extends State<AddStoryPage> {
   static const String _prefStoryDraftPath = 'story_draft_file_path';
   static const String _prefStoryDraftIsVideo = 'story_draft_is_video';
   static const String _prefStoryDraftCaption = 'story_draft_caption';
+
+  final List<StoryOverlayItem> _overlays = [];
 
   bool get _isVideoMode => _activeMode == _CreateMode.video;
   bool get _isLiveMode => _activeMode == _CreateMode.live;
@@ -108,18 +114,12 @@ class _AddStoryPageState extends State<AddStoryPage> {
     // Если файл пришёл с StoryCameraPage — загружаем сразу
     final preloaded = widget.preloadedFile;
     if (preloaded != null) {
-      _autoGalleryOpened = true; // Не открываем галерею
       if (widget.isVideoMode) {
         _video = preloaded;
         _validatePreloadedVideo(preloaded);
       } else {
         _image = preloaded;
       }
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _openGalleryOnEnter();
-      });
     }
   }
 
@@ -174,18 +174,6 @@ class _AddStoryPageState extends State<AddStoryPage> {
     super.dispose();
   }
 
-  Future<void> _openGalleryOnEnter() async {
-    if (_autoGalleryOpened) return;
-    if (_isLiveMode) return;
-    // Флаг после попытки: при отказе не крутим picker повторно сами, но и не блокируем ручной выбор.
-    _autoGalleryOpened = true;
-    if (_isVideoMode) {
-      await _pickVideoFromSource(ImageSource.gallery);
-      return;
-    }
-    await _pickImageFromSource(ImageSource.gallery);
-  }
-
   void _setMode(_CreateMode mode) {
     if (_activeMode == mode) return;
     setState(() {
@@ -196,16 +184,13 @@ class _AddStoryPageState extends State<AddStoryPage> {
         _videoDurationSeconds = 0;
         _selectedMusic = null;
         _musicStickerDrag = Offset.zero;
+        _overlays.clear();
       }
       if (!_musicAllowedForMode) {
         _selectedMusic = null;
         _musicStickerDrag = Offset.zero;
       }
     });
-    if (!_isLiveMode && !_hasMedia) {
-      _autoGalleryOpened = false;
-      Future<void>.microtask(_openGalleryOnEnter);
-    }
   }
 
   Future<void> _pickSource() async {
@@ -266,6 +251,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
           _video = null;
           _selectedMusic = null;
           _musicStickerDrag = Offset.zero;
+          _overlays.clear();
         });
       }
     } else {
@@ -383,6 +369,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
         _image = null;
         _selectedMusic = null;
         _musicStickerDrag = Offset.zero;
+        _overlays.clear();
         _loading = false;
       });
     }
@@ -396,6 +383,69 @@ class _AddStoryPageState extends State<AddStoryPage> {
       _selectedMusic = track;
       _musicTitlesHidden = false;
     });
+  }
+
+  Future<void> _openStickersTray() async {
+    if (!_hasMedia || _loading || _isLiveMode) return;
+    final auth = context.read<AuthBloc>().state;
+    final avatarUrl =
+        auth is AuthAuthenticated ? auth.user.avatarUrl : null;
+    await showStoryStickersTray(
+      context,
+      anchorContext: context,
+      musicEnabled: _musicAllowedForMode,
+      onMusic: _openMusicPicker,
+      userAvatarUrl: avatarUrl,
+      onAddOverlay: (item) {
+        if (mounted) setState(() => _overlays.add(item));
+      },
+    );
+  }
+
+  void _moveOverlay(int index, double nx, double ny) {
+    if (index < 0 || index >= _overlays.length) return;
+    setState(() {
+      _overlays[index] = _overlays[index].copyWith(nx: nx, ny: ny);
+    });
+  }
+
+  void _removeOverlay(int index) {
+    if (index < 0 || index >= _overlays.length) return;
+    setState(() => _overlays.removeAt(index));
+  }
+
+  Future<List<StoryOverlayItem>> _uploadStickerFiles(
+    List<StoryOverlayItem> items,
+  ) async {
+    final bucket = SupabaseConstants.bucketStories;
+    final client = Supabase.instance.client;
+    final out = <StoryOverlayItem>[];
+    for (final o in items) {
+      if (o.type == 'image' || o.type == 'gif') {
+        final p = o.data['localPath'] as String?;
+        if (p != null) {
+          final f = File(p);
+          if (await f.exists()) {
+            final ext = p.toLowerCase().endsWith('.gif') ? 'gif' : 'jpg';
+            final path = '${const Uuid().v4()}_stk.$ext';
+            await client.storage
+                .from(bucket)
+                .upload(path, f, fileOptions: const FileOptions(upsert: true));
+            final url = client.storage.from(bucket).getPublicUrl(path);
+            out.add(
+              o.copyWith(
+                data: Map<String, dynamic>.from(o.data)
+                  ..remove('localPath')
+                  ..['url'] = url,
+              ),
+            );
+            continue;
+          }
+        }
+      }
+      out.add(o);
+    }
+    return out;
   }
 
   void _toggleMusicTitlesHidden() {
@@ -486,6 +536,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
       _selectedMusic = null;
       _musicStickerDrag = Offset.zero;
       _musicTitlesHidden = false;
+      _overlays.clear();
     });
     if (mounted) context.popOrGoHomeFeed();
   }
@@ -637,6 +688,11 @@ class _AddStoryPageState extends State<AddStoryPage> {
 
       if (!mounted) return;
       final music = _musicAllowedForMode ? _selectedMusic : null;
+      final resolvedOverlays =
+          _overlays.isEmpty ? <StoryOverlayItem>[] : await _uploadStickerFiles(_overlays);
+      final overlaysJson = resolvedOverlays.isEmpty
+          ? null
+          : StoryOverlayItem.listToJson(resolvedOverlays);
       await storiesRepository.addStory(
             userId: authState.user.id,
             imageUrl: imageUrl,
@@ -646,6 +702,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
             musicTitle: music?.title,
             musicArtist: music?.artist,
             musicExternalUrl: music?.previewUrl,
+            overlaysJson: overlaysJson,
           );
       if (!mounted) return;
 
@@ -773,8 +830,8 @@ class _AddStoryPageState extends State<AddStoryPage> {
             },
           )
         : Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              const Spacer(),
               Icon(
                 _isVideoMode
                     ? Icons.videocam_outlined
@@ -796,18 +853,27 @@ class _AddStoryPageState extends State<AddStoryPage> {
                     ),
                 textAlign: TextAlign.center,
               ),
+              if (_activeMode == _CreateMode.story ||
+                  _activeMode == _CreateMode.video) ...[
+                const SizedBox(height: 28),
+                StoryEmptyCaptureButton(
+                  enabled: !_loading,
+                  videoMode: _isVideoMode,
+                ),
+              ],
               const SizedBox(height: 24),
               FilledButton.icon(
                 onPressed: _pickSource,
                 icon: Icon(
                   _isVideoMode ? Icons.videocam_outlined : Icons.add_photo_alternate_outlined,
                 ),
-                label: Text(_isVideoMode ? 'Выбрать видео' : 'Выбрать фото'),
+                label: Text(_isVideoMode ? 'Выбрать из галереи' : 'Выбрать из галереи'),
                 style: FilledButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: Colors.black,
                 ),
               ),
+              const Spacer(flex: 2),
             ],
           );
     final mediaState = Column(
@@ -816,31 +882,49 @@ class _AddStoryPageState extends State<AddStoryPage> {
           child: Center(
             child: AspectRatio(
               aspectRatio: _storyAspectRatio,
-              child: ClipRect(
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Positioned.fill(
-                      child: _video != null
-                          ? _VideoPreview(file: _video!)
-                          : (_image != null
-                              ? Image.file(
-                                  _image!,
-                                  fit: BoxFit.cover,
-                                  width: double.infinity,
-                                  height: double.infinity,
-                                )
-                              : ColoredBox(
-                                  color: Colors.grey.shade900,
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.broken_image_outlined,
-                                      color: Colors.grey.shade500,
-                                      size: 44,
-                                    ),
-                                  ),
-                                )),
-                    ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LayoutBuilder(
+                  builder: (context, c) {
+                    final trayH = math.max(72.0, c.maxHeight * 0.22);
+                    return Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Positioned.fill(
+                          child: _video != null
+                              ? _VideoPreview(file: _video!)
+                              : (_image != null
+                                  ? Image.file(
+                                      _image!,
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                    )
+                                  : ColoredBox(
+                                      color: Colors.grey.shade900,
+                                      child: Center(
+                                        child: Icon(
+                                          Icons.broken_image_outlined,
+                                          color: Colors.grey.shade500,
+                                          size: 44,
+                                        ),
+                                      ),
+                                    )),
+                        ),
+                        Positioned.fill(
+                          child: StoryOverlaysStack(
+                            items: _overlays,
+                            editable: true,
+                            onPositionChanged: _moveOverlay,
+                            onRemove: _removeOverlay,
+                          ),
+                        ),
+                        StoryPreviewTrayHint(
+                          enabled: !_isLiveMode,
+                          loading: _loading,
+                          height: trayH,
+                          onOpen: _openStickersTray,
+                        ),
                     if (_selectedMusic != null && _musicAllowedForMode)
                       Positioned(
                         left: 12,
@@ -906,7 +990,9 @@ class _AddStoryPageState extends State<AddStoryPage> {
                           );
                         },
                       ),
-                  ],
+                      ],
+                    );
+                  },
                 ),
               ),
             ),
