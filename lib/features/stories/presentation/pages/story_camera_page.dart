@@ -21,10 +21,14 @@ class StoryCameraResult {
 ///
 /// - Нажатие → фото
 /// - Удержание → видео (до 60 секунд, прогресс-кольцо вокруг кнопки)
+/// - «Свободные руки»: тап — старт/стоп записи
 ///
 /// После захвата делает `context.go('/add-story', extra: StoryCameraResult(...))`.
 class StoryCameraPage extends StatefulWidget {
-  const StoryCameraPage({super.key});
+  const StoryCameraPage({super.key, this.isVideoMode = false});
+
+  /// Подсветка «ВИДЕО» в нижней полосе режимов (как Reels).
+  final bool isVideoMode;
 
   @override
   State<StoryCameraPage> createState() => _StoryCameraPageState();
@@ -40,6 +44,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   bool _initializing = true;
   bool _permissionGranted = false;
   bool _isRecording = false;
+  bool _handsFree = false;
 
   late final AnimationController _progressCtrl;
   static const Duration _maxRecordDuration = Duration(seconds: 60);
@@ -94,7 +99,6 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     }
   }
 
-  /// После возврата из «Настроек» с включённой камерой.
   Future<void> _retryCameraPermissionAfterResume() async {
     var s = await Permission.camera.status;
     if (s.isGranted) {
@@ -247,7 +251,94 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     }
   }
 
-  /// Открыть галерею (фото).
+  /// Закрытие без перехода на экран редактирования (удаляем временный файл).
+  Future<void> _cancelRecording() async {
+    final ctrl = _cameraCtrl;
+    if (ctrl == null || !_isRecording) return;
+    _progressCtrl.reset();
+    _recordTimer?.cancel();
+    try {
+      final xFile = await ctrl.stopVideoRecording();
+      try {
+        final f = File(xFile.path);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
+    } catch (_) {}
+    if (mounted) setState(() => _isRecording = false);
+  }
+
+  Future<void> _onClosePressed() async {
+    if (_isRecording) {
+      await _cancelRecording();
+      return;
+    }
+    if (!mounted) return;
+    context.popOrGoHomeFeed();
+  }
+
+  void _showCameraSettingsSheet() {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.grey.shade900,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Настройки камеры',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Дополнительные параметры появятся позже.',
+                style: TextStyle(color: Colors.grey.shade400, height: 1.35),
+              ),
+              const SizedBox(height: 16),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('Закрыть'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _toggleHandsFree() {
+    setState(() => _handsFree = !_handsFree);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          _handsFree
+              ? 'Свободные руки: нажми на круг — начать или остановить запись'
+              : 'Обычный режим: нажми — фото, удерживай — видео',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _stubSoon(String label) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('$label — скоро')),
+    );
+  }
+
   Future<void> _pickFromGallery() async {
     if (_isRecording) return;
     final access =
@@ -283,6 +374,13 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     );
   }
 
+  String get _hintText {
+    if (_handsFree) {
+      return 'Нажми на круг — начать или остановить запись';
+    }
+    return 'Нажми — фото  •  Удерживай — видео';
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomPad = MediaQuery.of(context).padding.bottom;
@@ -292,7 +390,6 @@ class _StoryCameraPageState extends State<StoryCameraPage>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Превью камеры ─────────────────────────────────────
           if (_initializing)
             const Center(child: CircularProgressIndicator(color: Colors.white))
           else if (!_permissionGranted)
@@ -314,31 +411,74 @@ class _StoryCameraPageState extends State<StoryCameraPage>
               ),
             ),
 
-          // ── Верхние кнопки ────────────────────────────────────
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  // Закрыть
                   _IconBtn(
                     icon: Icons.close,
-                    onTap: () => context.popOrGoHomeFeed(),
+                    onTap: _onClosePressed,
                   ),
-                  if (!_initializing && _permissionGranted)
+                  const Spacer(),
+                  if (!_initializing && _permissionGranted) ...[
                     _IconBtn(
                       icon: _flashMode == FlashMode.torch
                           ? Icons.flash_on_rounded
                           : Icons.flash_off_rounded,
                       onTap: _toggleFlash,
                     ),
+                    const SizedBox(width: 8),
+                    _IconBtn(
+                      icon: Icons.settings_outlined,
+                      onTap: _showCameraSettingsSheet,
+                    ),
+                  ],
                 ],
               ),
             ),
           ),
 
-          // ── Таймер записи ─────────────────────────────────────
+          if (!_initializing &&
+              _permissionGranted &&
+              _cameraCtrl != null &&
+              _cameraCtrl!.value.isInitialized)
+            Positioned(
+              left: 4,
+              top: 72,
+              bottom: bottomPad + 200,
+              child: SafeArea(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _CameraToolTile(
+                        icon: Icons.text_fields_rounded,
+                        label: 'Создать',
+                        onTap: () => context.go('/add-story'),
+                      ),
+                      _CameraToolTile(
+                        icon: Icons.loop_rounded,
+                        label: 'Бумеранг',
+                        onTap: () => _stubSoon('Бумеранг'),
+                      ),
+                      _CameraToolTile(
+                        icon: Icons.grid_view_rounded,
+                        label: 'Коллаж',
+                        onTap: () => _stubSoon('Коллаж'),
+                      ),
+                      _CameraToolTile(
+                        icon: Icons.front_hand_rounded,
+                        label: 'Свободные\nруки',
+                        active: _handsFree,
+                        onTap: _toggleHandsFree,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
           if (_isRecording)
             Positioned(
               top: 80,
@@ -372,67 +512,88 @@ class _StoryCameraPageState extends State<StoryCameraPage>
               ),
             ),
 
-          // ── Подсказка ─────────────────────────────────────────
           if (!_isRecording && !_initializing && _permissionGranted)
             Positioned(
-              bottom: bottomPad + 130,
+              bottom: bottomPad + 168,
               left: 0,
               right: 0,
-              child: const Center(
+              child: Center(
                 child: Text(
-                  'Нажми — фото  •  Удерживай — видео',
-                  style: TextStyle(color: Colors.white70, fontSize: 13),
+                  _hintText,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 13),
                 ),
               ),
             ),
 
-          // ── Нижняя панель ─────────────────────────────────────
           if (!_initializing && _permissionGranted)
             Positioned(
               left: 0,
               right: 0,
-              bottom: bottomPad + 28,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                crossAxisAlignment: CrossAxisAlignment.center,
+              bottom: bottomPad,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Галерея
-                  GestureDetector(
-                    onTap: _pickFromGallery,
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.white38, width: 1.5),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _CaptureButton(
+                        progress: _progressCtrl,
+                        isRecording: _isRecording,
+                        handsFree: _handsFree,
+                        onTap: _takePicture,
+                        onHoldStart: _startRecording,
+                        onHoldEnd: _stopRecording,
                       ),
-                      child: const Icon(
-                        Icons.photo_library_outlined,
-                        color: Colors.white,
-                        size: 24,
-                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        _GalleryThumb(onTap: _pickFromGallery),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            physics: const BouncingScrollPhysics(),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                _ModePill(
+                                  label: 'ПУБЛИКАЦИЯ',
+                                  active: false,
+                                  dimmed: true,
+                                  onTap: () =>
+                                      context.go('/add-publication'),
+                                ),
+                                _ModePill(
+                                  label: 'ИСТОРИЯ',
+                                  active: !widget.isVideoMode,
+                                  onTap: () => context.go('/story-camera'),
+                                ),
+                                _ModePill(
+                                  label: 'ВИДЕО',
+                                  active: widget.isVideoMode,
+                                  onTap: () =>
+                                      context.go('/story-camera?mode=video'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_cameras.length > 1)
+                          _IconBtn(
+                            icon: Icons.flip_camera_ios_outlined,
+                            size: 26,
+                            onTap: _switchCamera,
+                          )
+                        else
+                          const SizedBox(width: 46, height: 46),
+                      ],
                     ),
                   ),
-
-                  // Кнопка захвата
-                  _CaptureButton(
-                    progress: _progressCtrl,
-                    isRecording: _isRecording,
-                    onTap: _takePicture,
-                    onHoldStart: _startRecording,
-                    onHoldEnd: _stopRecording,
-                  ),
-
-                  // Переключить камеру
-                  if (_cameras.length > 1)
-                    _IconBtn(
-                      icon: Icons.flip_camera_ios_outlined,
-                      size: 28,
-                      onTap: _switchCamera,
-                    )
-                  else
-                    const SizedBox(width: 48),
                 ],
               ),
             ),
@@ -442,7 +603,126 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   }
 }
 
-// ── Вспомогательные виджеты ───────────────────────────────────────
+class _CameraToolTile extends StatelessWidget {
+  const _CameraToolTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.active = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: active
+                    ? Colors.white.withValues(alpha: 0.22)
+                    : Colors.black38,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: active
+                      ? Colors.white54
+                      : Colors.white.withValues(alpha: 0.12),
+                ),
+              ),
+              child: Icon(icon, color: Colors.white, size: 22),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              width: 72,
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  height: 1.1,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModePill extends StatelessWidget {
+  const _ModePill({
+    required this.label,
+    required this.active,
+    required this.onTap,
+    this.dimmed = false,
+  });
+
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+  final bool dimmed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active
+                ? Colors.white
+                : (dimmed ? Colors.white38 : Colors.white60),
+            fontSize: 13,
+            fontWeight: active ? FontWeight.w800 : FontWeight.w500,
+            letterSpacing: 0.3,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GalleryThumb extends StatelessWidget {
+  const _GalleryThumb({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 46,
+        height: 46,
+        decoration: BoxDecoration(
+          color: Colors.white24,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white38, width: 1.5),
+        ),
+        child: const Icon(
+          Icons.photo_library_outlined,
+          color: Colors.white,
+          size: 22,
+        ),
+      ),
+    );
+  }
+}
 
 class _CameraPreviewFill extends StatelessWidget {
   const _CameraPreviewFill({required this.controller});
@@ -475,10 +755,12 @@ class _CaptureButton extends StatefulWidget {
     required this.onTap,
     required this.onHoldStart,
     required this.onHoldEnd,
+    this.handsFree = false,
   });
 
   final AnimationController progress;
   final bool isRecording;
+  final bool handsFree;
   final VoidCallback onTap;
   final VoidCallback onHoldStart;
   final VoidCallback onHoldEnd;
@@ -489,13 +771,15 @@ class _CaptureButton extends StatefulWidget {
 
 class _CaptureButtonState extends State<_CaptureButton> {
   bool _isDown = false;
-  // Задержка 200ms отделяет «тап» от «удержания»:
-  // если палец поднялся до 200ms — это тап (фото),
-  // если нет — это начало видеозаписи.
   static const _holdThreshold = Duration(milliseconds: 200);
   DateTime? _downAt;
 
   void _handlePointerDown(PointerDownEvent _) {
+    if (widget.handsFree) {
+      _isDown = true;
+      _downAt = DateTime.now();
+      return;
+    }
     _isDown = true;
     _downAt = DateTime.now();
     Future.delayed(_holdThreshold, () {
@@ -504,20 +788,37 @@ class _CaptureButtonState extends State<_CaptureButton> {
   }
 
   void _handlePointerUp(PointerUpEvent _) {
+    if (widget.handsFree) {
+      final wasDown = _isDown;
+      _isDown = false;
+      if (!wasDown) return;
+      final elapsed = DateTime.now().difference(_downAt ?? DateTime.now());
+      if (elapsed > const Duration(milliseconds: 500)) {
+        return;
+      }
+      if (widget.isRecording) {
+        widget.onHoldEnd();
+      } else {
+        widget.onHoldStart();
+      }
+      return;
+    }
     final wasDown = _isDown;
     _isDown = false;
     if (!wasDown) return;
     final elapsed = DateTime.now().difference(_downAt ?? DateTime.now());
     if (elapsed < _holdThreshold) {
-      // Короткое нажатие → фото
       widget.onTap();
     } else {
-      // Долгое → завершить запись
       widget.onHoldEnd();
     }
   }
 
   void _handlePointerCancel(PointerCancelEvent _) {
+    if (widget.handsFree) {
+      _isDown = false;
+      return;
+    }
     if (_isDown) {
       _isDown = false;
       widget.onHoldEnd();
@@ -532,7 +833,7 @@ class _CaptureButtonState extends State<_CaptureButton> {
       onPointerCancel: _handlePointerCancel,
       child: AnimatedBuilder(
         animation: widget.progress,
-        builder: (_, __) => SizedBox(
+        builder: (context, _) => SizedBox(
           width: 84,
           height: 84,
           child: Stack(

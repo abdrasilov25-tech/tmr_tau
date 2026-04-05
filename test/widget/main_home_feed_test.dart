@@ -30,6 +30,8 @@ class MockAuthRepository extends Mock implements AuthRepository {}
 
 class MockMultiAccountStorage extends Mock implements MultiAccountStorage {}
 
+/// Виджет-тесты ленты: [MainHomePage] безопасно работает без [Supabase.initialize]
+/// (см. `_supabaseAuthUserIdOrNull` в `main_home_page.dart`).
 void main() {
   late MockPostRepository postRepo;
   late MockProfileRepository profileRepo;

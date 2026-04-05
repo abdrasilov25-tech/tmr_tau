@@ -1,4 +1,6 @@
 import 'dart:async';
+
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -13,6 +15,7 @@ import '../../domain/entities/story_entity.dart';
 import '../../domain/entities/story_group_entity.dart';
 import '../../domain/repositories/stories_repository.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../widgets/story_music_sticker.dart';
 
 /// Единый формат сторис (как в Instagram — вертикальный 9:16).
 const double _storyAspectRatio = 9 / 16;
@@ -97,8 +100,17 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
     final s = (storyIndex ?? fallbackIndex).clamp(0, maxIdx);
     final story = group.stories[s];
     final hasVideo = (story.videoUrl ?? '').isNotEmpty;
-    return hasVideo ? _videoStoryDuration : _photoStoryDuration;
+    if (hasVideo) {
+      final sec = story.videoDurationSeconds;
+      if (sec > 0) {
+        return Duration(seconds: sec.clamp(1, _maxVideoStorySeconds));
+      }
+      return _videoStoryDuration;
+    }
+    return _photoStoryDuration;
   }
+
+  static const int _maxVideoStorySeconds = 120;
 
   void _pausePlayback() {
     if (_isPaused) return;
@@ -256,7 +268,6 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
             return _StoryGroupView(
               group: group,
               storyController: _storyPageControllers[groupIndex],
-              progressDuration: _durationForStory(groupIndex: groupIndex, storyIndex: 0),
               onNext: _goNext,
               onPrev: _goPrev,
               onPause: _pausePlayback,
@@ -276,7 +287,6 @@ class _StoryGroupView extends StatefulWidget {
   const _StoryGroupView({
     required this.group,
     required this.storyController,
-    required this.progressDuration,
     required this.onNext,
     required this.onPrev,
     required this.onPause,
@@ -288,7 +298,6 @@ class _StoryGroupView extends StatefulWidget {
 
   final StoryGroupEntity group;
   final PageController storyController;
-  final Duration progressDuration;
   final VoidCallback onNext;
   final VoidCallback onPrev;
   final VoidCallback onPause;
@@ -350,6 +359,19 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
 
   StoryEntity get _currentStory => widget.group.stories[_currentIndex];
   bool get _isOwnStory => widget.currentUserId != null && widget.group.userId == widget.currentUserId;
+
+  Duration _storyBarDuration() {
+    final s = _currentStory;
+    final hasVideo = (s.videoUrl ?? '').isNotEmpty;
+    if (hasVideo) {
+      final sec = s.videoDurationSeconds;
+      if (sec > 0) {
+        return Duration(seconds: sec.clamp(1, 120));
+      }
+      return const Duration(seconds: 8);
+    }
+    return const Duration(milliseconds: 6500);
+  }
 
   void _handleReplyFocusChange() {
     if (_replyFocusNode.hasFocus) {
@@ -847,7 +869,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
               _ProgressBars(
                 count: widget.group.stories.length,
                 currentIndex: _currentIndex,
-                duration: widget.progressDuration,
+                duration: _storyBarDuration(),
                 paused: widget.isPaused,
               ),
               Padding(
@@ -1201,6 +1223,11 @@ class _ProgressBarsState extends State<_ProgressBars>
   @override
   void didUpdateWidget(_ProgressBars oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.duration != widget.duration) {
+      _controller.duration = widget.duration;
+      _controller.reset();
+      _controller.forward();
+    }
     if (oldWidget.currentIndex != widget.currentIndex) {
       _controller.reset();
       _controller.forward();
@@ -1302,6 +1329,12 @@ class _StoryContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasVideo = story.videoUrl != null && story.videoUrl!.isNotEmpty;
+    final musicUrl = story.musicExternalUrl;
+    final hasMusicAudio =
+        musicUrl != null && musicUrl.trim().isNotEmpty;
+    final hasMusicSticker = hasMusicAudio ||
+        (story.musicTitle ?? '').trim().isNotEmpty ||
+        (story.musicArtist ?? '').trim().isNotEmpty;
     return GestureDetector(
       onLongPressStart: (_) => onHoldStart(),
       onLongPressEnd: (_) => onHoldEnd(),
@@ -1311,29 +1344,76 @@ class _StoryContent extends StatelessWidget {
         child: AspectRatio(
           aspectRatio: _storyAspectRatio,
           child: ClipRect(
-            child: hasVideo
-                ? _StoryVideoContent(
-                    videoUrl: story.videoUrl!,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned.fill(
+                  child: hasVideo
+                      ? _StoryVideoContent(
+                          videoUrl: story.videoUrl!,
+                          paused: isPaused,
+                          muteVideoForMusicTrack: hasMusicAudio,
+                        )
+                      : story.imageUrl.isNotEmpty
+                          ? CachedNetworkImage(
+                              imageUrl: story.imageUrl,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
+                              placeholder: (_, progress) => const Center(
+                                child:
+                                    CircularProgressIndicator(color: Colors.white),
+                              ),
+                              errorWidget: (_, error, stackTrace) =>
+                                  const Center(
+                                child: Icon(Icons.broken_image_outlined,
+                                    size: 64, color: Colors.white54),
+                              ),
+                            )
+                          : const Center(
+                              child: Icon(Icons.image_not_supported,
+                                  size: 64, color: Colors.white54),
+                            ),
+                ),
+                if (hasMusicAudio)
+                  _StoryMusicAmbientPlayer(
+                    key: ValueKey<String>('${story.id}_music'),
+                    audioUrl: musicUrl,
                     paused: isPaused,
-                  )
-                : story.imageUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: story.imageUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        placeholder: (_, progress) => const Center(
-                          child: CircularProgressIndicator(color: Colors.white),
-                        ),
-                        errorWidget: (_, error, stackTrace) => const Center(
-                          child: Icon(Icons.broken_image_outlined,
-                              size: 64, color: Colors.white54),
-                        ),
-                      )
-                    : const Center(
-                        child: Icon(Icons.image_not_supported,
-                            size: 64, color: Colors.white54),
+                  ),
+                if (hasMusicSticker)
+                  Positioned(
+                    left: 14,
+                    right: 14,
+                    top: 12,
+                    child: IgnorePointer(
+                      child: StoryMusicTopCaptionBar(
+                        title: (story.musicTitle ?? '').trim().isEmpty
+                            ? 'Музыка'
+                            : story.musicTitle!.trim(),
+                        artist: (story.musicArtist ?? '').trim(),
                       ),
+                    ),
+                  ),
+                if (hasMusicSticker)
+                  Positioned(
+                    left: 12,
+                    right: 12,
+                    bottom: 20,
+                    child: IgnorePointer(
+                      child: Align(
+                        alignment: Alignment.bottomCenter,
+                        child: StoryMusicSticker(
+                          title: (story.musicTitle ?? '').trim().isEmpty
+                              ? 'Музыка'
+                              : story.musicTitle!.trim(),
+                          artist: (story.musicArtist ?? '').trim(),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1345,10 +1425,13 @@ class _StoryVideoContent extends StatefulWidget {
   const _StoryVideoContent({
     required this.videoUrl,
     required this.paused,
+    this.muteVideoForMusicTrack = false,
   });
 
   final String videoUrl;
   final bool paused;
+  /// Как в Instagram: при стикере «Музыка» звук видео отключается, играет превью трека.
+  final bool muteVideoForMusicTrack;
 
   @override
   State<_StoryVideoContent> createState() => _StoryVideoContentState();
@@ -1379,7 +1462,9 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
         return;
       }
       c.setLooping(true);
-      c.setVolume(_audioState.isMuted.value ? 0 : 1);
+      final allowVideoSound =
+          !widget.muteVideoForMusicTrack && !_audioState.isMuted.value;
+      c.setVolume(allowVideoSound ? 1 : 0);
       _controller = c;
       setState(() {});
       if (!widget.paused) c.play();
@@ -1398,7 +1483,9 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
   void _syncVolumeWithGlobalState() {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
-    c.setVolume(_audioState.isMuted.value ? 0 : 1);
+    final allowVideoSound =
+        !widget.muteVideoForMusicTrack && !_audioState.isMuted.value;
+    c.setVolume(allowVideoSound ? 1 : 0);
     if (mounted) setState(() {});
   }
 
@@ -1411,6 +1498,9 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
       setState(() {});
       unawaited(_loadVideo(widget.videoUrl));
       return;
+    }
+    if (oldWidget.muteVideoForMusicTrack != widget.muteVideoForMusicTrack) {
+      _syncVolumeWithGlobalState();
     }
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
@@ -1448,29 +1538,30 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
               fit: StackFit.expand,
               children: [
                 VideoPlayer(c),
-                Positioned(
-                  right: 12,
-                  bottom: 12,
-                  child: GestureDetector(
-                    onTap: () {
-                      unawaited(_audioState.toggle());
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.black45,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Icon(
-                        _audioState.isMuted.value
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.white,
-                        size: 18,
+                if (!widget.muteVideoForMusicTrack)
+                  Positioned(
+                    right: 12,
+                    bottom: 12,
+                    child: GestureDetector(
+                      onTap: () {
+                        unawaited(_audioState.toggle());
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.black45,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Icon(
+                          _audioState.isMuted.value
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
@@ -1478,6 +1569,83 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
       ),
     );
   }
+}
+
+/// Фоновое воспроизведение превью трека в сторис (пауза по удержанию как в Instagram).
+///
+/// Не привязан к [GlobalVideoAudioState]: иначе при дефолтном «mute» трек не слышен.
+class _StoryMusicAmbientPlayer extends StatefulWidget {
+  const _StoryMusicAmbientPlayer({
+    super.key,
+    required this.audioUrl,
+    required this.paused,
+  });
+
+  final String audioUrl;
+  final bool paused;
+
+  @override
+  State<_StoryMusicAmbientPlayer> createState() =>
+      _StoryMusicAmbientPlayerState();
+}
+
+class _StoryMusicAmbientPlayerState extends State<_StoryMusicAmbientPlayer> {
+  late final AudioPlayer _player;
+
+  @override
+  void initState() {
+    super.initState();
+    _player = AudioPlayer();
+    unawaited(_boot());
+  }
+
+  Future<void> _boot() async {
+    try {
+      await _player.setReleaseMode(ReleaseMode.loop);
+      await _player.setVolume(1);
+      await _player.play(UrlSource(widget.audioUrl));
+      if (widget.paused) await _player.pause();
+    } catch (_) {}
+  }
+
+  Future<void> _applyPause() async {
+    if (!mounted) return;
+    if (widget.paused) {
+      await _player.pause();
+    } else {
+      await _player.resume();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _StoryMusicAmbientPlayer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.audioUrl != widget.audioUrl) {
+      unawaited(_reloadSource());
+      return;
+    }
+    if (oldWidget.paused != widget.paused) {
+      unawaited(_applyPause());
+    }
+  }
+
+  Future<void> _reloadSource() async {
+    try {
+      await _player.stop();
+      await _player.setReleaseMode(ReleaseMode.loop);
+      await _player.play(UrlSource(widget.audioUrl));
+      await _applyPause();
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    unawaited(_player.dispose());
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 class _EditCaptionDialog extends StatefulWidget {

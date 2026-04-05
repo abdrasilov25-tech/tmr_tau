@@ -248,7 +248,11 @@ class AppRouter {
       ),
       GoRoute(
         path: '/story-camera',
-        builder: (context, state) => const StoryCameraPage(),
+        builder: (context, state) {
+          final videoMode =
+              state.uri.queryParameters['mode'] == 'video';
+          return StoryCameraPage(isVideoMode: videoMode);
+        },
       ),
       GoRoute(
         path: '/add-story',

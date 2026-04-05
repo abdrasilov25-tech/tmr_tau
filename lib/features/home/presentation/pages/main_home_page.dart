@@ -31,6 +31,15 @@ import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../widgets/user_avatar_tap.dart';
 
+/// Безопасно для виджет-тестов и до [Supabase.initialize]: иначе `Supabase.instance` бросает.
+String? _supabaseAuthUserIdOrNull() {
+  try {
+    return supa.Supabase.instance.client.auth.currentUser?.id;
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Экран «Главное» — лента публикаций в стиле TikTok: вкладки
 /// **Рекомендации** и **Подписки** — отдельные вертикальные ленты (свайп вверх/вниз),
 /// у каждой вкладки свой [PageController], контент не смешивается.
@@ -131,7 +140,7 @@ class _MainHomePageState extends State<MainHomePage> {
     _currentUserId = authState is AuthAuthenticated
         ? authState.user.id
         : null;
-    _currentUserId ??= supa.Supabase.instance.client.auth.currentUser?.id;
+    _currentUserId ??= _supabaseAuthUserIdOrNull();
 
     _followingChangeSub =
         FollowingChangeBus.instance.stream.listen((_) {
@@ -478,8 +487,7 @@ class _MainHomePageState extends State<MainHomePage> {
     final authState = context.read<AuthBloc>().state;
     final activeUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
-    _currentUserId =
-        activeUserId ?? supa.Supabase.instance.client.auth.currentUser?.id;
+    _currentUserId = activeUserId ?? _supabaseAuthUserIdOrNull();
     _feedTab = _FeedTab.recommendations;
     _invalidateFollowingIdsCache();
     if (showLoading) {

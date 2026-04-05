@@ -48,8 +48,11 @@ import 'features/product/data/services/payment_service.dart';
 import 'features/product/presentation/bloc/payment_cubit.dart';
 import 'features/profile/data/repositories/profile_repository_impl.dart';
 import 'features/profile/domain/repositories/profile_repository.dart';
+import 'features/stories/data/datasources/itunes_music_remote_datasource.dart';
 import 'features/stories/data/repositories/stories_repository_impl.dart';
+import 'features/stories/data/repositories/story_music_search_repository_impl.dart';
 import 'features/stories/domain/repositories/stories_repository.dart';
+import 'features/stories/domain/repositories/story_music_search_repository.dart';
 import 'features/settings/data/repositories/settings_repository_impl.dart';
 import 'features/settings/domain/repositories/settings_repository.dart';
 import 'features/map/data/datasources/map_remote_datasource.dart';
@@ -103,6 +106,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   late final ProfileRepository _profileRepository;
   late final CommentsRepository _commentsRepository;
   late final StoriesRepository _storiesRepository;
+  late final StoryMusicSearchRepository _storyMusicSearchRepository;
   late final NotificationsRepository _notificationsRepository;
   late final PostRepository _postRepository;
   late final SettingsRepository _settingsRepository;
@@ -149,6 +153,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
     );
     _commentsRepository = CommentsRepositoryImpl(_client);
     _storiesRepository = StoriesRepositoryImpl(_client);
+    _storyMusicSearchRepository = StoryMusicSearchRepositoryImpl(
+      ItunesMusicRemoteDataSource(),
+    );
     _notificationsRepository = NotificationsRepositoryImpl(_client);
     _notificationTabBadgeController = NotificationTabBadgeController(
       notificationsRepository: _notificationsRepository,
@@ -263,6 +270,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         RepositoryProvider<ProfileRepository>.value(value: _profileRepository),
         RepositoryProvider<CommentsRepository>.value(value: _commentsRepository),
         RepositoryProvider<StoriesRepository>.value(value: _storiesRepository),
+        RepositoryProvider<StoryMusicSearchRepository>.value(
+          value: _storyMusicSearchRepository,
+        ),
         RepositoryProvider<NotificationsRepository>.value(
           value: _notificationsRepository,
         ),
