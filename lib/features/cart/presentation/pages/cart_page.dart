@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/widgets/cached_product_image.dart';
 import '../../domain/entities/cart_item_entity.dart';
 
@@ -15,7 +17,7 @@ class CartPage extends StatelessWidget {
         title: const Text('Корзина'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeFeed(),
         ),
       ),
       body: items.isEmpty

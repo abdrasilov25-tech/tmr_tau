@@ -26,6 +26,7 @@ import 'package:video_player/video_player.dart';
 import 'package:camera/camera.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/storage/chat_list_storage.dart';
@@ -2072,7 +2073,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () => context.popOrGoHomeChats(),
           ),
         ),
         body: Center(
@@ -2185,7 +2186,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     _toggleSelectionMode(false);
                     return;
                   }
-                  context.pop();
+                  context.popOrGoHomeChats();
                 },
               ),
               actions: [

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/entities/order_entity.dart';
 import '../../domain/repositories/orders_repository.dart';
@@ -72,7 +72,7 @@ class _OrdersPageState extends State<OrdersPage> {
         title: const Text('Мои заказы'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeFeed(),
         ),
       ),
       body: FutureBuilder<List<OrderEntity>>(

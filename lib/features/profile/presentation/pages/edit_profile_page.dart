@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -103,7 +103,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       if (!mounted) return;
       // Обновим профиль в AuthBloc.
       context.read<AuthBloc>().add(const AuthCheckRequested());
-      context.pop();
+      context.popOrGoHomeFeed();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

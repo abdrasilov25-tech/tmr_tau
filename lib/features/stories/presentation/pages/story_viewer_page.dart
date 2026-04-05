@@ -8,6 +8,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/media/global_video_audio_state.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -144,7 +145,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
 
   void _goNext() {
     if (widget.groups.isEmpty) {
-      context.pop();
+      context.popOrGoHomeFeed();
       return;
     }
     final group = widget.groups[_currentGroupIndex];
@@ -181,13 +182,13 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
       );
       _startTimer();
     } else {
-      context.pop();
+      context.popOrGoHomeFeed();
     }
   }
 
   void _goPrev() {
     if (widget.groups.isEmpty) {
-      context.pop();
+      context.popOrGoHomeFeed();
       return;
     }
     final storyController = _storyPageControllers[_currentGroupIndex];
@@ -224,7 +225,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
       );
       _startTimer();
     } else {
-      context.pop();
+      context.popOrGoHomeFeed();
     }
   }
 
@@ -252,7 +253,7 @@ class _StoryViewerPageState extends State<StoryViewerPage> {
         onVerticalDragEnd: (details) {
           final velocity = details.primaryVelocity ?? 0;
           if (velocity > 350) {
-            context.pop();
+            context.popOrGoHomeFeed();
           }
         },
         child: PageView.builder(

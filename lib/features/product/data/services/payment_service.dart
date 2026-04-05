@@ -1307,7 +1307,7 @@ class PaymentService {
               completer.complete(
                 PaymentResult(
                   status: PaymentResultStatus.error,
-                  message: 'Ошибка обработки покупки: $e',
+                  message: _friendlyPurchaseProcessingError(e),
                 ),
               );
             }
@@ -1445,7 +1445,60 @@ class PaymentService {
           'При тесте через Xcode: Run → Options → StoreKit Configuration = storekit.storekit. '
           'На устройстве без этого файла нужен Sandbox Apple ID и товары в App Store Connect.';
     }
+    // Не подменяем любой «401 + FunctionException» — это даёт ложное «сессия устарела»
+    // при 401 от getUser() на Edge (секреты/проект) или No Authorization.
+    if (lower.contains('invalid jwt')) {
+      return 'Сессия устарела для проверки покупки на сервере. Выйдите из аккаунта '
+          'и войдите снова, затем повторите покупку. Если ошибка остаётся — проверьте, '
+          'что в .env указан тот же проект Supabase, что и у задеплоенной функции verifyPurchase.';
+    }
     return raw;
+  }
+
+  /// Человекочитаемый текст для сбоев после успешного ответа StoreKit (verifyPurchase / RPC).
+  String _friendlyPurchaseProcessingError(Object error) {
+    if (error is FunctionException) {
+      return _friendlyVerifyPurchaseFunctionException(error);
+    }
+    return _friendlyIapUserMessage(error.toString());
+  }
+
+  String _friendlyVerifyPurchaseFunctionException(FunctionException e) {
+    final details = e.details;
+    final Map<String, dynamic>? detailsMap = details is Map
+        ? Map<String, dynamic>.from(details)
+        : null;
+    final code = detailsMap?['error_code']?.toString();
+
+    if (e.status == 403 && code == 'user_id_mismatch') {
+      return 'Аккаунт в приложении не совпадает с покупкой. Войдите в тот профиль, '
+          'с которого оформляли подписку, и повторите.';
+    }
+    if (e.status == 401) {
+      if (code == 'no_authorization_header') {
+        return 'Запрос к серверу без токена авторизации. Перезапустите приложение и войдите снова.';
+      }
+      if (code == 'auth_get_user_failed') {
+        final hint = detailsMap?['auth_message']?.toString();
+        final tail = (hint != null && hint.isNotEmpty) ? ' ($hint)' : '';
+        return 'Сервер не смог подтвердить вход при проверке покупки$tail. '
+            'Выйдите из аккаунта и войдите снова. Если не помогает — в Supabase Dashboard '
+            'проверьте секреты Edge Function verifyPurchase (SUPABASE_URL и ANON_KEY того же проекта, '
+            'что в приложении), затем выполните: supabase functions deploy verifyPurchase';
+      }
+      final raw = details?.toString().toLowerCase() ?? '';
+      if (raw.contains('invalid jwt')) {
+        return _friendlyIapUserMessage('Invalid JWT');
+      }
+      return 'Покупку не удалось подтвердить на сервере (ошибка авторизации). '
+          'Войдите снова; если повторяется — проверьте совпадение проекта Supabase в .env и деплой verifyPurchase.';
+    }
+    if (e.status == 400 && detailsMap?['error'] != null) {
+      return 'Проверка покупки: ${detailsMap!['error']}';
+    }
+    return _friendlyIapUserMessage(
+      'FunctionException(status: ${e.status}, details: $details, reasonPhrase: ${e.reasonPhrase})',
+    );
   }
 
   String _friendlyStoreError(PlatformException e) {
@@ -1541,6 +1594,16 @@ class PaymentService {
     return auth;
   }
 
+  /// JWS транзакции (предпочтительно) или JSON StoreKit 2: при тесте через
+  /// StoreKit Configuration иногда пустой [PurchaseVerificationData.serverVerificationData],
+  /// из‑за чего Edge Function отвечает 400 «Invalid purchase payload».
+  String _purchaseVerificationPayloadForVerify(PurchaseDetails purchase) {
+    final v = purchase.verificationData;
+    final server = v.serverVerificationData.trim();
+    if (server.isNotEmpty) return server;
+    return v.localVerificationData.trim();
+  }
+
   void _assertPackageValueLadder() {
     final premium = _qarmetCatalog[promotionPremiumProductId]!;
     final business = _qarmetCatalog[promotionBusinessProductId]!;
@@ -1559,48 +1622,83 @@ class PaymentService {
       throw Exception('Пользователь не авторизован');
     }
 
-    /// Не задаём заголовок Authorization вручную: HTTP-клиент Supabase
-    /// подставляет актуальный JWT перед запросом (в т.ч. после авто-refresh).
-    /// Ручной Bearer со старым accessToken перекрывал это и давал 401 Invalid JWT.
-    Future<void> invokeVerifyPurchase() async {
-      final response = await _client.functions.invoke(
-        'verifyPurchase',
-        body: <String, dynamic>{
-          'userId': auth.id,
-          'productId': productId,
-          'purchaseId': purchase.purchaseID,
-          'transactionDate': purchase.transactionDate,
-          'verificationData': purchase.verificationData.serverVerificationData,
-          'source': purchase.verificationData.source,
-          'platform': defaultTargetPlatform.name,
-        },
+    final verificationPayload = _purchaseVerificationPayloadForVerify(purchase);
+    if (verificationPayload.isEmpty) {
+      throw Exception(
+        'Нет данных чека StoreKit (пустой JWS/JSON транзакции). '
+        'В Xcode: схема Runner → Run → Options → StoreKit Configuration = storekit.storekit. '
+        'Повторите покупку.',
       );
-      final data = response.data;
-      if (data is Map && data['verified'] != true) {
-        final errMsg = data['error']?.toString() ?? 'Сервер не подтвердил покупку';
-        throw Exception('verifyPurchase: $errMsg');
-      }
     }
 
-    try {
-      await invokeVerifyPurchase();
-    } catch (e) {
-      final msg = e.toString();
-      final looksLikeAuth =
-          msg.contains('401') ||
-          msg.contains('Invalid JWT') ||
-          msg.contains('Unauthorized');
-      if (!looksLikeAuth) rethrow;
-
+    for (var attempt = 0; attempt < 3; attempt++) {
       final refreshed = await _client.auth.refreshSession();
-      final session = refreshed.session ?? _client.auth.currentSession;
-      if (session == null) {
+      final token =
+          refreshed.session?.accessToken ?? _client.auth.currentSession?.accessToken;
+      if (token == null || token.isEmpty) {
+        throw Exception('Сессия истекла. Войдите снова и повторите покупку.');
+      }
+
+      // Тот же вызов, что использует Edge getUser(): если здесь ок — токен валиден для проекта.
+      late final UserResponse validated;
+      try {
+        validated = await _client.auth.getUser();
+      } on AuthException catch (e) {
         throw Exception(
-          'Сессия истекла. Войдите снова и повторите покупку.',
+          'Не удалось подтвердить сессию: ${e.message}. Выйдите и войдите снова.',
         );
       }
-      await invokeVerifyPurchase();
+      if (validated.user == null || validated.user!.id != auth.id) {
+        throw Exception(
+          'Аккаунт не подтверждён после обновления сессии. Выйдите и войдите снова.',
+        );
+      }
+
+      try {
+        final response = await _client.functions.invoke(
+          'verifyPurchase',
+          headers: {'Authorization': 'Bearer $token'},
+          body: <String, dynamic>{
+            'userId': auth.id,
+            'productId': productId,
+            'purchaseId': purchase.purchaseID,
+            'transactionDate': purchase.transactionDate,
+            'verificationData': verificationPayload,
+            'source': purchase.verificationData.source,
+            'platform': defaultTargetPlatform.name,
+          },
+        );
+        final data = response.data;
+        if (data is Map && data['verified'] == true) return;
+        final errMsg = data is Map
+            ? (data['error']?.toString() ?? 'Сервер не подтвердил покупку')
+            : 'Сервер не подтвердил покупку';
+        throw Exception('verifyPurchase: $errMsg');
+      } on FunctionException catch (e) {
+        final retryable401 = e.status == 401 &&
+            attempt < 2 &&
+            _verifyPurchase401MayBeTransient(e);
+        if (retryable401) {
+          await Future<void>.delayed(Duration(milliseconds: 200 * (attempt + 1)));
+          continue;
+        }
+        throw Exception(_friendlyVerifyPurchaseFunctionException(e));
+      }
     }
+  }
+
+  /// Повторяем только типичные гонки/временные отказы шлюза, не «логические» 401.
+  bool _verifyPurchase401MayBeTransient(FunctionException e) {
+    final details = e.details;
+    if (details is! Map) {
+      return true;
+    }
+    final m = Map<String, dynamic>.from(details);
+    final code = m['error_code']?.toString();
+    if (code == 'user_id_mismatch') return false;
+    if (code == 'auth_get_user_failed') return false;
+    if (code == 'no_authorization_header') return false;
+    return true;
   }
 
   Future<void> _setPremiumIapLocalUnlocked(

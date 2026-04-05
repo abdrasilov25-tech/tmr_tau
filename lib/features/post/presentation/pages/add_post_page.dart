@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/services/geo_service.dart';
 import '../../domain/repositories/post_repository.dart';
@@ -591,7 +592,7 @@ class _AddPostPageState extends State<AddPostPage> {
         shadowColor: Colors.black.withValues(alpha: 0.06),
         leading: IconButton(
           icon: Icon(Icons.close_rounded, color: cs.onSurface),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeFeed(),
         ),
         title: Text(
           _pageTitle,

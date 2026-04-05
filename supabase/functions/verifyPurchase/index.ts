@@ -10,8 +10,15 @@ const corsHeaders: Record<string, string> = {
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) return json({ error: "No Authorization" }, 401);
+    const rawAuth =
+      req.headers.get("Authorization") ?? req.headers.get("authorization");
+    const authHeader = rawAuth?.trim() ?? "";
+    if (!authHeader) {
+      return json(
+        { error: "No Authorization", error_code: "no_authorization_header" },
+        401,
+      );
+    }
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -21,7 +28,17 @@ serve(async (req) => {
       global: { headers: { Authorization: authHeader } },
     });
     const { data: userData, error: userErr } = await userClient.auth.getUser();
-    if (userErr || !userData.user) return json({ error: "Unauthorized" }, 401);
+    if (userErr || !userData.user) {
+      const msg = userErr?.message ?? "no_user";
+      return json(
+        {
+          error: "Unauthorized",
+          error_code: "auth_get_user_failed",
+          auth_message: msg,
+        },
+        401,
+      );
+    }
     const user = userData.user;
 
     const body = await req.json();
@@ -32,7 +49,12 @@ serve(async (req) => {
     const platform = String(body.platform ?? "");
     const purchaseId = body.purchaseId == null ? null : String(body.purchaseId);
 
-    if (!userId || userId !== user.id) return json({ error: "Forbidden" }, 403);
+    if (!userId || userId !== user.id) {
+      return json(
+        { error: "Forbidden", error_code: "user_id_mismatch" },
+        403,
+      );
+    }
     if (!productId || !verificationData || !source || !platform) {
       return json({ error: "Invalid purchase payload" }, 400);
     }

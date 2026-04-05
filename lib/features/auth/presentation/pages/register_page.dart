@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
@@ -661,7 +662,7 @@ class _RegisterPageState extends State<RegisterPage>
       builder: (_, __) => FadeTransition(
         opacity: _panelFade,
         child: GestureDetector(
-          onTap: () => context.pop(),
+          onTap: () => context.popOrGo('/login'),
           child: RichText(
             textAlign: TextAlign.center,
             text: TextSpan(

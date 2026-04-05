@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -63,7 +64,7 @@ class _ReportPostPageState extends State<ReportPostPage> {
       child: BlocListener<PostReportFormCubit, PostReportFormState>(
         listener: (context, state) {
           if (state is PostReportFormSuccess) {
-            context.pop(true);
+            context.popOrGoHomeFeed(true);
           } else if (state is PostReportFormFailure) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(state.message)),
@@ -77,7 +78,7 @@ class _ReportPostPageState extends State<ReportPostPage> {
             elevation: 0,
             leading: IconButton(
               icon: const Icon(Icons.close),
-              onPressed: () => context.pop(),
+              onPressed: () => context.popOrGoHomeFeed(),
             ),
             title: const Text('Пожаловаться'),
             centerTitle: true,

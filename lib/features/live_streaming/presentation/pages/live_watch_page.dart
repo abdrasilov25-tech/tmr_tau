@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/config/agora_live_config.dart';
 import '../../../../core/utils/agora_uid.dart';
 import '../../data/agora_join_token.dart';
@@ -182,7 +182,7 @@ class _LiveWatchPageState extends State<LiveWatchPage> {
               ),
               const SizedBox(height: 16),
               FilledButton(
-                onPressed: () => context.pop(),
+                onPressed: () => context.popOrGoHomeFeed(),
                 child: const Text('Назад'),
               ),
             ],

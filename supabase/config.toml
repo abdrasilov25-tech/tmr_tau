@@ -8,8 +8,11 @@ enabled = true
 # По умолчанию JWT проверяется (пользователь должен быть залогинен).
 
 # Cloud Code функции валидации IAP.
+# Шлюз с verify_jwt=true иногда отвечает 401 Invalid JWT при валидной сессии Flutter
+# (несовпадение проекта/ключа, особенности токена). Доступ к покупке всё равно режется
+# внутри функции: Authorization + auth.getUser() и сверка userId.
 [functions.verifyPurchase]
-verify_jwt = true
+verify_jwt = false
 
 [functions.updateUserPremium]
 verify_jwt = true

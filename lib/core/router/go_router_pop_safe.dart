@@ -2,16 +2,26 @@ import 'package:flutter/widgets.dart';
 import 'package:go_router/go_router.dart';
 
 extension GoRouterPopSafeX on BuildContext {
-  /// Безопасный выход: [pop] только если есть куда; иначе [go] на главную ленту.
+  /// [pop] только если в стеке GoRouter есть куда вернуться; иначе [go] на [fallbackLocation].
   ///
-  /// Иначе [pop] при открытии через [go] (без записи в стеке) даёт
+  /// Иначе голый [pop] при открытии экрана через [go] даёт
   /// `GoError: There is nothing to pop`.
-  void popOrGoHomeFeed([Object? result]) {
+  void popOrGo(String fallbackLocation, [Object? result]) {
     if (!mounted) return;
     if (canPop()) {
       pop(result);
     } else {
-      go('/home/feed');
+      go(fallbackLocation);
     }
+  }
+
+  /// Безопасный выход на ленту (типичный fallback для модалок и сторис).
+  void popOrGoHomeFeed([Object? result]) {
+    popOrGo('/home/feed', result);
+  }
+
+  /// Вкладка «Чаты» в shell (DM / группы / канал открыты как top-level routes).
+  void popOrGoHomeChats([Object? result]) {
+    popOrGo('/home/chats', result);
   }
 }

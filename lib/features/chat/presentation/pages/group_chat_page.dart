@@ -14,6 +14,7 @@ import 'package:video_player/video_player.dart';
 import 'package:camera/camera.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/storage/chat_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -297,7 +298,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
     if (!mounted) return;
     if (left == true) {
-      context.pop();
+      context.popOrGoHomeChats();
       return;
     }
     await _loadGroupMeta();
@@ -611,7 +612,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
           title: Text(_groupTitle),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => context.pop(),
+            onPressed: () => context.popOrGoHomeChats(),
           ),
         ),
         body: _officialCity
@@ -702,7 +703,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeChats(),
         ),
       ),
       body: Column(

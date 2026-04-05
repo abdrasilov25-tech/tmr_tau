@@ -2,11 +2,11 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:video_player/video_player.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/post_entity.dart';
 import '../../domain/repositories/post_repository.dart';
@@ -289,7 +289,7 @@ class _EditPostPageState extends State<EditPostPage> {
         clearImage: clearImage,
         clearVideo: clearVideo,
       );
-      context.pop(updatedPost);
+      context.popOrGoHomeFeed(updatedPost);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Новость обновлена')),
       );
@@ -325,7 +325,7 @@ class _EditPostPageState extends State<EditPostPage> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeFeed(),
         ),
         title: const Text(
           'Редактировать новость',

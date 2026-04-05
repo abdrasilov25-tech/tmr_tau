@@ -4,11 +4,11 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/utils/kazakhstan_phone.dart';
 import '../../../../core/widgets/cached_product_image.dart';
@@ -470,7 +470,7 @@ class _EditProductPageState extends State<EditProductPage> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Товар обновлён')));
-      context.pop(out);
+      context.popOrGoHomeFeed(out);
     } catch (e, st) {
       if (!mounted) return;
       String message = 'Ошибка при сохранении';
@@ -498,7 +498,7 @@ class _EditProductPageState extends State<EditProductPage> {
         title: const Text('Редактировать товар'),
         leading: IconButton(
           icon: const Icon(Icons.close),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeFeed(),
         ),
       ),
       body: Form(

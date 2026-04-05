@@ -4,9 +4,9 @@ import 'dart:io';
 import 'package:agora_rtc_engine/agora_rtc_engine.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/config/agora_live_config.dart';
 import '../../../../core/permissions/agora_media_permissions.dart';
 import '../../data/agora_join_token.dart';
@@ -239,12 +239,12 @@ class _LiveBroadcastPageState extends State<LiveBroadcastPage>
       onPopInvokedWithResult: (didPop, result) async {
         if (didPop) return;
         if (!_inStream) {
-          if (context.mounted) context.pop();
+          if (context.mounted) context.popOrGoHomeFeed();
           return;
         }
         if (await _confirmEnd()) {
           await _shutdownFully();
-          if (context.mounted) context.pop();
+          if (context.mounted) context.popOrGoHomeFeed();
         }
       },
       child: Scaffold(
@@ -270,7 +270,7 @@ class _LiveBroadcastPageState extends State<LiveBroadcastPage>
                 onPressed: () async {
                   if (await _confirmEnd()) {
                     await _shutdownFully();
-                    if (context.mounted) context.pop();
+                    if (context.mounted) context.popOrGoHomeFeed();
                   }
                 },
                 child: const Text(

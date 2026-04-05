@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart' show ShareParams, SharePlus;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/storage/chat_list_storage.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../data/channel_owner_api.dart';
@@ -556,7 +556,7 @@ class _ChannelPageState extends State<ChannelPage> {
         title: Text(_displayTitle),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => context.pop(),
+          onPressed: () => context.popOrGoHomeChats(),
         ),
         actions: [
           IconButton(

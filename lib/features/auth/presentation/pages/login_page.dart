@@ -283,13 +283,17 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           void doNavigate() {
             if (!context.mounted) return;
             if (widget.addAccountMode) {
-              context.pop(LoginResult(
-                userId: state.user.id,
-                email: state.user.email,
-                name: state.user.name,
-                avatarUrl: state.user.avatarUrl,
-                password: password,
-              ));
+              if (context.canPop()) {
+                context.pop(LoginResult(
+                  userId: state.user.id,
+                  email: state.user.email,
+                  name: state.user.name,
+                  avatarUrl: state.user.avatarUrl,
+                  password: password,
+                ));
+              } else {
+                context.go('/home/feed');
+              }
             } else {
               context.go('/home/feed');
             }

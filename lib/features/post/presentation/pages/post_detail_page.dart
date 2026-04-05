@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:video_player/video_player.dart';
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/following/following_change_bus.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/media/global_video_audio_state.dart';
@@ -271,7 +272,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
     try {
       await widget.postRepository.deletePost(_post.id, authState.user.id);
       if (!mounted) return;
-      context.pop(true);
+      context.popOrGoHomeFeed(true);
     } catch (e) {
       if (mounted) {
         final msg = e is PostgrestException ? e.message : e.toString();
@@ -366,7 +367,9 @@ class _PostDetailPageState extends State<PostDetailPage> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: () => context.pop()),
+        leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.popOrGoHomeFeed()),
         title: const Text('Новость', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 18)),
         centerTitle: true,
         actions: isOwner

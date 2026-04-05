@@ -702,34 +702,7 @@ class _MainShell extends StatefulWidget {
   State<_MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends State<_MainShell>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _branchAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _branchAnim = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 280),
-    )..value = 1;
-  }
-
-  @override
-  void didUpdateWidget(covariant _MainShell oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.navigationShell.currentIndex !=
-        widget.navigationShell.currentIndex) {
-      _branchAnim.forward(from: 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _branchAnim.dispose();
-    super.dispose();
-  }
-
+class _MainShellState extends State<_MainShell> {
   @override
   Widget build(BuildContext context) {
     final themeNotifier = context.read<ThemeIndexNotifier>();
@@ -749,26 +722,14 @@ class _MainShellState extends State<_MainShell>
         final chatsBadge = chatUnread.badgeShortLabel;
         final publicationsBadge = notificationTabs.publicationsBadgeLabel;
         final newsBadge = notificationTabs.newsBadgeLabel;
-        final fade = CurvedAnimation(
-          parent: _branchAnim,
-          curve: Curves.easeOutCubic,
-        );
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: Stack(
             fit: StackFit.expand,
             children: [
               Container(decoration: decoration),
-              FadeTransition(
-                opacity: fade,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.012),
-                    end: Offset.zero,
-                  ).animate(fade),
-                  child: widget.navigationShell,
-                ),
-              ),
+              // Переключение вкладок только по тапу в NavigationBar — без анимации смены ветки.
+              widget.navigationShell,
             ],
           ),
           bottomNavigationBar: Container(

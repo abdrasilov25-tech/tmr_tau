@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
-
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../domain/repositories/settings_repository.dart';
 
@@ -40,7 +39,7 @@ class _DeleteAccountPageState extends State<DeleteAccountPage> {
           ),
         ),
       );
-      context.pop();
+      context.popOrGoHomeFeed();
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(

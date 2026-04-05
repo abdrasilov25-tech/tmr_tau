@@ -70,6 +70,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
   String _myStoryNote = '';
   StreamSubscription<String>? _deletedProductSub;
   supa.RealtimeChannel? _totalLikesChannel;
+  late final PageController _profileTabPageController;
+  /// Публикации/сетки ещё подгружаются после быстрого показа шапки профиля.
+  bool _isFetchingPosts = false;
 
   @override
   void initState() {
@@ -78,6 +81,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
     if (initialTab > 4) initialTab = 4;
     if (initialTab < 0) initialTab = 0;
     _tabIndex = initialTab;
+    _profileTabPageController = PageController(initialPage: _tabIndex);
     final authState = context.read<AuthBloc>().state;
     final uid = authState is AuthAuthenticated ? authState.user.id : null;
     final cache = _warmCache;
@@ -112,6 +116,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
 
   @override
   void dispose() {
+    _profileTabPageController.dispose();
     _deletedProductSub?.cancel();
     unawaited(_detachTotalLikesChannel());
     super.dispose();
@@ -323,62 +328,15 @@ class _MyProfilePageState extends State<MyProfilePage> {
       final profileFuture = repo
           .getSellerProfile(uid)
           .timeout(const Duration(seconds: 10));
-      final postsFuture = postRepo
-          .getPostsByUser(uid, currentUserId: uid)
-          .timeout(const Duration(seconds: 12));
-      final primary = await Future.wait<Object?>([
+
+      final head = await Future.wait<Object?>([
         verifiedFuture,
         profileFuture,
-        postsFuture,
       ]);
       if (!mounted || requestId != _loadRequestId) return;
-      final verifiedFlag = primary[0]! as bool;
-      final profile = primary[1] as SellerProfileEntity?;
-      final posts = primary[2]! as List<PostEntity>;
-      final newsPosts = posts
-          .where(
-            (p) => p.kind.trim().toLowerCase() == 'news' && !_isVideoPost(p),
-          )
-          .toList(growable: false);
-      var publicationPosts = posts
-          .where(
-            (p) =>
-                p.kind.trim().toLowerCase() == 'publication' &&
-                !_isVideoPost(p),
-          )
-          .toList(growable: false);
-      final videoPosts = posts.where(_isVideoPost).toList(growable: false);
-      final publicationPostsEmpty = publicationPosts.isEmpty;
-      final publicationsFallbackFuture = publicationPostsEmpty
-          ? postRepo
-              .searchPublicationsByCursor(
-                query: '',
-                limit: 100,
-                currentUserId: uid,
-              )
-              .timeout(const Duration(seconds: 12))
-              .then(
-                (feed) => feed
-                    .where((p) => p.userId == uid && !_isVideoPost(p))
-                    .toList(growable: false),
-              )
-          : Future<List<PostEntity>>.value(const <PostEntity>[]);
-      final secondary = await Future.wait<Object?>([
-        repo.getFollowingUsers(uid).timeout(const Duration(seconds: 10)),
-        _loadMyStoryNote(uid),
-        publicationsFallbackFuture,
-      ]);
-      if (!mounted || requestId != _loadRequestId) return;
-      final followingCount =
-          (secondary[0]! as List<SellerProfileEntity>).length;
-      final myStoryNote = secondary[1]! as String;
-      if (publicationPostsEmpty) {
-        publicationPosts = secondary[2]! as List<PostEntity>;
-      }
-      await _loadProfileStories(
-        uid,
-        showLoading: false,
-      ).timeout(const Duration(seconds: 12));
+      final verifiedFlag = head[0]! as bool;
+      final profile = head[1] as SellerProfileEntity?;
+
       if (mounted && requestId == _loadRequestId) {
         setState(() {
           _profile = profile == null
@@ -389,7 +347,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   avatarUrl: profile.avatarUrl,
                   bio: profile.bio,
                   followersCount: profile.followersCount,
-                  followingCount: followingCount,
+                  followingCount: profile.followingCount,
                   isFollowingByMe: profile.isFollowingByMe,
                   products: profile.products,
                   isVerified: profile.isVerified,
@@ -400,25 +358,123 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   officialPageActive: profile.officialPageActive,
                 );
           _selfVerified = (profile?.isVerified ?? false) || verifiedFlag;
+          _loading = false;
+        });
+        unawaited(_attachTotalLikesChannel(uid));
+      }
+
+      if (mounted && requestId == _loadRequestId) {
+        setState(() => _isFetchingPosts = true);
+      }
+
+      final postsFuture = postRepo
+          .getPostsByUser(uid, currentUserId: uid)
+          .timeout(const Duration(seconds: 12));
+      final followingFuture =
+          repo.getFollowingUsers(uid).timeout(const Duration(seconds: 10));
+      final noteFuture = _loadMyStoryNote(uid);
+
+      final bundle = await Future.wait<Object?>([
+        postsFuture,
+        followingFuture,
+        noteFuture,
+      ]);
+      if (!mounted || requestId != _loadRequestId) return;
+      final posts = bundle[0]! as List<PostEntity>;
+      final followingCount =
+          (bundle[1]! as List<SellerProfileEntity>).length;
+      final myStoryNote = bundle[2]! as String;
+
+      final newsPosts = posts
+          .where(
+            (p) => p.kind.trim().toLowerCase() == 'news' && !_isVideoPost(p),
+          )
+          .toList(growable: false);
+      final publicationPosts = posts
+          .where(
+            (p) =>
+                p.kind.trim().toLowerCase() == 'publication' &&
+                !_isVideoPost(p),
+          )
+          .toList(growable: false);
+      final videoPosts = posts.where(_isVideoPost).toList(growable: false);
+
+      if (mounted && requestId == _loadRequestId) {
+        setState(() {
+          _profile = _profile == null
+              ? null
+              : SellerProfileEntity(
+                  id: _profile!.id,
+                  name: _profile!.name,
+                  avatarUrl: _profile!.avatarUrl,
+                  bio: _profile!.bio,
+                  followersCount: _profile!.followersCount,
+                  followingCount: followingCount,
+                  isFollowingByMe: _profile!.isFollowingByMe,
+                  products: _profile!.products,
+                  isVerified: _profile!.isVerified,
+                  instagramUrl: _profile!.instagramUrl,
+                  telegramUsername: _profile!.telegramUsername,
+                  websiteUrl: _profile!.websiteUrl,
+                  totalReceivedPostLikes: _profile!.totalReceivedPostLikes,
+                  officialPageActive: _profile!.officialPageActive,
+                );
           _newsPosts = newsPosts;
           _publicationPosts = publicationPosts;
           _videoPosts = videoPosts;
           _myStoryNote = myStoryNote;
-          _loading = false;
+          _isFetchingPosts = false;
           if (publicationPosts.isNotEmpty) {
             _autoReloadTriggeredForPublications = false;
           }
         });
         _storeWarmCache(uid);
-        unawaited(_attachTotalLikesChannel(uid));
+      }
+
+      unawaited(_loadProfileStories(uid, showLoading: false));
+
+      if (publicationPosts.isEmpty) {
+        unawaited(_backfillPublicationsFromSearch(uid, requestId));
       }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _isFetchingPosts = false;
+        });
+      }
     } finally {
       if (requestId == _loadRequestId) {
         _isLoadingProfileData = false;
       }
     }
+  }
+
+  /// Тяжёлый fallback из ленты публикаций — только в фоне, не блокирует первый кадр.
+  Future<void> _backfillPublicationsFromSearch(
+    String uid,
+    int requestId,
+  ) async {
+    try {
+      final postRepo = context.read<PostRepository>();
+      final feed = await postRepo
+          .searchPublicationsByCursor(
+            query: '',
+            limit: 100,
+            currentUserId: uid,
+          )
+          .timeout(const Duration(seconds: 12));
+      if (!mounted || requestId != _loadRequestId) return;
+      final mine = feed
+          .where((p) => p.userId == uid && !_isVideoPost(p))
+          .toList(growable: false);
+      if (mine.isEmpty) return;
+      setState(() {
+        _publicationPosts = mine;
+        _autoReloadTriggeredForPublications = false;
+      });
+      _storeWarmCache(uid);
+    } catch (_) {}
   }
 
   Future<void> _openBioEditor() async {
@@ -895,7 +951,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 ),
               );
             }
-            if (_loading) {
+            if (_loading && _profile == null && !_isFetchingPosts) {
               return const Center(child: CircularProgressIndicator());
             }
             final ownGroup = _storyGroups.cast<StoryGroupEntity?>().firstWhere(
@@ -933,7 +989,17 @@ class _MyProfilePageState extends State<MyProfilePage> {
               videoPosts: visibleVideoPosts,
               privatePosts: privatePosts,
               tabIndex: _tabIndex,
-              onTabChanged: (i) => setState(() => _tabIndex = i),
+              tabPageController: _profileTabPageController,
+              onProfileTabSwipe: (i) {
+                if (_tabIndex != i) setState(() => _tabIndex = i);
+              },
+              onTabChipTap: (i) {
+                setState(() => _tabIndex = i);
+                if (_profileTabPageController.hasClients) {
+                  _profileTabPageController.jumpToPage(i);
+                }
+              },
+              showPostsProgress: _isFetchingPosts,
               onRefresh: _load,
               onAddTap: _showAddChoice,
               onOpenAccountSwitcher: () => _showAccountSwitcher(context, user),
@@ -1008,6 +1074,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
         if (hasVideo) {
           _videoPosts = [result, ..._videoPosts];
           _tabIndex = 3;
+          if (_profileTabPageController.hasClients) {
+            _profileTabPageController.jumpToPage(3);
+          }
         } else {
           _publicationPosts = [result, ..._publicationPosts];
         }
@@ -1471,7 +1540,10 @@ class _ProfileContent extends StatelessWidget {
     required this.videoPosts,
     required this.privatePosts,
     required this.tabIndex,
-    required this.onTabChanged,
+    required this.tabPageController,
+    required this.onProfileTabSwipe,
+    required this.onTabChipTap,
+    required this.showPostsProgress,
     required this.onRefresh,
     required this.onAddTap,
     required this.onOpenAccountSwitcher,
@@ -1498,7 +1570,10 @@ class _ProfileContent extends StatelessWidget {
   final List<PostEntity> videoPosts;
   final List<PostEntity> privatePosts;
   final int tabIndex;
-  final ValueChanged<int> onTabChanged;
+  final PageController tabPageController;
+  final ValueChanged<int> onProfileTabSwipe;
+  final ValueChanged<int> onTabChipTap;
+  final bool showPostsProgress;
   final VoidCallback onRefresh;
   final VoidCallback onAddTap;
   final VoidCallback onOpenAccountSwitcher;
@@ -2103,40 +2178,56 @@ class _ProfileContent extends StatelessWidget {
                         padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
                         child: _ProfileTabBar(
                           tabIndex: tabIndex,
-                          onChanged: onTabChanged,
+                          onChanged: onTabChipTap,
                         ),
                       ),
+                      if (showPostsProgress)
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(14, 0, 14, 6),
+                          child: LinearProgressIndicator(minHeight: 2),
+                        ),
                       ColoredBox(
                         color: const Color(0xFFF2F3F7),
                         child: SizedBox(
-                          height: 400,
-                          child: tabIndex == 0
-                              ? _ProductsGrid(products: profile?.products ?? [])
-                              : tabIndex == 1
-                              ? _PostsGrid(
+                          height: (MediaQuery.sizeOf(context).height - 260)
+                              .clamp(320.0, 560.0),
+                          child: PageView(
+                            controller: tabPageController,
+                            onPageChanged: onProfileTabSwipe,
+                            children: [
+                              SingleChildScrollView(
+                                child: _ProductsGrid(
+                                    products: profile?.products ?? []),
+                              ),
+                              SingleChildScrollView(
+                                child: _PostsGrid(
                                   posts: newsPosts,
                                   emptyTitle: 'Нет публикаций',
                                   emptyActionLabel: 'Создать публикацию',
                                   onEmptyAction: onCreateNews,
                                   onHidePost: onHidePost,
-                                )
-                              : tabIndex == 2
-                              ? _PostsGrid(
+                                ),
+                              ),
+                              SingleChildScrollView(
+                                child: _PostsGrid(
                                   posts: publicationPosts,
                                   emptyTitle: 'Нет публикаций',
                                   emptyActionLabel: 'Создать публикацию',
                                   onEmptyAction: onCreatePublication,
                                   onHidePost: onHidePost,
-                                )
-                              : tabIndex == 3
-                              ? _PostsGrid(
+                                ),
+                              ),
+                              SingleChildScrollView(
+                                child: _PostsGrid(
                                   posts: videoPosts,
                                   emptyTitle: 'Нет видео',
                                   emptyActionLabel: 'Создать видео',
                                   onEmptyAction: onCreateVideo,
                                   onHidePost: onHidePost,
-                                )
-                              : _PostsGrid(
+                                ),
+                              ),
+                              SingleChildScrollView(
+                                child: _PostsGrid(
                                   posts: privatePosts,
                                   emptyTitle: 'Нет приватных публикаций',
                                   emptyActionLabel: 'Создать публикацию',
@@ -2144,6 +2235,9 @@ class _ProfileContent extends StatelessWidget {
                                   onHidePost: onUnhidePost,
                                   hideActionLabel: 'Вернуть в профиль',
                                 ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:go_router/go_router.dart';
-
+import '../../../../core/router/go_router_pop_safe.dart';
 import '../../data/services/payment_service.dart';
 
 /// Покупка IAP Premium для расширенных радиусов в новостях «Рядом».
@@ -108,7 +107,7 @@ class _PremiumPurchasePageState extends State<PremiumPurchasePage> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Premium активирован')),
         );
-        context.pop(true);
+        context.popOrGoHomeFeed(true);
       case PaymentResultStatus.cancelled:
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
