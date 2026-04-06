@@ -8,7 +8,6 @@ import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_author_follow_pill.dart';
 import '../../../post/presentation/widgets/post_feed_overflow_menu.dart';
 import '../pages/post_detail_modal.dart';
-import '../pages/video_feed_screen.dart';
 import 'user_avatar_tap.dart';
 
 /// Instagram-стиль карточка публикации для ленты.
@@ -17,7 +16,7 @@ import 'user_avatar_tap.dart';
 /// ```dart
 /// PublicationFeedPostItem(
 ///   post: post,
-///   allVideoPosts: videoPosts, // для VideoFeedScreen
+///   allPosts: posts,
 ///   postRepository: repository,
 ///   currentUserId: userId,
 ///   onLike: () { ... },
@@ -65,28 +64,6 @@ class PublicationFeedPostItem extends StatelessWidget {
     );
   }
 
-  void _openVideoFeed(BuildContext context) {
-    // Передаём только видео-посты, начинаем с текущего
-    final videoPosts = allPosts.where((p) => p.videoUrl != null).toList();
-    if (videoPosts.isEmpty) return;
-
-    Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        pageBuilder: (_, unused, unused2) => VideoFeedScreen(
-          initialPost: post,
-          allPosts: videoPosts,
-          postRepository: postRepository,
-          currentUserId: currentUserId,
-        ),
-        transitionsBuilder: (_, animation, unused, child) => FadeTransition(
-          opacity: animation,
-          child: child,
-        ),
-        transitionDuration: const Duration(milliseconds: 250),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return RepaintBoundary(
@@ -108,8 +85,9 @@ class PublicationFeedPostItem extends StatelessWidget {
           // ── Медиа (фото галерея или видео превью) ───────────
           _PostMedia(
             post: post,
+            // Видео-публикации смотрят в Reels; в ленте — детальный просмотр.
             onTap: post.videoUrl != null
-                ? () => _openVideoFeed(context)
+                ? () => _openDetail(context)
                 : null,
             onDoubleTap: onLike,
           ),

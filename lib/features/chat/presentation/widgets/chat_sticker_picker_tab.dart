@@ -65,20 +65,20 @@ class _ChatStickerPickerTabState extends State<ChatStickerPickerTab> {
             ),
           ),
           SizedBox(
-            height: 76,
+            height: 56,
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               scrollDirection: Axis.horizontal,
               itemCount: favorites.length,
               separatorBuilder: (context, index) =>
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
               itemBuilder: (context, i) {
                 final token = favorites[i];
                 final payload = _parseFavorite(token);
                 if (payload == null) return const SizedBox.shrink();
                 return Material(
                   color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     onTap: () {
                       if (_isEmojiEntry(token)) {
@@ -88,21 +88,21 @@ class _ChatStickerPickerTabState extends State<ChatStickerPickerTab> {
                       }
                     },
                     onLongPress: () => fav.removeToken(token),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(10),
                     child: SizedBox(
-                      width: 72,
-                      height: 72,
+                      width: 52,
+                      height: 52,
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
                           Positioned.fill(
                             child: Padding(
-                              padding: const EdgeInsets.all(6),
+                              padding: const EdgeInsets.all(4),
                               child: _isEmojiEntry(token)
                                   ? Center(
                                       child: Text(
                                         payload,
-                                        style: const TextStyle(fontSize: 44),
+                                        style: const TextStyle(fontSize: 30),
                                       ),
                                     )
                                   : ClipRRect(
@@ -202,10 +202,10 @@ class _ChatStickerPickerTabState extends State<ChatStickerPickerTab> {
         ),
         Expanded(
           child: GridView.builder(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(6),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 4,
-              childAspectRatio: 0.92,
+              crossAxisCount: 5,
+              childAspectRatio: 1.0,
             ),
             itemCount: kStickerEmojiPacks[_categoryIndex].length,
             itemBuilder: (_, i) {
@@ -216,14 +216,14 @@ class _ChatStickerPickerTabState extends State<ChatStickerPickerTab> {
                 color: Colors.transparent,
                 child: InkWell(
                   onTap: () => widget.onEmojiSticker(emoji),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(10),
                   child: Stack(
                     clipBehavior: Clip.none,
                     children: [
                       Center(
                         child: Text(
                           emoji,
-                          style: const TextStyle(fontSize: 52),
+                          style: const TextStyle(fontSize: 34),
                         ),
                       ),
                       Positioned(
@@ -232,10 +232,10 @@ class _ChatStickerPickerTabState extends State<ChatStickerPickerTab> {
                         child: IconButton(
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(
-                            minWidth: 32,
-                            minHeight: 32,
+                            minWidth: 22,
+                            minHeight: 22,
                           ),
-                          iconSize: 20,
+                          iconSize: 14,
                           onPressed: () => fav.toggleToken(token),
                           icon: Icon(
                             isFav ? Icons.star_rounded : Icons.star_outline_rounded,

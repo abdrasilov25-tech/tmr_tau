@@ -1485,6 +1485,37 @@ $$;
 
 grant execute on function public.increment_publication_feed_impression(uuid, int, boolean) to authenticated;
 
+-- Reels: порядок видео-публикаций по сессии (см. migrations/20260406210000_reels_video_post_ids.sql).
+create or replace function public.reels_video_post_ids(
+  p_limit integer,
+  p_offset integer,
+  p_session_key text
+)
+returns uuid[]
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select coalesce(
+    array(
+      select p.id
+      from public.posts p
+      where p.kind = 'publication'
+        and p.video_url is not null
+        and btrim(p.video_url) <> ''
+      order by md5(
+        p.id::text || coalesce(nullif(trim(p_session_key), ''), 'tmr-reels-default')
+      )
+      limit greatest(1, least(coalesce(p_limit, 20), 50))
+      offset greatest(0, coalesce(p_offset, 0))
+    ),
+    '{}'::uuid[]
+  );
+$$;
+
+grant execute on function public.reels_video_post_ids(integer, integer, text) to anon, authenticated;
+
 -- ============== Личные сообщения (direct messages) ==============
 -- Базовая таблица и RLS: migrations/20250314000000_messages_rls_delete.sql
 -- Расширения: migrations/20260403190000_dm_read_receipts_presence_reactions.sql

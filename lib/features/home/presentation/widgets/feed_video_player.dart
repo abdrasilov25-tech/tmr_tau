@@ -201,7 +201,6 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
               showControls: widget.showControls,
               showPlayIcon: _showPlayIcon,
               isPlaying: c.value.isPlaying,
-              isMuted: _audioState.isMuted.value,
               onMuteTap: _toggleMute,
             )
           : AspectRatio(
@@ -278,7 +277,6 @@ class _CoverFullscreenVideo extends StatelessWidget {
     required this.showControls,
     required this.showPlayIcon,
     required this.isPlaying,
-    required this.isMuted,
     required this.onMuteTap,
   });
 
@@ -286,7 +284,6 @@ class _CoverFullscreenVideo extends StatelessWidget {
   final bool showControls;
   final bool showPlayIcon;
   final bool isPlaying;
-  final bool isMuted;
   final VoidCallback onMuteTap;
 
   @override
@@ -294,6 +291,7 @@ class _CoverFullscreenVideo extends StatelessWidget {
     final sz = controller.value.size;
     final w = sz.width;
     final h = sz.height;
+    final pad = MediaQuery.paddingOf(context);
 
     return SizedBox.expand(
       child: Stack(
@@ -346,22 +344,37 @@ class _CoverFullscreenVideo extends StatelessWidget {
               ),
             ),
           Positioned(
-            bottom: 12,
-            right: 12,
-            child: GestureDetector(
-              onTap: onMuteTap,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.black38,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-              ),
+            top: pad.top + 6,
+            right: 10,
+            child: ValueListenableBuilder<bool>(
+              valueListenable: GlobalVideoAudioState.instance.isMuted,
+              builder: (context, muted, _) {
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onMuteTap,
+                    customBorder: const CircleBorder(),
+                    child: Ink(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.35),
+                        ),
+                      ),
+                      child: Icon(
+                        muted
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],

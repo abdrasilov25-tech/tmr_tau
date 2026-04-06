@@ -17,11 +17,17 @@ class PostRepositoryImpl implements PostRepository {
 
   static const String _postSelect = '*, users!user_id(name, avatar, official_page_active)';
 
+  static bool _hasPublicationVideo(PostEntity p) {
+    final v = p.videoUrl;
+    return v != null && v.trim().isNotEmpty;
+  }
+
   @override
   Future<List<PostEntity>> getFeedPosts({
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    bool excludeVideoPublications = false,
   }) async {
     var res = await _client
         .from(SupabaseConstants.postsTable)
@@ -40,7 +46,68 @@ class PostRepositoryImpl implements PostRepository {
           .map((e) => _mapPost(e as Map<String, dynamic>))
           .toList();
     }
+    if (excludeVideoPublications) {
+      list = list.where((p) => !_hasPublicationVideo(p)).toList();
+    }
     return await _applyPostUserState(list, currentUserId);
+  }
+
+  static List<String> _parseUuidArray(dynamic raw) {
+    if (raw == null) return [];
+    if (raw is List) {
+      return raw.map((e) => e.toString()).where((s) => s.isNotEmpty).toList();
+    }
+    return [];
+  }
+
+  @override
+  Future<List<PostEntity>> getReelsVideoPosts({
+    required String sessionKey,
+    int limit = 15,
+    int offset = 0,
+    String? currentUserId,
+  }) async {
+    final safeLimit = limit.clamp(1, 50);
+    final safeOffset = offset < 0 ? 0 : offset;
+    List<String> orderedIds = [];
+    try {
+      final raw = await _client.rpc<dynamic>(
+        'reels_video_post_ids',
+        params: {
+          'p_limit': safeLimit,
+          'p_offset': safeOffset,
+          'p_session_key': sessionKey,
+        },
+      );
+      orderedIds = _parseUuidArray(raw);
+    } catch (e) {
+      debugPrint('getReelsVideoPosts reels_video_post_ids: $e');
+      final res = await _client
+          .from(SupabaseConstants.postsTable)
+          .select('id')
+          .eq('kind', 'publication')
+          .not('video_url', 'is', null)
+          .neq('video_url', '')
+          .order('created_at', ascending: false)
+          .range(safeOffset, safeOffset + safeLimit - 1);
+      orderedIds = (res as List)
+          .map((e) => (e as Map)['id'].toString())
+          .toList(growable: false);
+    }
+    if (orderedIds.isEmpty) return [];
+
+    final res = await _client
+        .from(SupabaseConstants.postsTable)
+        .select(_postSelect)
+        .inFilter('id', orderedIds);
+    final rows = (res as List)
+        .map((e) => _mapPost(e as Map<String, dynamic>))
+        .toList(growable: false);
+    final byId = {for (final p in rows) p.id: p};
+    final ordered =
+        orderedIds.map((id) => byId[id]).whereType<PostEntity>().toList();
+    if (ordered.isEmpty) return [];
+    return _applyPostUserState(ordered, currentUserId);
   }
 
   Future<List<PostEntity>> _applyPostUserState(
@@ -160,6 +227,7 @@ class PostRepositoryImpl implements PostRepository {
         .range(fetchFrom, fetchTo);
     final rawList = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
+        .where((p) => !_hasPublicationVideo(p))
         .toList(growable: false);
     List<PostEntity> list;
     if (me != null) {
@@ -227,6 +295,7 @@ class PostRepositoryImpl implements PostRepository {
         break;
       }
       for (final p in batch) {
+        if (_hasPublicationVideo(p)) continue;
         if (me != null && p.userId == me) {
           addUniqueTo(relaxSelfPool, p);
           continue;
@@ -1131,11 +1200,12 @@ class PostRepositoryImpl implements PostRepository {
         .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('kind', 'publication')
         .inFilter('id', postIds);
-    final list = (res as List)
+    var list = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
         .toList(growable: false);
     final order = {for (var i = 0; i < postIds.length; i++) postIds[i]: i};
     list.sort((a, b) => (order[a.id] ?? 1 << 20).compareTo(order[b.id] ?? 1 << 20));
+    list = list.where((p) => !_hasPublicationVideo(p)).toList();
 
     return _applyPostUserState(list, userId);
   }
@@ -1163,11 +1233,12 @@ class PostRepositoryImpl implements PostRepository {
         .select('*, users!user_id(name, avatar, official_page_active)')
         .eq('kind', 'publication')
         .inFilter('id', postIds);
-    final list = (res as List)
+    var list = (res as List)
         .map((e) => _mapPost(e as Map<String, dynamic>))
         .toList(growable: false);
     final order = {for (var i = 0; i < postIds.length; i++) postIds[i]: i};
     list.sort((a, b) => (order[a.id] ?? 1 << 20).compareTo(order[b.id] ?? 1 << 20));
+    list = list.where((p) => !_hasPublicationVideo(p)).toList();
 
     return _applyPostUserState(list, userId);
   }
@@ -1323,9 +1394,12 @@ class PostRepositoryImpl implements PostRepository {
           .order('created_at', ascending: false)
           .limit(limit);
 
-      final list = (res as List)
+      var list = (res as List)
           .map((e) => _mapPost(e as Map<String, dynamic>))
           .toList(growable: false);
+      if (!videoPublicationsOnly) {
+        list = list.where((p) => !_hasPublicationVideo(p)).toList();
+      }
       if (currentUserId == null || list.isEmpty) return list;
       return await _applyPostUserState(list, currentUserId);
     } catch (e) {

@@ -7,6 +7,17 @@ abstract class PostRepository {
     int limit = 20,
     int offset = 0,
     String? currentUserId,
+    /// Исключить публикации с видео (видео только в Reels).
+    bool excludeVideoPublications = false,
+  });
+
+  /// Все видео-публикации в «случайном» порядке (стабильном в рамках [sessionKey]).
+  /// В выборке только [kind] = publication с непустым video_url; удалённые посты отсутствуют в БД.
+  Future<List<PostEntity>> getReelsVideoPosts({
+    required String sessionKey,
+    int limit = 15,
+    int offset = 0,
+    String? currentUserId,
   });
 
   /// Только публикации от авторов из [followingUserIds] (вкладка «Подписки»).

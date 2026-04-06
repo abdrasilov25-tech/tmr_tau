@@ -174,6 +174,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
         limit: _pageSize,
         offset: nextOffset,
         currentUserId: _currentUserId,
+        excludeVideoPublications: true,
       );
       final pubs = batch
           .where((p) => p.kind.trim().toLowerCase() == 'publication')

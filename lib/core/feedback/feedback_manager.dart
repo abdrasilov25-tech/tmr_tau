@@ -72,6 +72,13 @@ class FeedbackManager {
     await _playAsset('sounds/message_received.wav');
   }
 
+  /// Soft double-tick sound when the peer reads our outgoing message.
+  /// Green ticks appear — this sound confirms the read receipt.
+  Future<void> messageRead() async {
+    await _haptic(() => HapticFeedback.selectionClick());
+    await _playAsset('sounds/success.wav');
+  }
+
   /// Short ping when new activity lands in the in-app notifications list or peek bar.
   Future<void> notificationActivity() async {
     await _haptic(() => HapticFeedback.lightImpact());

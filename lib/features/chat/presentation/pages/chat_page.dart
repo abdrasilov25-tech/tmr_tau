@@ -80,6 +80,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   int _lastMessageCount = 0;
   String? _lastLatestMessageId;
   bool _forceScrollToLatest = false;
+  /// ID сообщений, для которых мы уже знаем что read_at != null.
+  /// Используется для детекта перехода «отправлено → прочитано» и звука.
+  final Set<String> _knownReadIds = {};
   bool _selectionMode = false;
   final Set<String> _selectedMessageIds = <String>{};
   List<Map<String, dynamic>> _latestDialogMessages = const [];
@@ -2484,6 +2487,22 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             );
                           }
                         }
+                        // Read-receipt sound: когда собеседник впервые прочитал
+                        // одно из наших отправленных сообщений (read_at становится != null).
+                        for (final msg in messages) {
+                          final sid = msg['sender_id'] as String?;
+                          if (sid != me) continue;
+                          final id = (msg['id'] ?? '').toString();
+                          if (id.isEmpty) continue;
+                          final readAt = msg['read_at'];
+                          if (readAt != null && !_knownReadIds.contains(id)) {
+                            _knownReadIds.add(id);
+                            if (_didInitialAutoScroll) {
+                              // только после первичной загрузки, чтобы не было звука на открытии
+                              unawaited(FeedbackManager.instance.messageRead());
+                            }
+                          }
+                        }
                         if (_forceScrollToLatest) {
                           _forceScrollToLatest = false;
                           if (_showNewMessagesHint) {
@@ -4175,6 +4194,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   }
 }
 
+/// WhatsApp-style read receipt ticks:
+/// 🔴 две красные галочки — отправлено, не прочитано
+/// 🟢 две зелёные галочки — прочитано
 class _ReadReceiptTicks extends StatelessWidget {
   const _ReadReceiptTicks({
     required this.readAt,
@@ -4187,26 +4209,26 @@ class _ReadReceiptTicks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final read = readAt != null;
-    final unreadColor = outgoingOnPrimary
-        ? Colors.white.withValues(alpha: 0.72)
-        : Colors.black45;
-    const readColor = Color(0xFF53BDEB);
-    final color = read ? readColor : unreadColor;
+    // Красные = отправлено но не прочитано, зелёные = прочитано
+    final color = read
+        ? const Color(0xFF22C55E) // зелёный — прочитано
+        : const Color(0xFFEF4444); // красный — не прочитано
+
     return SizedBox(
-      width: 30,
-      height: 18,
+      width: 26,
+      height: 16,
       child: Stack(
         clipBehavior: Clip.none,
         children: [
           Positioned(
             left: 0,
-            top: 1,
-            child: Icon(Icons.done, size: 14, color: color),
+            top: 0,
+            child: Icon(Icons.done_rounded, size: 15, color: color),
           ),
           Positioned(
             left: 8,
-            top: 1,
-            child: Icon(Icons.done, size: 14, color: color),
+            top: 0,
+            child: Icon(Icons.done_rounded, size: 15, color: color),
           ),
         ],
       ),
@@ -5260,9 +5282,10 @@ class _StickerMessageBubble extends StatelessWidget {
             bottomLeft: Radius.circular(4),
             bottomRight: radius,
           );
+    // Нормальный размер стикера — ~1/3 ширины экрана, максимум 130px
     final maxSide = math.min(
-      MediaQuery.sizeOf(context).width * 0.52,
-      280.0,
+      MediaQuery.sizeOf(context).width * 0.34,
+      130.0,
     );
     final url = imageUrl.trim();
 
@@ -5305,7 +5328,7 @@ class _StickerMessageBubble extends StatelessWidget {
           emoji,
           textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: math.min(maxSide * 0.55, 132),
+            fontSize: math.min(maxSide * 0.65, 72),
             height: 1.05,
           ),
         );

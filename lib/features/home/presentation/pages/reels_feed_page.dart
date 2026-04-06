@@ -1,17 +1,23 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:tmr_tau/core/following/following_change_bus.dart';
 import 'package:tmr_tau/core/formatting/compact_count_format.dart';
+import 'package:tmr_tau/core/widgets/cached_avatar.dart';
 
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
+import '../../../profile/domain/repositories/profile_repository.dart';
 import '../widgets/feed_video_player.dart';
+import '../widgets/reels_comments_sheet.dart';
 import '../widgets/user_avatar_tap.dart';
-import '../widgets/vertical_snap_page_scroll_physics.dart';
 
-/// Встроенная вкладка Reels — вертикальный бесконечный видео-фид в стиле Instagram.
-/// Используется как первая вкладка в [MainHomePage].
+/// Вкладка Reels: только видео-публикации, вертикальный свайп по одному ролику,
+/// порядок «случайный» в рамках сессии, просмотр фиксируется после ~1.5 с на ролике.
 class ReelsFeedPage extends StatefulWidget {
   const ReelsFeedPage({super.key});
 
@@ -21,8 +27,8 @@ class ReelsFeedPage extends StatefulWidget {
 
 class _ReelsFeedPageState extends State<ReelsFeedPage>
     with AutomaticKeepAliveClientMixin {
-  static const int _pageSize = 10;
-  static const int _loadThreshold = 3;
+  static const int _pageSize = 15;
+  static const int _loadThreshold = 4;
 
   late final PageController _pageController;
   final List<PostEntity> _posts = [];
@@ -30,8 +36,11 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   bool _loading = true;
   bool _loadingMore = false;
   bool _hasMore = true;
+  int _apiOffset = 0;
+  late String _sessionKey;
 
   String? _currentUserId;
+  Timer? _viewDwellTimer;
 
   @override
   bool get wantKeepAlive => true;
@@ -39,6 +48,8 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   @override
   void initState() {
     super.initState();
+    _sessionKey =
+        '${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1 << 30)}';
     _pageController = PageController();
     final authState = context.read<AuthBloc>().state;
     _currentUserId =
@@ -48,30 +59,48 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
 
   @override
   void dispose() {
+    _viewDwellTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
 
+  void _newSessionAndReload() {
+    _sessionKey =
+        '${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1 << 30)}';
+    _loadInitial();
+  }
+
   Future<void> _loadInitial() async {
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _apiOffset = 0;
+      _hasMore = true;
+    });
     try {
       final repo = context.read<PostRepository>();
-      final raw = await repo.getFeedPosts(
+      final list = await repo.getReelsVideoPosts(
+        sessionKey: _sessionKey,
         limit: _pageSize,
         offset: 0,
         currentUserId: _currentUserId,
       );
-      final videos = raw.where((p) => p.videoUrl != null).toList();
       if (!mounted) return;
       setState(() {
         _posts
           ..clear()
-          ..addAll(videos);
-        _hasMore = raw.length >= _pageSize;
+          ..addAll(list);
+        _apiOffset = list.length;
+        _hasMore = list.length >= _pageSize;
         _loading = false;
+        _currentPage = 0;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scheduleViewDwellFor(0);
       });
     } catch (e) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -80,19 +109,20 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
     setState(() => _loadingMore = true);
     try {
       final repo = context.read<PostRepository>();
-      final existingIds = _posts.map((p) => p.id).toSet();
-      final raw = await repo.getFeedPosts(
+      final list = await repo.getReelsVideoPosts(
+        sessionKey: _sessionKey,
         limit: _pageSize,
-        offset: _posts.length,
+        offset: _apiOffset,
         currentUserId: _currentUserId,
       );
-      final newVideos = raw
-          .where((p) => p.videoUrl != null && !existingIds.contains(p.id))
-          .toList();
       if (!mounted) return;
+      final existing = _posts.map((p) => p.id).toSet();
+      final fresh =
+          list.where((p) => !existing.contains(p.id)).toList(growable: false);
       setState(() {
-        _posts.addAll(newVideos);
-        _hasMore = raw.length >= _pageSize;
+        _posts.addAll(fresh);
+        _apiOffset += list.length;
+        _hasMore = list.length >= _pageSize;
         _loadingMore = false;
       });
     } catch (e) {
@@ -100,9 +130,29 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
     }
   }
 
+  void _scheduleViewDwellFor(int index) {
+    _viewDwellTimer?.cancel();
+    if (_currentUserId == null) return;
+    if (index < 0 || index >= _posts.length) return;
+    final postId = _posts[index].id;
+    _viewDwellTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      if (_currentPage != index) return;
+      unawaited(
+        context.read<PostRepository>().recordPublicationFeedImpression(
+              postId: postId,
+              watchedMsDelta: 2000,
+            ),
+      );
+    });
+  }
+
   void _onPageChanged(int index) {
+    _scheduleViewDwellFor(index);
     setState(() => _currentPage = index);
-    if (index >= _posts.length - _loadThreshold) _loadMore();
+    if (index >= _posts.length - _loadThreshold) {
+      _loadMore();
+    }
   }
 
   Future<void> _toggleLike(int index) async {
@@ -163,6 +213,43 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
     }
   }
 
+  Future<void> _toggleFollowAuthor(String authorId) async {
+    if (_currentUserId == null || authorId == _currentUserId) return;
+    try {
+      await context.read<ProfileRepository>().toggleFollow(
+            _currentUserId!,
+            authorId,
+          );
+      FollowingChangeBus.instance.notify();
+      if (!mounted) return;
+      setState(() {
+        for (var i = 0; i < _posts.length; i++) {
+          if (_posts[i].userId != authorId) continue;
+          final p = _posts[i];
+          _posts[i] = p.copyWith(isFollowingAuthor: !p.isFollowingAuthor);
+        }
+      });
+    } catch (e) {
+      debugPrint('$e');
+    }
+  }
+
+  void _applyCommentsCount(int index, int count) {
+    if (index < 0 || index >= _posts.length) return;
+    setState(() {
+      _posts[index] = _posts[index].copyWith(commentsCount: count);
+    });
+  }
+
+  void _openCommentsSheet(BuildContext context, int index) {
+    final post = _posts[index];
+    ReelsCommentsSheet.show(
+      context,
+      post: post,
+      onCommentsCountChanged: (c) => _applyCommentsCount(index, c),
+    );
+  }
+
   void _showMoreMenu(int index) {
     final post = _posts[index];
     showModalBottomSheet<void>(
@@ -180,7 +267,6 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
         },
         onUseSound: () {
           Navigator.pop(context);
-          // Переход на создание видео с этим треком (будущая фича)
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Скоро: снять видео под этот звук')),
           );
@@ -194,9 +280,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
     super.build(context);
 
     if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
+      return const Center(child: CircularProgressIndicator());
     }
 
     if (_posts.isEmpty) {
@@ -209,7 +293,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
             const Text('Нет видео', style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 16),
             FilledButton(
-              onPressed: _loadInitial,
+              onPressed: _newSessionAndReload,
               child: const Text('Обновить'),
             ),
           ],
@@ -223,8 +307,8 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
         controller: _pageController,
         scrollDirection: Axis.vertical,
         onPageChanged: _onPageChanged,
-        physics: const VerticalSnapPageScrollPhysics(),
-        itemCount: _posts.length + (_loadingMore ? 1 : 0),
+        physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
+        itemCount: _posts.length + (_loadingMore && _hasMore ? 1 : 0),
         itemBuilder: (context, index) {
           if (index == _posts.length) {
             return const Center(
@@ -239,15 +323,15 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
             currentUserId: _currentUserId,
             onLike: () => _toggleLike(index),
             onRepost: () => _toggleRepost(index),
+            onCommentsTap: () => _openCommentsSheet(context, index),
             onMoreTap: () => _showMoreMenu(index),
+            onFollowAuthor: () => _toggleFollowAuthor(post.userId),
           );
         },
       ),
     );
   }
 }
-
-// ── Один рил (одна страница видео) ──────────────────────────────
 
 class _ReelItem extends StatelessWidget {
   const _ReelItem({
@@ -257,7 +341,9 @@ class _ReelItem extends StatelessWidget {
     required this.currentUserId,
     required this.onLike,
     required this.onRepost,
+    required this.onCommentsTap,
     required this.onMoreTap,
+    required this.onFollowAuthor,
   });
 
   final PostEntity post;
@@ -265,7 +351,9 @@ class _ReelItem extends StatelessWidget {
   final String? currentUserId;
   final VoidCallback onLike;
   final VoidCallback onRepost;
+  final VoidCallback onCommentsTap;
   final VoidCallback onMoreTap;
+  final VoidCallback onFollowAuthor;
 
   @override
   Widget build(BuildContext context) {
@@ -281,8 +369,6 @@ class _ReelItem extends StatelessWidget {
             coverFullscreen: true,
           ),
         ),
-
-        // Нижний градиент
         const Positioned(
           bottom: 0,
           left: 0,
@@ -290,24 +376,23 @@ class _ReelItem extends StatelessWidget {
           height: 240,
           child: _BottomGradient(),
         ),
-
-        // Правая панель действий
         Positioned(
-          right: 12,
+          right: 10,
           bottom: 96,
           child: _ReelRightActions(
             post: post,
             currentUserId: currentUserId,
             onLike: onLike,
             onRepost: onRepost,
+            onCommentsTap: onCommentsTap,
             onMoreTap: onMoreTap,
+            onOpenProfile: () => context.push('/profile/${post.userId}'),
+            onFollowAuthor: onFollowAuthor,
           ),
         ),
-
-        // Автор + caption + просмотры
         Positioned(
           left: 14,
-          right: 80,
+          right: 88,
           bottom: MediaQuery.of(context).padding.bottom + 20,
           child: _ReelBottomInfo(post: post),
         ),
@@ -316,49 +401,59 @@ class _ReelItem extends StatelessWidget {
   }
 }
 
-// ── Правая панель: лайк, коммент, репост, поделиться, три точки ─
-
 class _ReelRightActions extends StatelessWidget {
   const _ReelRightActions({
     required this.post,
     required this.currentUserId,
     required this.onLike,
     required this.onRepost,
+    required this.onCommentsTap,
     required this.onMoreTap,
+    required this.onOpenProfile,
+    required this.onFollowAuthor,
   });
 
   final PostEntity post;
   final String? currentUserId;
   final VoidCallback onLike;
   final VoidCallback onRepost;
+  final VoidCallback onCommentsTap;
   final VoidCallback onMoreTap;
+  final VoidCallback onOpenProfile;
+  final VoidCallback onFollowAuthor;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Лайк
+        _ReelsAuthorAvatar(
+          post: post,
+          currentUserId: currentUserId,
+          onOpenProfile: onOpenProfile,
+          onFollow: currentUserId != null &&
+                  post.userId != currentUserId &&
+                  !post.isFollowingAuthor
+              ? onFollowAuthor
+              : null,
+        ),
+        const SizedBox(height: 20),
         _ReelActionBtn(
           icon: post.isLikedByMe
               ? Icons.favorite_rounded
               : Icons.favorite_border_rounded,
-          color: post.isLikedByMe ? Colors.red : Colors.white,
+          color: post.isLikedByMe ? Colors.redAccent : Colors.white,
           label: _fmt(post.likesCount),
           onTap: currentUserId != null ? onLike : null,
         ),
-        const SizedBox(height: 20),
-
-        // Комментарии
+        const SizedBox(height: 18),
         _ReelActionBtn(
           icon: Icons.chat_bubble_outline_rounded,
           color: Colors.white,
           label: _fmt(post.commentsCount),
-          onTap: () => context.push('/post/${post.id}', extra: post),
+          onTap: onCommentsTap,
         ),
-        const SizedBox(height: 20),
-
-        // Репост
+        const SizedBox(height: 18),
         _ReelActionBtn(
           icon: post.isRepostedByMe
               ? Icons.repeat_rounded
@@ -369,18 +464,14 @@ class _ReelRightActions extends StatelessWidget {
           label: _fmt(post.repostsCount),
           onTap: currentUserId != null ? onRepost : null,
         ),
-        const SizedBox(height: 20),
-
-        // Поделиться (прямая отправка в чат)
+        const SizedBox(height: 18),
         _ReelActionBtn(
           icon: Icons.send_rounded,
           color: Colors.white,
           label: '',
-          onTap: () => _shareReel(context),
+          onTap: () => context.push('/discover-publications'),
         ),
-        const SizedBox(height: 20),
-
-        // Три точки
+        const SizedBox(height: 18),
         _ReelActionBtn(
           icon: Icons.more_vert_rounded,
           color: Colors.white,
@@ -391,14 +482,113 @@ class _ReelRightActions extends StatelessWidget {
     );
   }
 
-  void _shareReel(BuildContext context) {
-    // Открываем список пользователей для отправки в чат
-    context.push('/discover-publications');
-  }
-
   String _fmt(int n) {
     if (n <= 0) return '';
     return formatCompactCount(n);
+  }
+}
+
+/// Аватар в стиле TikTok: градиентное кольцо / подпись «+».
+class _ReelsAuthorAvatar extends StatelessWidget {
+  const _ReelsAuthorAvatar({
+    required this.post,
+    required this.currentUserId,
+    required this.onOpenProfile,
+    this.onFollow,
+  });
+
+  final PostEntity post;
+  final String? currentUserId;
+  final VoidCallback onOpenProfile;
+  final VoidCallback? onFollow;
+
+  @override
+  Widget build(BuildContext context) {
+    final isMe =
+        currentUserId != null && post.userId == currentUserId;
+    final showPlus = onFollow != null && !isMe;
+
+    return SizedBox(
+      width: 58,
+      height: showPlus ? 78 : 64,
+      child: Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.topCenter,
+        children: [
+          GestureDetector(
+            onTap: onOpenProfile,
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.all(2.8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: showPlus
+                    ? const LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color(0xFF2ED1C4),
+                          Color(0xFFFE2C55),
+                        ],
+                      )
+                    : null,
+                color: showPlus ? null : Colors.white.withValues(alpha: 0.42),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.black,
+                ),
+                child: CachedAvatar(
+                  imageUrl: post.userAvatarUrl,
+                  radius: 22,
+                  enableLightboxOnTap: false,
+                ),
+              ),
+            ),
+          ),
+          if (showPlus)
+            Positioned(
+              bottom: 2,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onFollow,
+                  customBorder: const CircleBorder(),
+                  child: Ink(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFE2C55),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          blurRadius: 8,
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.add_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -427,7 +617,7 @@ class _ReelActionBtn extends StatelessWidget {
             icon,
             color: color,
             size: 32,
-            shadows: const [Shadow(color: Colors.black45, blurRadius: 6)],
+            shadows: const [Shadow(color: Colors.black54, blurRadius: 8)],
           ),
           if (label.isNotEmpty) ...[
             const SizedBox(height: 3),
@@ -447,8 +637,6 @@ class _ReelActionBtn extends StatelessWidget {
   }
 }
 
-// ── Информация об авторе (левый нижний угол) ─────────────────────
-
 class _ReelBottomInfo extends StatelessWidget {
   const _ReelBottomInfo({required this.post});
 
@@ -460,46 +648,46 @@ class _ReelBottomInfo extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            UserAvatarTap(
-              userId: post.userId,
-              avatarUrl: post.userAvatarUrl,
-              radius: 18,
-            ),
-            const SizedBox(width: 8),
-            UsernameTap(
-              userId: post.userId,
-              username: post.userName ?? 'Пользователь',
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
-              ),
-            ),
-          ],
+        UsernameTap(
+          userId: post.userId,
+          username: post.userName ?? 'Пользователь',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: 15,
+            letterSpacing: -0.2,
+            shadows: [Shadow(color: Colors.black54, blurRadius: 6)],
+          ),
         ),
         if (post.caption.isNotEmpty) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           _ExpandableCaption(caption: post.caption),
         ],
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Row(
           children: [
             Icon(
-              Icons.play_arrow_rounded,
-              size: 16,
-              color: Colors.white.withValues(alpha: 0.85),
+              Icons.play_circle_outline_rounded,
+              size: 17,
+              color: Colors.white.withValues(alpha: 0.88),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
             Text(
               formatCompactCount(post.viewsCount),
               style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.9),
+                color: Colors.white.withValues(alpha: 0.92),
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
                 shadows: const [Shadow(color: Colors.black54, blurRadius: 4)],
+              ),
+            ),
+            const SizedBox(width: 6),
+            Text(
+              'просмотров',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.72),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -528,17 +716,16 @@ class _ExpandableCaptionState extends State<_ExpandableCaption> {
         widget.caption,
         maxLines: _expanded ? null : 2,
         overflow: _expanded ? null : TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 13,
-          shadows: [Shadow(color: Colors.black54, blurRadius: 4)],
+        style: TextStyle(
+          color: Colors.white.withValues(alpha: 0.95),
+          fontSize: 14,
+          height: 1.35,
+          shadows: const [Shadow(color: Colors.black54, blurRadius: 6)],
         ),
       ),
     );
   }
 }
-
-// ── Нижний градиент ───────────────────────────────────────────────
 
 class _BottomGradient extends StatelessWidget {
   const _BottomGradient();
@@ -550,14 +737,16 @@ class _BottomGradient extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.bottomCenter,
           end: Alignment.topCenter,
-          colors: [Colors.black87, Colors.transparent],
+          colors: [
+            Color(0xDD000000),
+            Colors.transparent,
+          ],
+          stops: [0.0, 1.0],
         ),
       ),
     );
   }
 }
-
-// ── Меню трёх точек (bottom sheet) ───────────────────────────────
 
 class _ReelsMoreMenu extends StatelessWidget {
   const _ReelsMoreMenu({
@@ -585,7 +774,6 @@ class _ReelsMoreMenu extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Drag handle
           Container(
             margin: const EdgeInsets.only(top: 10, bottom: 8),
             width: 40,
