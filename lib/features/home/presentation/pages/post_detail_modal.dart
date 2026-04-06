@@ -294,6 +294,7 @@ class _PostMediaState extends State<_PostMedia> {
         constraints: BoxConstraints(maxHeight: widget.maxHeight),
         child: FeedVideoPlayer(
           videoUrl: post.videoUrl!,
+          musicPreviewUrl: post.musicPreviewUrl,
           isActive: true,
           aspectRatio: 1.0,
           looping: true,

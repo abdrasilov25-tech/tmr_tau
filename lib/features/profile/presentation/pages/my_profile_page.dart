@@ -36,6 +36,7 @@ import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_grid_engagement_overlay.dart';
+import '../../../post/presentation/widgets/post_video_grid_thumbnail.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../domain/entities/seller_profile_entity.dart';
 import '../../domain/repositories/profile_repository.dart';
@@ -2588,12 +2589,31 @@ class _PostsGrid extends StatelessWidget {
             child: const Center(child: Icon(Icons.article_outlined, size: 32)),
           );
         } else if (hasVideo && p.imageUrl.isEmpty) {
-          content = ColoredBox(
-            color: Colors.grey.shade300,
-            child: const Center(
-              child: Icon(Icons.videocam, size: 40, color: Colors.white70),
-            ),
-          );
+          final vUrl = (p.videoUrl ?? '').trim();
+          content = vUrl.isEmpty
+              ? ColoredBox(
+                  color: Colors.grey.shade300,
+                  child: const Center(
+                    child:
+                        Icon(Icons.videocam, size: 40, color: Colors.white70),
+                  ),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    PostVideoGridThumbnail(
+                      videoUrl: vUrl,
+                      memCacheWidth: gridThumbPx,
+                    ),
+                    const Center(
+                      child: Icon(
+                        Icons.play_circle_fill,
+                        size: 36,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                );
         } else {
           content = Stack(
             fit: StackFit.expand,

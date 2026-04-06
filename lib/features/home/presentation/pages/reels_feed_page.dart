@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:tmr_tau/core/following/following_change_bus.dart';
 import 'package:tmr_tau/core/formatting/compact_count_format.dart';
 import 'package:tmr_tau/core/widgets/cached_avatar.dart';
@@ -29,6 +30,8 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
     with AutomaticKeepAliveClientMixin {
   static const int _pageSize = 15;
   static const int _loadThreshold = 4;
+  static const Duration _warmCacheTtl = Duration(minutes: 45);
+  static _ReelsWarmCache? _warmCache;
 
   late final PageController _pageController;
   final List<PostEntity> _posts = [];
@@ -48,13 +51,37 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   @override
   void initState() {
     super.initState();
-    _sessionKey =
-        '${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1 << 30)}';
     _pageController = PageController();
     final authState = context.read<AuthBloc>().state;
     _currentUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
-    _loadInitial();
+    _sessionKey =
+        '${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1 << 30)}';
+
+    final warmSnapshot = _warmCache;
+    var canUseCache = false;
+    if (_currentUserId != null && warmSnapshot != null) {
+      final w = warmSnapshot;
+      if (w.userId == _currentUserId &&
+          DateTime.now().difference(w.createdAt) <= _warmCacheTtl) {
+        canUseCache = true;
+        _sessionKey = w.sessionKey;
+        _posts.addAll(w.posts);
+        _apiOffset = w.apiOffset;
+        _hasMore = w.hasMore;
+        _loading = false;
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (canUseCache) {
+        _scheduleViewDwellFor(0);
+        unawaited(_silentRefreshReelsFromNetwork());
+      } else {
+        unawaited(_loadInitial());
+      }
+    });
   }
 
   @override
@@ -65,9 +92,63 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   }
 
   void _newSessionAndReload() {
+    _warmCache = null;
     _sessionKey =
         '${DateTime.now().millisecondsSinceEpoch}_${math.Random().nextInt(1 << 30)}';
-    _loadInitial();
+    unawaited(_loadInitial());
+  }
+
+  void _storeReelsWarmCache() {
+    final uid = _currentUserId;
+    if (uid == null || _posts.isEmpty) return;
+    _warmCache = _ReelsWarmCache(
+      userId: uid,
+      createdAt: DateTime.now(),
+      sessionKey: _sessionKey,
+      posts: List<PostEntity>.from(_posts),
+      apiOffset: _apiOffset,
+      hasMore: _hasMore,
+    );
+  }
+
+  Future<void> _silentRefreshReelsFromNetwork() async {
+    try {
+      final repo = context.read<PostRepository>();
+      final list = await repo.getReelsVideoPosts(
+        sessionKey: _sessionKey,
+        limit: _pageSize,
+        offset: 0,
+        currentUserId: _currentUserId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _posts
+          ..clear()
+          ..addAll(list);
+        _apiOffset = list.length;
+        _hasMore = list.length >= _pageSize;
+        if (_posts.isEmpty) {
+          _currentPage = 0;
+        } else {
+          _currentPage = _currentPage.clamp(0, _posts.length - 1);
+        }
+        _loading = false;
+      });
+      if (_pageController.hasClients && _posts.isNotEmpty) {
+        final idx = _currentPage.clamp(0, _posts.length - 1);
+        _pageController.jumpToPage(idx);
+      }
+      _storeReelsWarmCache();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_posts.isEmpty) return;
+        _scheduleViewDwellFor(
+          _currentPage.clamp(0, _posts.length - 1),
+        );
+      });
+    } catch (e) {
+      debugPrint('$e');
+    }
   }
 
   Future<void> _loadInitial() async {
@@ -94,6 +175,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
         _loading = false;
         _currentPage = 0;
       });
+      _storeReelsWarmCache();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scheduleViewDwellFor(0);
       });
@@ -125,6 +207,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
         _hasMore = list.length >= _pageSize;
         _loadingMore = false;
       });
+      _storeReelsWarmCache();
     } catch (e) {
       if (mounted) setState(() => _loadingMore = false);
     }
@@ -279,8 +362,30 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   Widget build(BuildContext context) {
     super.build(context);
 
+    return BlocListener<AuthBloc, AuthState>(
+      listenWhen: (prev, curr) {
+        final currId = curr is AuthAuthenticated ? curr.user.id : null;
+        final prevId = prev is AuthAuthenticated ? prev.user.id : null;
+        if (currId == null) return prevId != null;
+        if (prevId != null && prevId != currId) return true;
+        if (prevId == null) {
+          return prev is AuthUnauthenticated || prev is AuthError;
+        }
+        return false;
+      },
+      listener: (context, state) {
+        _warmCache = null;
+        _currentUserId =
+            state is AuthAuthenticated ? state.user.id : null;
+        _newSessionAndReload();
+      },
+      child: _buildReelsBody(context),
+    );
+  }
+
+  Widget _buildReelsBody(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const _ReelsLoadingSkeleton();
     }
 
     if (_posts.isEmpty) {
@@ -333,6 +438,67 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   }
 }
 
+class _ReelsWarmCache {
+  const _ReelsWarmCache({
+    required this.userId,
+    required this.createdAt,
+    required this.sessionKey,
+    required this.posts,
+    required this.apiOffset,
+    required this.hasMore,
+  });
+
+  final String userId;
+  final DateTime createdAt;
+  final String sessionKey;
+  final List<PostEntity> posts;
+  final int apiOffset;
+  final bool hasMore;
+}
+
+class _ReelsLoadingSkeleton extends StatelessWidget {
+  const _ReelsLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Shimmer.fromColors(
+        baseColor: Colors.grey.shade900,
+        highlightColor: Colors.grey.shade700,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(
+                    4,
+                    (_) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ReelItem extends StatelessWidget {
   const _ReelItem({
     super.key,
@@ -363,6 +529,7 @@ class _ReelItem extends StatelessWidget {
         Positioned.fill(
           child: FeedVideoPlayer(
             videoUrl: post.videoUrl!,
+            musicPreviewUrl: post.musicPreviewUrl,
             isActive: isActive,
             looping: true,
             showControls: true,
@@ -644,6 +811,12 @@ class _ReelBottomInfo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mt = (post.musicTitle ?? '').trim();
+    final ma = (post.musicArtist ?? '').trim();
+    final musicLine = mt.isEmpty
+        ? (ma.isEmpty ? null : ma)
+        : (ma.isEmpty ? mt : '$mt · $ma');
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -662,6 +835,34 @@ class _ReelBottomInfo extends StatelessWidget {
         if (post.caption.isNotEmpty) ...[
           const SizedBox(height: 8),
           _ExpandableCaption(caption: post.caption),
+        ],
+        if (musicLine != null) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(
+                Icons.music_note_rounded,
+                size: 17,
+                color: Colors.white.withValues(alpha: 0.9),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  musicLine,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.92),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    shadows: const [
+                      Shadow(color: Colors.black54, blurRadius: 4),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ],
         const SizedBox(height: 8),
         Row(

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
@@ -13,6 +14,9 @@ import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/services/geo_service.dart';
 import '../../domain/repositories/post_repository.dart';
+import '../../../stories/domain/entities/story_music_track.dart';
+import '../../../stories/domain/repositories/story_music_search_repository.dart';
+import '../../../stories/presentation/widgets/story_music_picker_sheet.dart';
 import '../widgets/post_photo_gallery.dart';
 import 'video_trim_page.dart';
 
@@ -37,6 +41,7 @@ class AddPostPage extends StatefulWidget {
 class _AddPostPageState extends State<AddPostPage> {
   final List<File> _images = [];
   File? _video;
+  StoryMusicTrack? _videoMusic;
   final _captionController = TextEditingController();
   bool _loading = false;
   int _previewPage = 0;
@@ -187,6 +192,7 @@ class _AddPostPageState extends State<AddPostPage> {
           ..clear()
           ..add(File(x.path));
         _video = null;
+        _videoMusic = null;
         _previewPage = 0;
       });
     }
@@ -253,6 +259,7 @@ class _AddPostPageState extends State<AddPostPage> {
       }
       setState(() {
         _video = null;
+        _videoMusic = null;
         for (var i = 0; i < addCount; i++) {
           _images.add(File(picked[i].path));
         }
@@ -272,6 +279,7 @@ class _AddPostPageState extends State<AddPostPage> {
         }
         setState(() {
           _video = null;
+          _videoMusic = null;
           _images.add(File(x.path));
           _previewPage = _images.length - 1;
         });
@@ -331,32 +339,57 @@ class _AddPostPageState extends State<AddPostPage> {
       return;
     }
     if (!mounted) return;
-    if (durationSeconds > _maxVideoSeconds) {
-      setState(() => _loading = false);
-      final trimmed = await Navigator.of(context).push<File?>(
-        MaterialPageRoute<File?>(
-          fullscreenDialog: true,
-          builder: (context) => VideoTrimPage(
-            sourceFile: file,
-            maxDurationSeconds: _maxVideoSeconds,
-            contextLabel: _isPublication ? 'публикации' : 'новости',
-          ),
-        ),
-      );
-      if (!mounted || trimmed == null) return;
+    setState(() => _loading = false);
+
+    final needsTrimByLength = durationSeconds > _maxVideoSeconds;
+    final openTrimmer = _isPublication || needsTrimByLength;
+    if (!openTrimmer) {
       setState(() {
-        _video = trimmed;
+        _video = file;
         _images.clear();
         _previewPage = 0;
       });
       return;
     }
+
+    final maxForTrim = min(
+      needsTrimByLength ? _maxVideoSeconds : durationSeconds,
+      durationSeconds,
+    );
+    if (maxForTrim < 1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Видео слишком короткое')),
+        );
+      }
+      return;
+    }
+
+    final trimmed = await Navigator.of(context).push<File?>(
+      MaterialPageRoute<File?>(
+        fullscreenDialog: true,
+        builder: (context) => VideoTrimPage(
+          sourceFile: file,
+          maxDurationSeconds: maxForTrim,
+          contextLabel: _isPublication ? 'публикации' : 'новости',
+        ),
+      ),
+    );
+    if (!mounted || trimmed == null) return;
     setState(() {
-      _video = file;
+      _video = trimmed;
       _images.clear();
       _previewPage = 0;
-      _loading = false;
     });
+  }
+
+  Future<void> _pickVideoMusic() async {
+    if (!mounted) return;
+    final repo = context.read<StoryMusicSearchRepository>();
+    final track = await showStoryMusicPicker(context, repository: repo);
+    if (track != null && mounted) {
+      setState(() => _videoMusic = track);
+    }
   }
 
   /// Длина ролика в секундах (не меньше 1), или `null` при ошибке.
@@ -540,6 +573,9 @@ class _AddPostPageState extends State<AddPostPage> {
                 ? _newsPollQuestion.text.trim()
                 : null,
         pollOptions: pollOpts,
+        musicTitle: _video != null ? _videoMusic?.title : null,
+        musicArtist: _video != null ? _videoMusic?.artist : null,
+        musicPreviewUrl: _video != null ? _videoMusic?.previewUrl : null,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -713,6 +749,35 @@ class _AddPostPageState extends State<AddPostPage> {
                   label: const Text('Обрезать видео'),
                 ),
               ),
+              if (_isPublication) ...[
+                const SizedBox(height: 4),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.library_music_rounded, size: 26),
+                  title: Text(
+                    _videoMusic == null
+                        ? 'Добавить музыку'
+                        : '${_videoMusic!.title} — ${_videoMusic!.artist}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    _videoMusic == null
+                        ? 'Звук из каталога (превью), как в Reels'
+                        : 'Нажмите, чтобы сменить',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                  trailing: _videoMusic != null
+                      ? IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: _loading
+                              ? null
+                              : () => setState(() => _videoMusic = null),
+                        )
+                      : const Icon(Icons.chevron_right_rounded),
+                  onTap: _loading ? null : _pickVideoMusic,
+                ),
+              ],
             ],
             if (_isPublication) ...[
               const SizedBox(height: 18),

@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
+import 'package:shimmer/shimmer.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../../core/following/following_change_bus.dart';
@@ -12,7 +13,6 @@ import '../../../live_streaming/domain/entities/live_room_entity.dart';
 import '../../../live_streaming/domain/repositories/live_streaming_repository.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/utils/notification_badge_format.dart';
-import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../../core/constants/supabase_constants.dart';
@@ -27,6 +27,7 @@ import '../../../notifications/presentation/notification_activity_peek_bus.dart'
 import '../../../notifications/presentation/notification_tab_badge_controller.dart';
 import '../../../notifications/presentation/widgets/notification_activity_peek_bar.dart';
 import '../../../post/domain/entities/post_entity.dart';
+import '../../../post/domain/entities/publication_feed_page_result.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_author_follow_pill.dart';
 import 'reels_feed_page.dart';
@@ -512,7 +513,6 @@ class _MainHomePageState extends State<MainHomePage> {
     _storyGroups = cache.storyGroups;
     _newStoriesByUserId = cache.newStoriesByUserId;
     _storyNotesByUserId = cache.storyNotesByUserId;
-    _feedTab = _FeedTab.recommendations;
     _initialLoading = false;
   }
 
@@ -539,7 +539,6 @@ class _MainHomePageState extends State<MainHomePage> {
     final activeUserId =
         authState is AuthAuthenticated ? authState.user.id : null;
     _currentUserId = activeUserId ?? _supabaseAuthUserIdOrNull();
-    _feedTab = _FeedTab.recommendations;
     _invalidateFollowingIdsCache();
     if (showLoading) {
       setState(() => _initialLoading = true);
@@ -551,23 +550,65 @@ class _MainHomePageState extends State<MainHomePage> {
     _hasMoreRecommendations = true;
     _hasMoreSubscriptions = true;
     try {
-      await _fetchPageForTab(_feedTab, reset: true);
+      final repo = context.read<PostRepository>();
+      final followingIds = await _getFollowingUserIdsCached();
+      final recSub = await Future.wait<PublicationFeedPageResult>([
+        repo.getPublicationsFeedRecommendations(
+          currentUserId: _currentUserId,
+          followingUserIds: followingIds,
+          limit: _pageSize,
+          discoveryDbOffset: 0,
+        ),
+        repo.getPublicationsFeedSubscriptions(
+          currentUserId: _currentUserId,
+          followingUserIds: followingIds,
+          limit: _pageSize,
+          offset: 0,
+        ),
+      ]);
+      final rec = recSub[0];
+      final sub = recSub[1];
       if (!mounted) return;
-      setState(() => _initialLoading = false);
+      setState(() {
+        _postsRecommendations
+          ..clear()
+          ..addAll(rec.posts);
+        _cursorRecommendations = rec.nextOffset;
+        _hasMoreRecommendations =
+            rec.posts.isNotEmpty && rec.posts.length >= _pageSize;
+        _postsSubscriptions
+          ..clear()
+          ..addAll(sub.posts);
+        _cursorSubscriptions = sub.nextOffset;
+        _hasMoreSubscriptions =
+            sub.posts.isNotEmpty && sub.posts.length >= _pageSize;
+        _initialLoading = false;
+      });
       _resetAllFeedPagesAfterFullReload();
       _storeWarmCache();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (_tabPageController.hasClients) {
+          _tabPageController.jumpToPage(_feedTab.pageIndex);
+        }
+        if (_feedTab == _FeedTab.recommendations) {
+          _syncVisiblePostForImpression();
+          _ensureImpressionTimer();
+        }
+        _precacheFeedHead(_postsRecommendations);
+        _precacheFeedHead(_postsSubscriptions);
+        _lastPrecachedFeedIndex = null;
+        _precacheNeighborsForCurrentFeedPost();
+      });
       debugPrint(
-        '[MainHomePage] loaded tab=$_feedTab count=${_posts.length}',
+        '[MainHomePage] loaded feeds rec=${rec.posts.length} sub=${sub.posts.length} tab=$_feedTab',
       );
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _initialLoading = false;
-        if (_feedTab == _FeedTab.recommendations) {
-          _hasMoreRecommendations = false;
-        } else {
-          _hasMoreSubscriptions = false;
-        }
+        _hasMoreRecommendations = false;
+        _hasMoreSubscriptions = false;
       });
     }
   }
@@ -668,14 +709,16 @@ class _MainHomePageState extends State<MainHomePage> {
     _lastPrecachedFeedIndex = null;
     setState(() => _feedTab = tab);
 
-    // Синхронизируем горизонтальный PageView при нажатии на вкладку.
-    if (_tabPageController.hasClients) {
+    // Пока скелетон вместо PageView — только обновляем выбранную вкладку на макете.
+    if (!_initialLoading && _tabPageController.hasClients) {
       _tabPageController.animateToPage(
         tab.pageIndex,
         duration: const Duration(milliseconds: 260),
         curve: Curves.easeInOut,
       );
     }
+
+    if (_initialLoading) return;
 
     if (tab == _FeedTab.recommendations) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1146,9 +1189,11 @@ class _MainHomePageState extends State<MainHomePage> {
                 ),
               ),
             ),
-            if (snapshot.connectionState == ConnectionState.waiting && rooms.isEmpty)
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                rooms.isEmpty)
               const SliverFillRemaining(
-                child: Center(child: CircularProgressIndicator()),
+                hasScrollBody: false,
+                child: _LiveRoomsLoadingSkeleton(),
               )
             else if (rooms.isEmpty)
               SliverFillRemaining(
@@ -1190,7 +1235,7 @@ class _MainHomePageState extends State<MainHomePage> {
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 sliver: SliverList.separated(
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
                   itemCount: rooms.length,
                   itemBuilder: (context, i) {
                     final room = rooms[i];
@@ -1205,6 +1250,18 @@ class _MainHomePageState extends State<MainHomePage> {
         );
       },
     );
+  }
+
+  Widget _buildInitialLoadingFeedArea(double itemHeight) {
+    switch (_feedTab) {
+      case _FeedTab.reels:
+        return const _MainHomeReelsLoadingPlaceholder();
+      case _FeedTab.recommendations:
+      case _FeedTab.subscriptions:
+        return _VerticalFeedTabSkeleton(height: itemHeight);
+      case _FeedTab.live:
+        return const _LiveTabLoadingShell();
+    }
   }
 
   @override
@@ -1243,123 +1300,121 @@ class _MainHomePageState extends State<MainHomePage> {
             unawaited(_reloadHomeAfterAuthUserChange());
           }
         },
-        child: _initialLoading
-            ? const Center(child: AppLoading())
-            : Column(
+        child: Column(
+          children: [
+            if (_initialLoading)
+              const _StoriesStripSkeleton()
+            else
+              ChatStoriesFriendsStrip(
+                groups: _storyGroups,
+                newStoriesByUserId: _newStoriesByUserId,
+                storyNotesByUserId: const <String, String>{},
+                enableNotes: false,
+                currentUserId: sessionUid,
+                currentUserAvatarUrl: currentUserAvatarUrl,
+                onOwnNoteTap: (_) {},
+                onAddStoryTap: _openAddStoryAndRefresh,
+                onStoryTap: (group) async {
+                  if (group.stories.isEmpty) return;
+                  await context.push(
+                    '/stories',
+                    extra: StoryViewerArgs(
+                      groups: [group],
+                      initialGroupIndex: 0,
+                    ),
+                  );
+                  if (!mounted) return;
+                  await _loadStories();
+                },
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 2, 4, 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  ChatStoriesFriendsStrip(
-                    groups: _storyGroups,
-                    newStoriesByUserId: _newStoriesByUserId,
-                    storyNotesByUserId: const <String, String>{},
-                    enableNotes: false,
-                    currentUserId: sessionUid,
-                    currentUserAvatarUrl: currentUserAvatarUrl,
-                    onOwnNoteTap: (_) {},
-                    onAddStoryTap: _openAddStoryAndRefresh,
-                    onStoryTap: (group) async {
-                      if (group.stories.isEmpty) return;
-                      await context.push(
-                        '/stories',
-                        extra: StoryViewerArgs(
-                          groups: [group],
-                          initialGroupIndex: 0,
-                        ),
-                      );
-                      if (!mounted) return;
-                      await _loadStories();
-                    },
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(6, 2, 4, 6),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: _PublicationFeedTabStrip(
-                              selected: _feedTab,
-                              onChanged: _onFeedTabChanged,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: 'Поиск людей и видео',
-                          icon: Icon(
-                            Icons.search_rounded,
-                            size: 26,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurface
-                                .withValues(alpha: 0.72),
-                          ),
-                          onPressed: () =>
-                              context.push('/discover-publications'),
-                        ),
-                      ],
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _PublicationFeedTabStrip(
+                        selected: _feedTab,
+                        onChanged: _onFeedTabChanged,
+                      ),
                     ),
                   ),
-                  Expanded(
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        LayoutBuilder(
-                          builder: (context, constraints) {
-                            final itemHeight = constraints.maxHeight.isFinite &&
-                                    constraints.maxHeight > 0
-                                ? constraints.maxHeight
-                                : h;
-                            _feedItemHeight = itemHeight;
-
-                            // Горизонтальный PageView: свайп влево/вправо меняет вкладку.
-                            // Внутри каждой вкладки — вертикальный PageView (свайп вверх/вниз).
-                            // Flutter разграничивает жесты по направлению — конфликтов нет.
-                            return PageView(
-                              controller: _tabPageController,
-                              scrollDirection: Axis.horizontal,
-                              physics: const ClampingScrollPhysics(),
-                              onPageChanged: (i) {
-                                final tab = _FeedTabIndex.fromIndex(i);
-                                if (_feedTab != tab) {
-                                  _onFeedTabChanged(tab);
-                                }
-                              },
-                              children: [
-                                // Reels — первая вкладка
-                                const ReelsFeedPage(),
-                                _buildVerticalFeed(
-                                  tab: _FeedTab.recommendations,
-                                  posts: _postsRecommendations,
-                                  controller: _pageRecommendationsController,
-                                  itemHeight: itemHeight,
-                                ),
-                                _buildVerticalFeed(
-                                  tab: _FeedTab.subscriptions,
-                                  posts: _postsSubscriptions,
-                                  controller: _pageSubscriptionsController,
-                                  itemHeight: itemHeight,
-                                ),
-                                _buildLiveTab(),
-                              ],
-                            );
-                          },
-                        ),
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          width:
-                              _StoryCameraEdgeSwipeDetector.edgeWidthLogical,
-                          child: _StoryCameraEdgeSwipeDetector(
-                            onOpenStoryCamera: () =>
-                                unawaited(_openAddStoryAndRefresh()),
+                  IconButton(
+                    tooltip: 'Поиск людей и видео',
+                    icon: Icon(
+                      Icons.search_rounded,
+                      size: 26,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.72),
+                    ),
+                    onPressed: () => context.push('/discover-publications'),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final itemHeight =
+                          constraints.maxHeight.isFinite &&
+                                  constraints.maxHeight > 0
+                              ? constraints.maxHeight
+                              : h;
+                      _feedItemHeight = itemHeight;
+                      if (_initialLoading) {
+                        return _buildInitialLoadingFeedArea(itemHeight);
+                      }
+                      return PageView(
+                        controller: _tabPageController,
+                        scrollDirection: Axis.horizontal,
+                        physics: const ClampingScrollPhysics(),
+                        onPageChanged: (i) {
+                          final tab = _FeedTabIndex.fromIndex(i);
+                          if (_feedTab != tab) {
+                            _onFeedTabChanged(tab);
+                          }
+                        },
+                        children: [
+                          const ReelsFeedPage(),
+                          _buildVerticalFeed(
+                            tab: _FeedTab.recommendations,
+                            posts: _postsRecommendations,
+                            controller: _pageRecommendationsController,
+                            itemHeight: itemHeight,
                           ),
-                        ),
-                      ],
+                          _buildVerticalFeed(
+                            tab: _FeedTab.subscriptions,
+                            posts: _postsSubscriptions,
+                            controller: _pageSubscriptionsController,
+                            itemHeight: itemHeight,
+                          ),
+                          _buildLiveTab(),
+                        ],
+                      );
+                    },
+                  ),
+                  Positioned(
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: _StoryCameraEdgeSwipeDetector.edgeWidthLogical,
+                    child: _StoryCameraEdgeSwipeDetector(
+                      onOpenStoryCamera: () =>
+                          unawaited(_openAddStoryAndRefresh()),
                     ),
                   ),
                 ],
               ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1644,6 +1699,203 @@ class _LiveRoomCard extends StatelessWidget {
             ),
             const Icon(Icons.chevron_right_rounded, size: 22),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StoriesStripSkeleton extends StatelessWidget {
+  const _StoriesStripSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
+    final hi = Theme.of(context).colorScheme.surfaceContainerHigh;
+    return SizedBox(
+      height: 96,
+      child: Shimmer.fromColors(
+        baseColor: base,
+        highlightColor: hi,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          itemCount: 8,
+          separatorBuilder: (_, _) => const SizedBox(width: 12),
+          itemBuilder: (_, _) => Container(
+            width: 64,
+            height: 64,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MainHomeReelsLoadingPlaceholder extends StatelessWidget {
+  const _MainHomeReelsLoadingPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Colors.black,
+      child: Shimmer.fromColors(
+        baseColor: Colors.grey.shade900,
+        highlightColor: Colors.grey.shade700,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(
+                    4,
+                    (_) => Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VerticalFeedTabSkeleton extends StatelessWidget {
+  const _VerticalFeedTabSkeleton({required this.height});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
+    final hi = Theme.of(context).colorScheme.surfaceContainerHigh;
+    return Shimmer.fromColors(
+      baseColor: base,
+      highlightColor: hi,
+      child: SizedBox(
+        height: height,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 140,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Container(color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LiveTabLoadingShell extends StatelessWidget {
+  const _LiveTabLoadingShell();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => context.push('/live/host'),
+                    icon: const Icon(Icons.videocam_rounded),
+                    label: const Text('Начать эфир'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => context.push('/live-battle-lobby'),
+                    icon: const Icon(Icons.sports_kabaddi_rounded),
+                    label: const Text('Баттл'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SliverFillRemaining(
+          hasScrollBody: false,
+          child: _LiveRoomsLoadingSkeleton(),
+        ),
+      ],
+    );
+  }
+}
+
+class _LiveRoomsLoadingSkeleton extends StatelessWidget {
+  const _LiveRoomsLoadingSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.surfaceContainerHighest;
+    final hi = Theme.of(context).colorScheme.surfaceContainerHigh;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      child: Shimmer.fromColors(
+        baseColor: base,
+        highlightColor: hi,
+        child: Column(
+          children: List.generate(
+            5,
+            (_) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                height: 88,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

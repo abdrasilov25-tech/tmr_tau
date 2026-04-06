@@ -67,6 +67,9 @@ abstract class PostRepository {
     String? locationLabel,
     String? pollQuestion,
     List<String> pollOptions = const [],
+    String? musicTitle,
+    String? musicArtist,
+    String? musicPreviewUrl,
   });
 
   /// Голос в опросе новости (один голос на пользователя, можно сменить вариант).

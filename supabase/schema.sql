@@ -319,6 +319,9 @@ alter table public.posts add column if not exists is_anonymous boolean not null 
 alter table public.posts add column if not exists location_label text;
 alter table public.posts add column if not exists poll_question text;
 alter table public.posts add column if not exists poll_options text[];
+alter table public.posts add column if not exists music_title text;
+alter table public.posts add column if not exists music_artist text;
+alter table public.posts add column if not exists music_preview_url text;
 
 create table if not exists public.post_poll_votes (
   post_id uuid not null references public.posts(id) on delete cascade,

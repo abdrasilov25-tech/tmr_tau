@@ -131,6 +131,8 @@ List<_ChatThread> _computeDirectThreadsFromRows(
         lastMessageText: text,
         lastMessageAt: createdAt,
         lastMessageSenderId: senderId,
+        lastMessageReadAt:
+            senderId == currentUserId ? json['read_at'] : null,
         unreadCount: 0,
         lastIncomingAt: null,
       );
@@ -443,6 +445,7 @@ class _ChatsPageState extends State<ChatsPage> {
             lastMessageText: 'Написать',
             lastMessageAt: placeholderAt,
             lastMessageSenderId: id,
+            lastMessageReadAt: null,
             unreadCount: 0,
             lastIncomingAt: null,
             fromGlobalSearch: true,
@@ -475,6 +478,7 @@ class _ChatsPageState extends State<ChatsPage> {
                 : 'Групповой чат',
             lastMessageAt: placeholderAt,
             lastMessageSenderId: _sessionUserId,
+            lastMessageReadAt: null,
             unreadCount: 0,
             lastIncomingAt: null,
             isTemirtauCity: isOfficial,
@@ -503,6 +507,7 @@ class _ChatsPageState extends State<ChatsPage> {
             lastMessageText: 'Канал',
             lastMessageAt: placeholderAt,
             lastMessageSenderId: _sessionUserId,
+            lastMessageReadAt: null,
             unreadCount: 0,
             lastIncomingAt: null,
             fromGlobalSearch: true,
@@ -1639,6 +1644,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   : (fallbackCreatedAt ?? DateTime.now()),
               lastMessageSenderId:
                   (latest?['sender_id'] as String?) ?? _sessionUserId,
+              lastMessageReadAt: null,
               unreadCount: unreadByGroupId[id] ?? 0,
               lastIncomingAt: lastIncomingByGroup[id],
               isTemirtauCity: id == temirtau.id,
@@ -1811,6 +1817,7 @@ class _ChatsPageState extends State<ChatsPage> {
                   : (fallbackCreatedAt ?? DateTime.now()),
               lastMessageSenderId:
                   (latest?['sender_id'] as String?) ?? _sessionUserId,
+              lastMessageReadAt: null,
               unreadCount: unreadByChannel[id] ?? 0,
               lastIncomingAt: lastIncomingByChannel[id],
             );
@@ -2692,6 +2699,40 @@ class _ChatsPageState extends State<ChatsPage> {
     );
   }
 
+  Widget _buildThreadSubtitle(
+    BuildContext context,
+    _ChatThread t,
+    bool isUnread,
+  ) {
+    final baseStyle = TextStyle(
+      color: t.isTemirtauCity
+          ? const Color(0xFF0369A1)
+          : Colors.grey.shade600,
+      fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
+    );
+    final text = Text(
+      t.lastMessageText,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: baseStyle,
+    );
+    final showTicks = t.kind == _ChatThreadKind.direct &&
+        !t.isTemirtauCity &&
+        !t.fromGlobalSearch &&
+        t.lastMessageSenderId == _sessionUserId;
+    if (!showTicks) return text;
+    return Row(
+      children: [
+        Expanded(child: text),
+        const SizedBox(width: 6),
+        Padding(
+          padding: const EdgeInsets.only(top: 1),
+          child: _DmListReadTicks(readAt: t.lastMessageReadAt),
+        ),
+      ],
+    );
+  }
+
   Widget _buildThreadTile(
     BuildContext context,
     _ChatThread t,
@@ -2775,17 +2816,7 @@ class _ChatsPageState extends State<ChatsPage> {
             ],
           ],
         ),
-        subtitle: Text(
-          t.lastMessageText,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: t.isTemirtauCity
-                ? const Color(0xFF0369A1)
-                : Colors.grey.shade600,
-            fontWeight: isUnread ? FontWeight.w500 : FontWeight.w400,
-          ),
-        ),
+        subtitle: _buildThreadSubtitle(context, t, isUnread),
         trailing: showRequestActions
             ? SizedBox(
                 width: 168,
@@ -3059,6 +3090,41 @@ class _SwipeActionBackground extends StatelessWidget {
   }
 }
 
+/// Галочки прочтения в строке превью (как внутри чата).
+class _DmListReadTicks extends StatelessWidget {
+  const _DmListReadTicks({required this.readAt});
+
+  final dynamic readAt;
+
+  @override
+  Widget build(BuildContext context) {
+    final read = readAt != null;
+    final color = read
+        ? const Color(0xFF22C55E)
+        : const Color(0xFFEF4444);
+
+    return SizedBox(
+      width: 22,
+      height: 14,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned(
+            left: 0,
+            top: 0,
+            child: Icon(Icons.done_rounded, size: 13, color: color),
+          ),
+          Positioned(
+            left: 7,
+            top: 0,
+            child: Icon(Icons.done_rounded, size: 13, color: color),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ChatThread {
   const _ChatThread({
     this.kind = _ChatThreadKind.direct,
@@ -3068,6 +3134,7 @@ class _ChatThread {
     required this.lastMessageText,
     required this.lastMessageAt,
     required this.lastMessageSenderId,
+    this.lastMessageReadAt,
     this.unreadCount = 0,
     this.lastIncomingAt,
     this.isBlocked = false,
@@ -3082,6 +3149,8 @@ class _ChatThread {
   final String lastMessageText;
   final DateTime lastMessageAt;
   final String lastMessageSenderId;
+  /// [read_at] последнего сообщения, если оно **исходящее**; иначе null.
+  final dynamic lastMessageReadAt;
   final int unreadCount;
   final DateTime? lastIncomingAt;
   final bool isBlocked;
@@ -3108,6 +3177,7 @@ class _ChatThread {
       lastMessageText: lastMessageText,
       lastMessageAt: lastMessageAt,
       lastMessageSenderId: lastMessageSenderId,
+      lastMessageReadAt: lastMessageReadAt,
       unreadCount: unreadCount ?? this.unreadCount,
       lastIncomingAt: lastIncomingAt ?? this.lastIncomingAt,
       isBlocked: isBlocked ?? this.isBlocked,

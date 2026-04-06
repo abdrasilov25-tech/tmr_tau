@@ -195,6 +195,9 @@ class PostRepositoryImpl implements PostRepository {
             authorOfficialPageActive: p.authorOfficialPageActive,
             isFollowingAuthor: p.userId != currentUserId &&
                 followingAuthorIds.contains(p.userId),
+            musicTitle: p.musicTitle,
+            musicArtist: p.musicArtist,
+            musicPreviewUrl: p.musicPreviewUrl,
           ),
         )
         .toList();
@@ -891,6 +894,9 @@ class PostRepositoryImpl implements PostRepository {
                 promotedUntil: p.promotedUntil,
                 authorOfficialPageActive: p.authorOfficialPageActive,
                 isFollowingAuthor: followingProfile,
+                musicTitle: p.musicTitle,
+                musicArtist: p.musicArtist,
+                musicPreviewUrl: p.musicPreviewUrl,
               ))
           .toList();
     }
@@ -1012,6 +1018,9 @@ class PostRepositoryImpl implements PostRepository {
     String? locationLabel,
     String? pollQuestion,
     List<String> pollOptions = const [],
+    String? musicTitle,
+    String? musicArtist,
+    String? musicPreviewUrl,
   }) async {
     final normalizedKind = kind.trim().toLowerCase() == 'news'
         ? 'news'
@@ -1055,6 +1064,18 @@ class PostRepositoryImpl implements PostRepository {
         normalizedKind == 'news') {
       data['poll_question'] = pq;
       data['poll_options'] = cleanPollOpts;
+    }
+    final mTitle = musicTitle?.trim();
+    final mArtist = musicArtist?.trim();
+    final mUrl = musicPreviewUrl?.trim();
+    if (mTitle != null && mTitle.isNotEmpty) {
+      data['music_title'] = mTitle;
+    }
+    if (mArtist != null && mArtist.isNotEmpty) {
+      data['music_artist'] = mArtist;
+    }
+    if (mUrl != null && mUrl.isNotEmpty) {
+      data['music_preview_url'] = mUrl;
     }
     final res = await _client
         .from(SupabaseConstants.postsTable)
@@ -1447,33 +1468,10 @@ class PostRepositoryImpl implements PostRepository {
           followingAuthor = row != null;
         } catch (e) { debugPrint('$e'); }
       }
-      return PostModel(
-        id: post.id,
-        userId: post.userId,
-        kind: post.kind,
-        imageUrl: post.imageUrl,
-        imageUrls: post.imageUrls,
-        caption: post.caption,
-        videoUrl: post.videoUrl,
-        videoDurationSeconds: post.videoDurationSeconds,
-        createdAt: post.createdAt,
-        likesCount: post.likesCount,
-        dislikesCount: post.dislikesCount,
-        commentsCount: post.commentsCount,
-        viewsCount: post.viewsCount,
-        repostsCount: post.repostsCount,
-        userName: post.userName,
-        userAvatarUrl: post.userAvatarUrl,
+      return post.copyWith(
         isLikedByMe: like != null,
-        isDislikedByMe: post.isDislikedByMe,
         isRepostedByMe: repost != null,
         isSavedByMe: save != null,
-        latitude: post.latitude,
-        longitude: post.longitude,
-        distanceKm: post.distanceKm,
-        isPromoted: post.isPromoted,
-        promotedUntil: post.promotedUntil,
-        authorOfficialPageActive: post.authorOfficialPageActive,
         isFollowingAuthor: followingAuthor,
       );
     }

@@ -42,77 +42,89 @@ class PostGridEngagementOverlay extends StatelessWidget {
           ),
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(5, 12, 5, 5),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.favorite_rounded,
-                size: 12,
-                color: Colors.white,
-              ),
-              const SizedBox(width: 3),
-              Text(
-                formatCompactCount(post.likesCount),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(
-                Icons.chat_bubble_outline_rounded,
-                size: 11,
-                color: Colors.white,
-              ),
-              const SizedBox(width: 3),
-              Text(
-                formatCompactCount(post.commentsCount),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Icon(
-                Icons.repeat_rounded,
-                size: 12,
-                color: Colors.white,
-              ),
-              const SizedBox(width: 3),
-              Text(
-                formatCompactCount(post.repostsCount),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
-                ),
-              ),
-              if (showViewCount) ...[
-                const Spacer(),
-                Icon(
-                  Icons.play_arrow_rounded,
-                  size: 13,
-                  color: Colors.white.withValues(alpha: 0.92),
-                ),
-                const SizedBox(width: 3),
-                Text(
-                  formatCompactCount(post.viewsCount),
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.92),
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    shadows: const [
-                      Shadow(color: Colors.black54, blurRadius: 2),
+          padding: const EdgeInsets.fromLTRB(4, 12, 4, 5),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.bottomLeft,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.favorite_rounded,
+                        size: 12,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        formatCompactCount(post.likesCount),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        size: 11,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        formatCompactCount(post.commentsCount),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      const Icon(
+                        Icons.repeat_rounded,
+                        size: 12,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        formatCompactCount(post.repostsCount),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          shadows: [Shadow(color: Colors.black54, blurRadius: 2)],
+                        ),
+                      ),
+                      if (showViewCount) ...[
+                        const SizedBox(width: 6),
+                        Icon(
+                          Icons.play_arrow_rounded,
+                          size: 13,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          formatCompactCount(post.viewsCount),
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.92),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            shadows: const [
+                              Shadow(color: Colors.black54, blurRadius: 2),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
-              ],
-            ],
+              );
+            },
           ),
         ),
       ),

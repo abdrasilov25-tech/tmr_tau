@@ -50,6 +50,11 @@ import '../widgets/dm_hold_video_overlay.dart';
 import '../widgets/unified_message_composer_bar.dart';
 import '../widgets/chat_rich_emoji_panel.dart';
 
+// Пузыри лички в стиле WhatsApp: исходящие — светло-зелёный, входящие — белый.
+const Color _kDmOutgoingBubble = Color(0xFFDCF8C6);
+const Color _kDmIncomingBubble = Color(0xFFFFFFFF);
+const Color _kWaAccentGreen = Color(0xFF25D366);
+
 class ChatPage extends StatefulWidget {
   const ChatPage({
     super.key,
@@ -2582,11 +2587,11 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   .secondaryContainer
                               : msgType == 'audio'
                                   ? (isMe
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.grey.shade200)
+                                      ? _kDmOutgoingBubble
+                                      : _kDmIncomingBubble)
                                   : isMe
-                                      ? Theme.of(context).colorScheme.primary
-                                      : Colors.grey.shade200;
+                                      ? _kDmOutgoingBubble
+                                      : _kDmIncomingBubble;
                           final useVideoShell = msgType == 'video_circle' &&
                               forwardOf == null &&
                               !isSelected;
@@ -2656,9 +2661,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                             Icon(
                                               Icons.forward_rounded,
                                               size: 14,
-                                              color: isMe
-                                                  ? Colors.white70
-                                                  : Colors.black54,
+                                              color: Colors.black54,
                                             ),
                                             const SizedBox(width: 4),
                                             Text(
@@ -2666,9 +2669,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                               style: TextStyle(
                                                 fontSize: 11,
                                                 fontStyle: FontStyle.italic,
-                                                color: isMe
-                                                    ? Colors.white70
-                                                    : Colors.black54,
+                                                color: Colors.black54,
                                               ),
                                             ),
                                           ],
@@ -2682,17 +2683,14 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                         padding: const EdgeInsets.fromLTRB(
                                             10, 8, 10, 8),
                                         decoration: BoxDecoration(
-                                          color: isMe
-                                              ? Colors.white
-                                                  .withValues(alpha: 0.22)
-                                              : Colors.black
-                                                  .withValues(alpha: 0.06),
+                                          color: Colors.black
+                                              .withValues(alpha: 0.06),
                                           borderRadius:
                                               BorderRadius.circular(10),
                                           border: Border(
                                             left: BorderSide(
                                               color: isMe
-                                                  ? Colors.white70
+                                                  ? const Color(0xFF128C7E)
                                                   : Theme.of(context)
                                                       .colorScheme
                                                       .primary,
@@ -2704,13 +2702,10 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                           replyQuote,
                                           maxLines: 3,
                                           overflow: TextOverflow.ellipsis,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             fontSize: 13,
                                             height: 1.25,
-                                            color: isMe
-                                                ? Colors.white.withValues(
-                                                    alpha: 0.95)
-                                                : Colors.black87,
+                                            color: Colors.black87,
                                           ),
                                         ),
                                       ),
@@ -2869,11 +2864,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                                       : structured == null
                                                           ? Text(
                                                               text,
-                                                              style: TextStyle(
-                                                                color: isMe
-                                                                    ? Colors.white
-                                                                    : Colors
-                                                                        .black87,
+                                                              style: const TextStyle(
+                                                                color: Colors
+                                                                    .black87,
                                                               ),
                                                             )
                                                           : _StoryLinkedChatBubble(
@@ -2902,8 +2895,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                                 ? Icon(
                                                     Icons.access_time_rounded,
                                                     size: 13,
-                                                    color: Colors.white
-                                                        .withValues(alpha: 0.7),
+                                                    color: Colors.black
+                                                        .withValues(alpha: 0.45),
                                                   )
                                                 : _ReadReceiptTicks(
                                                     readAt: m['read_at'],
@@ -4341,7 +4334,7 @@ class _StoryLinkedChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = isMe ? Colors.white : Colors.black87;
+    const textColor = Colors.black87;
     final title = message.kind == 'reaction'
         ? 'Реакция на сторис: ${message.payload}'
         : 'Ответ на сторис: ${message.payload}';
@@ -4396,7 +4389,7 @@ class _PostLinkedChatBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = isMe ? Colors.white : Colors.black87;
+    const textColor = Colors.black87;
     final hasPreview = message.imageUrl.isNotEmpty;
     final hasVideo = message.videoUrl.isNotEmpty;
     return GestureDetector(
@@ -4613,9 +4606,9 @@ class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final textColor = widget.isMe ? Colors.white : Colors.black87;
+    const textColor = Colors.black87;
     final sliderColor =
-        widget.isMe ? Colors.white : Theme.of(context).colorScheme.primary;
+        widget.isMe ? _kWaAccentGreen : Theme.of(context).colorScheme.primary;
     final totalSec = _total.inSeconds > 0 ? _total.inSeconds : 1;
     final progress = (_position.inSeconds / totalSec).clamp(0.0, 1.0);
 
@@ -4630,14 +4623,14 @@ class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
               height: 40,
               decoration: BoxDecoration(
                 color: widget.isMe
-                    ? Colors.white24
+                    ? Colors.black.withValues(alpha: 0.08)
                     : Theme.of(context).colorScheme.primary.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
                 color: widget.isMe
-                    ? Colors.white
+                    ? _kWaAccentGreen
                     : Theme.of(context).colorScheme.primary,
                 size: 22,
               ),
@@ -4656,7 +4649,7 @@ class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
                     value: progress,
                     minHeight: 4,
                     backgroundColor: widget.isMe
-                        ? Colors.white30
+                        ? Colors.black.withValues(alpha: 0.12)
                         : Colors.grey.shade300,
                     valueColor: AlwaysStoppedAnimation<Color>(sliderColor),
                   ),
@@ -4752,7 +4745,7 @@ class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
   Widget build(BuildContext context) {
     const size = 200.0;
     final ringColor = widget.isMe
-        ? Colors.white
+        ? _kWaAccentGreen
         : Theme.of(context).colorScheme.primary;
 
     return GestureDetector(
@@ -4878,13 +4871,13 @@ class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(Icons.videocam_rounded, size: 13,
-                  color: widget.isMe ? Colors.white70 : Colors.black45),
+                  color: Colors.black.withValues(alpha: 0.45)),
               const SizedBox(width: 3),
               Text(
                 'Видео-сообщение',
                 style: TextStyle(
                   fontSize: 11,
-                  color: widget.isMe ? Colors.white70 : Colors.black45,
+                  color: Colors.black.withValues(alpha: 0.45),
                 ),
               ),
             ],
@@ -5122,7 +5115,7 @@ class _ImageMessageBubble extends StatelessWidget {
               bottom: 6,
               right: 8,
               child: Icon(Icons.access_time_rounded,
-                  size: 14, color: Colors.white.withValues(alpha: 0.8)),
+                  size: 14, color: Colors.black.withValues(alpha: 0.55)),
             ),
         ],
       ),
@@ -5210,8 +5203,8 @@ class _EventMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = isMe ? Colors.white : Colors.black87;
-    final sub = isMe ? Colors.white70 : Colors.black54;
+    const fg = Colors.black87;
+    final sub = Colors.black54;
     var whenStr = '—';
     final w = when;
     if (w != null) {
@@ -5349,9 +5342,7 @@ class _StickerMessageBubble extends StatelessWidget {
               child: Icon(
                 Icons.access_time_rounded,
                 size: 14,
-                color: isMe
-                    ? Colors.white.withValues(alpha: 0.85)
-                    : Colors.black38,
+                color: Colors.black.withValues(alpha: 0.5),
               ),
             ),
         ],
@@ -5631,18 +5622,14 @@ class _LocationBubble extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(
                     horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isMe
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.grey.shade200,
+                  color: isMe ? _kDmOutgoingBubble : _kDmIncomingBubble,
                 ),
                 child: Row(
                   children: [
                     Icon(
                       Icons.location_on_rounded,
                       size: 16,
-                      color: isMe
-                          ? Colors.white70
-                          : Colors.red.shade400,
+                      color: isMe ? _kWaAccentGreen : Colors.red.shade400,
                     ),
                     const SizedBox(width: 6),
                     Expanded(
@@ -5650,10 +5637,10 @@ class _LocationBubble extends StatelessWidget {
                         address.isNotEmpty ? address : 'Местоположение',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: isMe ? Colors.white : Colors.black87,
+                          color: Colors.black87,
                         ),
                       ),
                     ),

@@ -262,6 +262,7 @@ class _VideoPage extends StatelessWidget {
         Positioned.fill(
           child: FeedVideoPlayer(
             videoUrl: post.videoUrl!,
+            musicPreviewUrl: post.musicPreviewUrl,
             isActive: isActive,
             looping: true,
             showControls: true,

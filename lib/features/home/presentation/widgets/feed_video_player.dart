@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:tmr_tau/core/media/cached_video_controller.dart';
 import 'package:tmr_tau/core/media/global_video_audio_state.dart';
@@ -30,9 +31,14 @@ class FeedVideoPlayer extends StatefulWidget {
     /// Заполняет родителя с [BoxFit.cover] (рилсы / полноэкранный фид).
     /// В ленте карточек оставьте false.
     this.coverFullscreen = false,
+    /// URL превью трека (iTunes и т.п.): играет вместо звука ролика, в цикле.
+    this.musicPreviewUrl,
   });
 
   final String videoUrl;
+
+  /// Не muxed в файл — отдельный аудиопоток поверх видео.
+  final String? musicPreviewUrl;
 
   /// Управляет авто-воспроизведением: true = play, false = pause.
   final bool isActive;
@@ -57,6 +63,8 @@ class FeedVideoPlayer extends StatefulWidget {
 
 class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   VideoPlayerController? _controller;
+  AudioPlayer? _musicPlayer;
+  bool _musicActive = false;
   bool _initialized = false;
   bool _error = false;
   bool _showPlayIcon = false;
@@ -78,20 +86,56 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
       controller.setVolume(_audioState.isMuted.value ? 0 : 1);
       if (!mounted) {
         await controller.dispose();
+        await _disposeMusicPlayer();
         return;
       }
       _controller = controller;
       setState(() => _initialized = true);
-      if (widget.isActive) controller.play();
+
+      final track = widget.musicPreviewUrl?.trim();
+      if (track != null && track.isNotEmpty) {
+        try {
+          await _attachMusicTrack(track, controller);
+        } catch (_) {
+          await controller.setVolume(_audioState.isMuted.value ? 0 : 1);
+        }
+      } else {
+        await _disposeMusicPlayer();
+      }
+
+      if (widget.isActive) {
+        await controller.play();
+        if (_musicActive) await _musicPlayer?.resume();
+      }
     } catch (e) {
       if (mounted) setState(() => _error = true);
     }
   }
 
+  Future<void> _attachMusicTrack(String url, VideoPlayerController video) async {
+    await _disposeMusicPlayer();
+    final player = AudioPlayer();
+    await player.setReleaseMode(ReleaseMode.loop);
+    await player.setVolume(_audioState.isMuted.value ? 0 : 1);
+    await player.setSource(UrlSource(url));
+    await video.setVolume(0);
+    _musicPlayer = player;
+    _musicActive = true;
+  }
+
+  Future<void> _disposeMusicPlayer() async {
+    _musicActive = false;
+    final p = _musicPlayer;
+    _musicPlayer = null;
+    await p?.dispose();
+  }
+
   @override
   void didUpdateWidget(FeedVideoPlayer old) {
     super.didUpdateWidget(old);
-    if (widget.videoUrl != old.videoUrl) {
+    if (widget.videoUrl != old.videoUrl ||
+        widget.musicPreviewUrl != old.musicPreviewUrl) {
+      unawaited(_disposeMusicPlayer());
       _controller?.dispose();
       _controller = null;
       setState(() {
@@ -108,9 +152,11 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
     if (widget.isActive != old.isActive) {
       if (widget.isActive) {
         c.play();
+        if (_musicActive) unawaited(_musicPlayer?.resume());
       } else {
         c.pause();
         c.seekTo(Duration.zero);
+        if (_musicActive) unawaited(_musicPlayer?.pause());
       }
     }
   }
@@ -118,6 +164,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   @override
   void dispose() {
     _audioState.isMuted.removeListener(_syncVolumeWithGlobalState);
+    unawaited(_disposeMusicPlayer());
     _controller?.dispose();
     super.dispose();
   }
@@ -125,7 +172,13 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   void _syncVolumeWithGlobalState() {
     final c = _controller;
     if (c == null || !_initialized) return;
-    c.setVolume(_audioState.isMuted.value ? 0 : 1);
+    final muted = _audioState.isMuted.value;
+    if (_musicActive) {
+      c.setVolume(0);
+      _musicPlayer?.setVolume(muted ? 0 : 1);
+    } else {
+      c.setVolume(muted ? 0 : 1);
+    }
     if (mounted) setState(() {});
   }
 
@@ -139,9 +192,11 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
     setState(() {
       if (c.value.isPlaying) {
         c.pause();
+        if (_musicActive) unawaited(_musicPlayer?.pause());
         _showPlayIcon = true;
       } else {
         c.play();
+        if (_musicActive) unawaited(_musicPlayer?.resume());
         _showPlayIcon = false;
       }
     });
@@ -291,7 +346,6 @@ class _CoverFullscreenVideo extends StatelessWidget {
     final sz = controller.value.size;
     final w = sz.width;
     final h = sz.height;
-    final pad = MediaQuery.paddingOf(context);
 
     return SizedBox.expand(
       child: Stack(
@@ -343,38 +397,42 @@ class _CoverFullscreenVideo extends StatelessWidget {
                 ),
               ),
             ),
-          Positioned(
-            top: pad.top + 6,
-            right: 10,
-            child: ValueListenableBuilder<bool>(
-              valueListenable: GlobalVideoAudioState.instance.isMuted,
-              builder: (context, muted, _) {
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onMuteTap,
-                    customBorder: const CircleBorder(),
-                    child: Ink(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.35),
+          // Ниже по экрану (как в TikTok), чтобы не пересекаться с системной
+          // полосой и не «прилипать» к верху рилса.
+          Align(
+            alignment: const Alignment(0.88, 0.54),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: ValueListenableBuilder<bool>(
+                valueListenable: GlobalVideoAudioState.instance.isMuted,
+                builder: (context, muted, _) {
+                  return Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onMuteTap,
+                      customBorder: const CircleBorder(),
+                      child: Ink(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.35),
+                          ),
+                        ),
+                        child: Icon(
+                          muted
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          color: Colors.white,
+                          size: 24,
                         ),
                       ),
-                      child: Icon(
-                        muted
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.white,
-                        size: 24,
-                      ),
                     ),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ],

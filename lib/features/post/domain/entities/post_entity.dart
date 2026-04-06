@@ -36,6 +36,9 @@ class PostEntity extends Equatable {
     this.myPollVoteIndex,
     this.authorOfficialPageActive = false,
     this.isFollowingAuthor = false,
+    this.musicTitle,
+    this.musicArtist,
+    this.musicPreviewUrl,
   });
 
   final String id;
@@ -77,6 +80,11 @@ class PostEntity extends Equatable {
   final bool authorOfficialPageActive;
   /// Текущий пользователь подписан на автора (followers).
   final bool isFollowingAuthor;
+
+  /// Музыка поверх видео (метаданные + URL превью, как в сторис).
+  final String? musicTitle;
+  final String? musicArtist;
+  final String? musicPreviewUrl;
 
   bool get hasPoll =>
       pollQuestion != null &&
@@ -128,6 +136,10 @@ class PostEntity extends Equatable {
     bool clearMyPollVote = false,
     bool? authorOfficialPageActive,
     bool? isFollowingAuthor,
+    String? musicTitle,
+    String? musicArtist,
+    String? musicPreviewUrl,
+    bool clearMusic = false,
   }) {
     return PostEntity(
       id: id ?? this.id,
@@ -166,6 +178,10 @@ class PostEntity extends Equatable {
           : (myPollVoteIndex ?? this.myPollVoteIndex),
       authorOfficialPageActive: authorOfficialPageActive ?? this.authorOfficialPageActive,
       isFollowingAuthor: isFollowingAuthor ?? this.isFollowingAuthor,
+      musicTitle: clearMusic ? null : (musicTitle ?? this.musicTitle),
+      musicArtist: clearMusic ? null : (musicArtist ?? this.musicArtist),
+      musicPreviewUrl:
+          clearMusic ? null : (musicPreviewUrl ?? this.musicPreviewUrl),
     );
   }
 
@@ -205,5 +221,8 @@ class PostEntity extends Equatable {
         myPollVoteIndex,
         authorOfficialPageActive,
         isFollowingAuthor,
+        musicTitle,
+        musicArtist,
+        musicPreviewUrl,
       ];
 }

@@ -36,6 +36,9 @@ class PostModel extends PostEntity {
     super.myPollVoteIndex,
     super.authorOfficialPageActive = false,
     super.isFollowingAuthor = false,
+    super.musicTitle,
+    super.musicArtist,
+    super.musicPreviewUrl,
   });
 
   factory PostModel.fromJson(Map<String, dynamic> json) {
@@ -60,6 +63,12 @@ class PostModel extends PostEntity {
           .toList();
     }
     final pq = (json['poll_question'] as String?)?.trim();
+    String? optStr(dynamic v) {
+      if (v == null) return null;
+      final s = v.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+
     return PostModel(
       id: json['id'] as String,
       userId: json['user_id'] as String,
@@ -95,6 +104,9 @@ class PostModel extends PostEntity {
       myPollVoteIndex: null,
       authorOfficialPageActive: (json['author_official_page_active'] as bool?) ?? false,
       isFollowingAuthor: (json['is_following_author'] as bool?) ?? false,
+      musicTitle: optStr(json['music_title']),
+      musicArtist: optStr(json['music_artist']),
+      musicPreviewUrl: optStr(json['music_preview_url']),
     );
   }
 }

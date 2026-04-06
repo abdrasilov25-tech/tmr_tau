@@ -33,6 +33,15 @@ class _VideoTrimPageState extends State<VideoTrimPage> {
 
   Future<void> _load() async {
     await _trimmer.loadVideo(videoFile: widget.sourceFile);
+    final c = _trimmer.videoPlayerController;
+    final totalMs = (c != null && c.value.isInitialized)
+        ? c.value.duration.inMilliseconds.toDouble()
+        : 0.0;
+    final capMs = widget.maxDurationSeconds * 1000.0;
+    if (totalMs > 0) {
+      _startValue = 0;
+      _endValue = totalMs < capMs ? totalMs : capMs;
+    }
     if (mounted) setState(() => _loadingVideo = false);
   }
 
@@ -126,8 +135,12 @@ class _VideoTrimPageState extends State<VideoTrimPage> {
         ),
         body: _loadingVideo
             ? const Center(child: CircularProgressIndicator(color: Colors.white))
-            : Column(
-                children: [
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final trimStripW =
+                      (constraints.maxWidth - 16).clamp(120.0, double.infinity);
+                  return Column(
+                    children: [
                   if (_saving)
                     const LinearProgressIndicator(
                       backgroundColor: Colors.black,
@@ -148,7 +161,7 @@ class _VideoTrimPageState extends State<VideoTrimPage> {
                     child: TrimViewer(
                       trimmer: _trimmer,
                       viewerHeight: 52,
-                      viewerWidth: MediaQuery.sizeOf(context).width,
+                      viewerWidth: trimStripW,
                       type: ViewerType.auto,
                       maxVideoLength: _maxLen,
                       durationStyle: _durationStyle,
@@ -186,7 +199,9 @@ class _VideoTrimPageState extends State<VideoTrimPage> {
                       ),
                     ),
                   ),
-                ],
+                    ],
+                  );
+                },
               ),
       ),
     );

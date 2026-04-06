@@ -18,6 +18,7 @@ import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_grid_engagement_overlay.dart';
+import '../../../post/presentation/widgets/post_video_grid_thumbnail.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
 import '../../../product/domain/entities/product_entity.dart';
 import '../../../product/presentation/bloc/payment_cubit.dart';
@@ -1116,16 +1117,34 @@ class _ProfilePublicationsGrid extends StatelessWidget {
             child: const Center(child: Icon(Icons.person_outline_rounded)),
           );
         } else if (hasVideo && p.imageUrl.isEmpty) {
-          content = ColoredBox(
-            color: Colors.grey.shade300,
-            child: const Center(
-              child: Icon(
-                Icons.play_circle_fill,
-                size: 36,
-                color: Colors.white70,
-              ),
-            ),
-          );
+          final vUrl = (p.videoUrl ?? '').trim();
+          content = vUrl.isEmpty
+              ? ColoredBox(
+                  color: Colors.grey.shade300,
+                  child: const Center(
+                    child: Icon(
+                      Icons.play_circle_fill,
+                      size: 36,
+                      color: Colors.white70,
+                    ),
+                  ),
+                )
+              : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    PostVideoGridThumbnail(
+                      videoUrl: vUrl,
+                      memCacheWidth: gridThumbPx,
+                    ),
+                    const Center(
+                      child: Icon(
+                        Icons.play_circle_fill,
+                        size: 36,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  ],
+                );
         } else {
           content = Stack(
             fit: StackFit.expand,
