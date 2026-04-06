@@ -111,7 +111,7 @@ class _MapProductSheetBodyState extends State<_MapProductSheetBody> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Спасибо за оценку!')),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось отправить оценку')),

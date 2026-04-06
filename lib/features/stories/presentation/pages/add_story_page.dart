@@ -220,7 +220,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
           _loading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
   }
@@ -387,7 +387,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
       await controller.initialize();
       durationSeconds = controller.value.duration.inSeconds;
       await controller.dispose();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось определить длительность видео')),
@@ -613,7 +613,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
       await prefs.setString(_prefStoryDraftPath, dest.path);
       await prefs.setBool(_prefStoryDraftIsVideo, _video != null);
       await prefs.setString(_prefStoryDraftCaption, _captionController.text);
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось сохранить черновик')),

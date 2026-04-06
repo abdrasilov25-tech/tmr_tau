@@ -123,6 +123,84 @@ Widget _shellNavCountBadge({required String label, required Widget icon}) {
   );
 }
 
+/// Ветви нижней навигации не строим до первого захода на вкладку — иначе при старте
+/// одновременно поднимаются Search, Map(+MapBloc), Chats, News, Profile и давят сеть/UI.
+Widget _lazyIndexedShellBuilder(
+  BuildContext context,
+  StatefulNavigationShell navigationShell,
+  List<Widget> children,
+) {
+  return _LazyIndexedShellContainer(
+    currentIndex: navigationShell.currentIndex,
+    children: children,
+  );
+}
+
+class _LazyIndexedShellContainer extends StatefulWidget {
+  const _LazyIndexedShellContainer({
+    required this.currentIndex,
+    required this.children,
+  });
+
+  final int currentIndex;
+  final List<Widget> children;
+
+  @override
+  State<_LazyIndexedShellContainer> createState() =>
+      _LazyIndexedShellContainerState();
+}
+
+class _LazyIndexedShellContainerState extends State<_LazyIndexedShellContainer> {
+  late List<bool> _activated;
+
+  @override
+  void initState() {
+    super.initState();
+    _activated = List<bool>.filled(widget.children.length, false);
+    _activated[widget.currentIndex] = true;
+  }
+
+  @override
+  void didUpdateWidget(_LazyIndexedShellContainer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.children.length != _activated.length) {
+      final next = List<bool>.filled(widget.children.length, false);
+      for (var i = 0;
+          i < next.length && i < _activated.length;
+          i++) {
+        next[i] = _activated[i];
+      }
+      _activated = next;
+    }
+    _activated[widget.currentIndex] = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final stackChildren = <Widget>[];
+    for (var i = 0; i < widget.children.length; i++) {
+      if (i >= _activated.length || !_activated[i]) {
+        stackChildren.add(const SizedBox.shrink());
+        continue;
+      }
+      final active = widget.currentIndex == i;
+      stackChildren.add(
+        Offstage(
+          offstage: !active,
+          child: TickerMode(
+            enabled: active,
+            child: widget.children[i],
+          ),
+        ),
+      );
+    }
+    return IndexedStack(
+      index: widget.currentIndex,
+      children: stackChildren,
+    );
+  }
+}
+
 class AppRouter {
   AppRouter({
     required this.feedRepository,
@@ -536,11 +614,12 @@ class AppRouter {
           return null;
         },
         routes: [
-          StatefulShellRoute.indexedStack(
+          StatefulShellRoute(
             builder: (context, state, navigationShell) => _MainShell(
               navigationShell: navigationShell,
               searchTabActivation: searchTabActivation,
             ),
+            navigatorContainerBuilder: _lazyIndexedShellBuilder,
             branches: [
               StatefulShellBranch(
                 routes: [
@@ -629,7 +708,7 @@ class _AuthCallbackPageState extends State<_AuthCallbackPage> {
     if (code != null && code.isNotEmpty) {
       try {
         await supa.Supabase.instance.client.auth.exchangeCodeForSession(code);
-      } catch (_) {
+      } catch (e) {
         // Если обмен кода не удался — просто продолжаем до проверки AuthBloc.
       }
     }

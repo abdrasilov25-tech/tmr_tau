@@ -212,7 +212,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
       avatarPath = cropped.path;
     } on MissingPluginException {
       // Тихий fallback: продолжаем с исходным фото без лишних сообщений.
-    } on PlatformException catch (_) {
+    } on PlatformException catch (e) {
+      debugPrint('$e');
       // Cropper может быть недоступен на части платформ/сборок.
     }
     setState(() => _updatingAvatar = true);
@@ -436,7 +437,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
       if (publicationPosts.isEmpty) {
         unawaited(_backfillPublicationsFromSearch(uid, requestId));
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() {
           _loading = false;
@@ -474,7 +475,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         _autoReloadTriggeredForPublications = false;
       });
       _storeWarmCache(uid);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _openBioEditor() async {
@@ -551,7 +552,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         _profile = _profile?.copyWith(bio: nextBio);
       });
       _storeWarmCache(state.user.id);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось обновить био')),
@@ -567,7 +568,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           .eq('user_id', uid)
           .maybeSingle();
       return (me?['story_note'] ?? '').toString().trim();
-    } catch (_) {
+    } catch (e) {
       return '';
     }
   }
@@ -582,7 +583,8 @@ class _MyProfilePageState extends State<MyProfilePage> {
       return (row?['is_verified'] as bool? ?? false) ||
           (row?['official_page_active'] as bool? ?? false) ||
           (row?['seller_verified_store'] as bool? ?? false);
-    } on supa.PostgrestException catch (_) {
+    } on supa.PostgrestException catch (e) {
+      debugPrint('$e');
       final row = await supa.Supabase.instance.client
           .from(SupabaseConstants.usersTable)
           .select('is_verified')
@@ -622,7 +624,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
             peerIds.add(senderId);
           }
         }
-      } catch (_) {
+      } catch (e) {
         // Даже если чат-список недоступен, собственные сторис все равно покажем.
       }
       if (!mounted) return;
@@ -672,7 +674,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
         setState(() => _loading = false);
       }
       _storeWarmCache(uid);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       if (showLoading) {
         setState(() => _loading = false);
@@ -1045,7 +1047,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       ownGroup.userId: false,
                     };
                   });
-                } catch (_) {}
+                } catch (e) { debugPrint('$e'); }
                 if (!context.mounted) return;
                 await _loadProfileStories(user.id);
               },
@@ -1176,7 +1178,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
                       account.id,
                       email: account.email,
                     );
-                  } catch (_) {
+                  } catch (e) {
                     password = null;
                   }
                   if (password == null || password.isEmpty) {
@@ -1510,12 +1512,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
                   final userId = authState.user.id;
                   try {
                     rootContext.read<AccountManager>().removeAccount(userId);
-                  } catch (_) {}
+                  } catch (e) { debugPrint('$e'); }
                   try {
                     rootContext.read<MultiAccountStorage>().removeAccount(
                       userId,
                     );
-                  } catch (_) {}
+                  } catch (e) { debugPrint('$e'); }
                 }
                 navigator.pop();
                 rootContext.read<AuthBloc>().add(const AuthSignOutRequested());

@@ -78,7 +78,7 @@ class _PostDetailModalState extends State<PostDetailModal> {
         _comments = list;
         _loadingComments = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loadingComments = false);
     }
   }
@@ -96,7 +96,7 @@ class _PostDetailModalState extends State<PostDetailModal> {
               : _post.likesCount + 1,
         );
       });
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _toggleSave() async {
@@ -105,7 +105,7 @@ class _PostDetailModalState extends State<PostDetailModal> {
       await widget.repository.toggleSave(_post.id, widget.currentUserId!);
       if (!mounted) return;
       setState(() => _post = _post.copyWith(isSavedByMe: !_post.isSavedByMe));
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _submitComment() async {
@@ -121,8 +121,7 @@ class _PostDetailModalState extends State<PostDetailModal> {
       );
       _commentCtrl.clear();
       await _loadComments();
-    } catch (_) {
-    } finally {
+    } catch (e) { debugPrint('$e'); } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }

@@ -61,7 +61,7 @@ class _DmHoldVideoOverlayState extends State<DmHoldVideoOverlay> {
       _ctrl = ctrl;
       setState(() => _ready = true);
       await _startRecording();
-    } catch (_) {
+    } catch (e) {
       if (mounted) Navigator.of(context).pop();
     }
   }
@@ -71,7 +71,7 @@ class _DmHoldVideoOverlayState extends State<DmHoldVideoOverlay> {
     if (ctrl == null || !ctrl.value.isInitialized || _recording) return;
     try {
       await ctrl.startVideoRecording();
-    } catch (_) {
+    } catch (e) {
       if (mounted) Navigator.of(context).pop();
       return;
     }
@@ -117,14 +117,14 @@ class _DmHoldVideoOverlayState extends State<DmHoldVideoOverlay> {
       if (_seconds < 1) {
         try {
           await file.delete();
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
         if (!mounted) return;
         Navigator.of(context).pop();
         return;
       }
       if (!mounted) return;
       Navigator.of(context).pop(DmHoldVideoResult(file: file));
-    } catch (_) {
+    } catch (e) {
       if (mounted) Navigator.of(context).pop();
     }
   }
@@ -138,8 +138,8 @@ class _DmHoldVideoOverlayState extends State<DmHoldVideoOverlay> {
         final x = await ctrl.stopVideoRecording();
         try {
           await File(x.path).delete();
-        } catch (_) {}
-      } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
+      } catch (e) { debugPrint('$e'); }
     }
     if (mounted) Navigator.of(context).pop();
   }

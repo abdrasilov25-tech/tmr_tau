@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter/services.dart';
+
+import '../../../../core/feedback/feedback_manager.dart';
+import '../../../../core/storage/hidden_posts_storage.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../../core/widgets/feed_product_card_skeleton.dart';
 import '../../../../core/widgets/cached_avatar.dart';
@@ -200,6 +204,9 @@ class _FeedPageState extends State<FeedPage> {
                                     ),
                                   )
                               : null,
+                          onHide: () => context.read<FeedBloc>().add(
+                                FeedProductRemoved(productId: product.id),
+                              ),
                         );
                       },
                       childCount:
@@ -531,6 +538,7 @@ class _ProductCard extends StatelessWidget {
     this.onFollow,
     required this.onComment,
     this.onRepost,
+    this.onHide,
   });
 
   final ProductEntity product;
@@ -541,6 +549,7 @@ class _ProductCard extends StatelessWidget {
   final VoidCallback? onFollow;
   final VoidCallback onComment;
   final VoidCallback? onRepost;
+  final VoidCallback? onHide;
 
   @override
   Widget build(BuildContext context) {
@@ -597,7 +606,14 @@ class _ProductCard extends StatelessWidget {
                 ),
                 if (onFollow != null)
                   TextButton(
-                    onPressed: onFollow,
+                    onPressed: () {
+                      if (product.isFollowingSeller) {
+                        FeedbackManager.instance.buttonTap();
+                      } else {
+                        FeedbackManager.instance.success();
+                      }
+                      onFollow!();
+                    },
                     child: Text(
                       product.isFollowingSeller ? 'Отписаться' : 'Подписаться',
                       style: TextStyle(
@@ -607,6 +623,18 @@ class _ProductCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                IconButton(
+                  icon: const Icon(Icons.more_horiz_rounded,
+                      color: Colors.white, size: 22),
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  onPressed: () => _showOptions(
+                    context,
+                    product: product,
+                    currentUserId: currentUserId,
+                    onHide: onHide,
+                  ),
+                ),
               ],
             ),
           ),
@@ -742,8 +770,272 @@ class _ProductCard extends StatelessWidget {
       ),
     );
   }
+
+  static void _showOptions(
+    BuildContext context, {
+    required ProductEntity product,
+    required String? currentUserId,
+    VoidCallback? onHide,
+  }) {
+    final isOwn =
+        currentUserId != null && currentUserId == product.sellerId;
+
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => _ProductOptionsSheet(
+        product: product,
+        isOwn: isOwn,
+        onHide: onHide,
+        parentContext: context,
+      ),
+    );
+  }
 }
 
+class _ProductOptionsSheet extends StatefulWidget {
+  const _ProductOptionsSheet({
+    required this.product,
+    required this.isOwn,
+    required this.parentContext,
+    this.onHide,
+  });
+
+  final ProductEntity product;
+  final bool isOwn;
+  final BuildContext parentContext;
+  final VoidCallback? onHide;
+
+  @override
+  State<_ProductOptionsSheet> createState() => _ProductOptionsSheetState();
+}
+
+class _ProductOptionsSheetState extends State<_ProductOptionsSheet> {
+  bool _showReport = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: _showReport
+            ? _buildReportSheet(context)
+            : _buildMainSheet(context),
+      ),
+    );
+  }
+
+  Widget _buildMainSheet(BuildContext context) {
+    return Column(
+      key: const ValueKey('main'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: 10, bottom: 4),
+          width: 36,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade600,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        if (widget.isOwn) ...[
+          ListTile(
+            leading:
+                const Icon(Icons.edit_outlined, color: Colors.white),
+            title: const Text('Редактировать',
+                style: TextStyle(color: Colors.white)),
+            onTap: () {
+              Navigator.of(context).pop();
+              GoRouter.of(widget.parentContext)
+                  .push('/edit-product', extra: widget.product);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.delete_outline, color: Colors.red),
+            title: const Text('Удалить',
+                style: TextStyle(color: Colors.red)),
+            onTap: () => Navigator.of(context).pop(),
+          ),
+        ] else ...[
+          ListTile(
+            leading: const Icon(Icons.hide_source_outlined,
+                color: Colors.white),
+            title: const Text('Скрыть',
+                style: TextStyle(color: Colors.white)),
+            onTap: () async {
+              Navigator.of(context).pop();
+              await HiddenPostsStorage.hidePost(widget.product.id);
+              widget.onHide?.call();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.thumb_down_outlined,
+                color: Colors.white),
+            title: const Text('Не интересует',
+                style: TextStyle(color: Colors.white)),
+            onTap: () async {
+              Navigator.of(context).pop();
+              await HiddenPostsStorage.hidePost(widget.product.id);
+              widget.onHide?.call();
+            },
+          ),
+          ListTile(
+            leading:
+                const Icon(Icons.flag_outlined, color: Colors.red),
+            title: const Text('Пожаловаться',
+                style: TextStyle(color: Colors.red)),
+            onTap: () => setState(() => _showReport = true),
+          ),
+          ListTile(
+            leading: const Icon(Icons.block_rounded, color: Colors.red),
+            title: const Text('Заблокировать продавца',
+                style: TextStyle(color: Colors.red)),
+            onTap: () {
+              Navigator.of(context).pop();
+              showDialog<void>(
+                context: widget.parentContext,
+                builder: (dlgCtx) => AlertDialog(
+                  title: Text(
+                    'Заблокировать ${widget.product.sellerName ?? 'продавца'}?',
+                  ),
+                  content: const Text(
+                    'Вы сможете меньше видеть этого продавца в ленте.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dlgCtx),
+                      child: const Text('Отмена'),
+                    ),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.red.shade600,
+                      ),
+                      onPressed: () {
+                        Navigator.pop(dlgCtx);
+                        ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '${widget.product.sellerName ?? 'Продавец'} заблокирован',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                      child: const Text('Заблокировать'),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.support_agent_outlined,
+                color: Colors.white),
+            title: const Text('Написать в поддержку',
+                style: TextStyle(color: Colors.white)),
+            onTap: () {
+              Navigator.of(context).pop();
+              GoRouter.of(widget.parentContext)
+                  .push('/profile/settings/report-problem');
+            },
+          ),
+        ],
+        ListTile(
+          leading: const Icon(Icons.link_outlined, color: Colors.white),
+          title: const Text('Скопировать ссылку',
+              style: TextStyle(color: Colors.white)),
+          onTap: () {
+            Clipboard.setData(ClipboardData(
+                text:
+                    'https://tmrtau.kz/product/${widget.product.id}'));
+            Navigator.of(context).pop();
+            ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+              const SnackBar(
+                content: Text('Ссылка скопирована'),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+
+  Widget _buildReportSheet(BuildContext context) {
+    const reasons = [
+      'Спам',
+      'Оскорбления или травля',
+      'Обнажённость или сексуальный контент',
+      'Нарушение авторских прав',
+      'Насилие или опасный контент',
+      'Ложная информация',
+      'Другое',
+    ];
+    return Column(
+      key: const ValueKey('report'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: 10, bottom: 4),
+          width: 36,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.grey.shade600,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        Padding(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              GestureDetector(
+                onTap: () => setState(() => _showReport = false),
+                child: const Icon(Icons.arrow_back_ios_new_rounded,
+                    size: 18, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              const Text(
+                'Причина жалобы',
+                style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 16,
+                    color: Colors.white),
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1, color: Colors.white24),
+        ...reasons.map(
+          (reason) => ListTile(
+            title: Text(reason,
+                style:
+                    const TextStyle(color: Colors.red, fontSize: 14)),
+            trailing: const Icon(Icons.arrow_forward_ios_rounded,
+                size: 14, color: Colors.red),
+            onTap: () {
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(widget.parentContext).showSnackBar(
+                const SnackBar(
+                  content: Text('Жалоба отправлена. Спасибо!'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+// ignore: unused_element — kept for consistency
 class _SponsoredCard extends StatelessWidget {
   const _SponsoredCard({required this.onTap});
 

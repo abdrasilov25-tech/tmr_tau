@@ -85,7 +85,7 @@
           "locale" : "ru"
         }
       ],
-      "productID" : "com.example.tmrTau.premium",
+      "productID" : "com.tmrtau.app.premium",
       "referenceName" : "Premium profile",
       "type" : "NonConsumable"
     },
@@ -159,7 +159,9 @@
           "familyShareable" : false,
           "groupNumber" : 1,
           "internalID" : "6761383202",
-          "introductoryOffer" : null,
+          "introductoryOffers" : [
+
+          ],
           "localizations" : [
             {
               "description" : "Подписка Official Page (1 мес.)",
@@ -167,11 +169,14 @@
               "locale" : "ru"
             }
           ],
-          "productID" : "com.example.tmrTau.subscription.monthly",
+          "productID" : "com.tmrtau.app.subscription.monthly",
           "recurringSubscriptionPeriod" : "P1M",
           "referenceName" : "Official Page (bazar)",
           "subscriptionGroupID" : "A8F2C1E4",
-          "type" : "RecurringSubscription"
+          "type" : "RecurringSubscription",
+          "winbackOffers" : [
+
+          ]
         }
       ]
     }

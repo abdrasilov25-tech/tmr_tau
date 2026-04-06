@@ -178,7 +178,7 @@ class _SearchPageState extends State<SearchPage> {
       categories = await context
           .read<CategoriesRepository>()
           .getMainCategories();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     if (!mounted) return;
     setState(() {
       _searchStorage = storage;
@@ -2252,7 +2252,7 @@ class _FiltersSheetState extends State<_FiltersSheet> {
           const SnackBar(content: Text('Не удалось определить геопозицию')),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ошибка получения геопозиции')),

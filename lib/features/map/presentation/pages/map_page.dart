@@ -100,7 +100,7 @@ class _MapPageState extends State<MapPage> {
       );
       if (!mounted) return;
       setState(() => _mysterySpot = spot);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Marker? _buildMysteryMarker() {
@@ -176,7 +176,7 @@ class _MapPageState extends State<MapPage> {
       if (!mounted) return;
       setState(() => _activeZones = zones);
       if (_myPosition != null) _checkCurrentZone(_myPosition!);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   void _checkCurrentZone(LatLng pos) {
@@ -231,7 +231,7 @@ class _MapPageState extends State<MapPage> {
       final progress = await _mapDataSource.getTodayQuestProgress();
       if (!mounted) return;
       setState(() => _questProgress = progress);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _tryCompleteQuest(MapQuestId questId) async {
@@ -265,7 +265,7 @@ class _MapPageState extends State<MapPage> {
           duration: const Duration(seconds: 3),
         ),
       );
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   void _onListingViewed() {
@@ -308,7 +308,7 @@ class _MapPageState extends State<MapPage> {
         _myFeaturedBid = (uid != null && featured?.userId == uid) ? featured?.bidAmount : null;
         _featuredLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _featuredLoading = false);
     }
   }
@@ -441,7 +441,7 @@ class _MapPageState extends State<MapPage> {
           .maybeSingle();
       if (!mounted) return;
       setState(() => _shareMyLocation = row?['share_location'] == true);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _setShareLocation(bool enabled) async {
@@ -524,7 +524,7 @@ class _MapPageState extends State<MapPage> {
         _friends = mapped;
         _friendsLoading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _friendsLoading = false);
     }
@@ -695,7 +695,7 @@ class _MapPageState extends State<MapPage> {
       );
       if (!mounted) return;
       setState(() => _mapsConfigured = configured ?? false);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _mapsConfigured = false);
     }
@@ -738,7 +738,7 @@ class _MapPageState extends State<MapPage> {
       if (mounted) {
         context.read<MapBloc>().add(const MapLocationRequested());
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _hasOfficialPageAccess = false;
@@ -803,7 +803,7 @@ class _MapPageState extends State<MapPage> {
           .buyQarmetPackage(PaymentService.officialPageProductId);
       if (!mounted) return;
       _onOfficialPagePurchaseResult(result);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ошибка покупки, попробуйте позже')),
@@ -1641,7 +1641,7 @@ class _OfficialPageSubscriptionSheetState
         Navigator.of(context).pop();
       }
       widget.onPurchaseCompleted(result);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Ошибка покупки, попробуйте позже')),

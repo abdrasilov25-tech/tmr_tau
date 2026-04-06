@@ -60,7 +60,7 @@ class MapBloc extends Bloc<MapEvent, MapState> {
             timeLimit: Duration(seconds: 25),
           ),
         );
-      } catch (_) {
+      } catch (e) {
         pos = null;
       }
 
@@ -75,7 +75,7 @@ class MapBloc extends Bloc<MapEvent, MapState> {
         longitude: pos.longitude,
         radiusKm: _lastRadius,
       ));
-    } catch (_) {
+    } catch (e) {
       _safeEmit(emit, const MapError('Не удалось определить местоположение'));
     }
   }

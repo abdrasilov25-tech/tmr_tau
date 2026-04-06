@@ -40,7 +40,7 @@ class StoriesRepositoryImpl implements StoriesRepository {
       return stories
           .where((s) => !hiddenOwners.contains(s.userId))
           .toList(growable: false);
-    } catch (_) {
+    } catch (e) {
       final res = await _client
           .from(SupabaseConstants.storiesTable)
           .select()
@@ -147,7 +147,7 @@ class StoriesRepositoryImpl implements StoriesRepository {
           .gt('expires_at', DateTime.now().toIso8601String())
           .order('created_at', ascending: true);
       return (res as List).map((e) => _mapStory(e as Map<String, dynamic>)).toList();
-    } catch (_) {
+    } catch (e) {
       final res = await _client
           .from(SupabaseConstants.storiesTable)
           .select()
@@ -211,7 +211,7 @@ class StoriesRepositoryImpl implements StoriesRepository {
           .eq('story_id', storyId)
           .order('created_at', ascending: true);
       return (res as List).map((e) => _mapReply(e as Map<String, dynamic>)).toList();
-    } catch (_) {
+    } catch (e) {
       final res = await _client
           .from(SupabaseConstants.storyRepliesTable)
           .select()

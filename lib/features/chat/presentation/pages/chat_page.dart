@@ -26,12 +26,12 @@ import 'package:video_player/video_player.dart';
 import 'package:camera/camera.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/feedback/feedback_manager.dart';
 import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/storage/chat_list_storage.dart';
 import '../chat_unread_badge_controller.dart';
-import '../../data/chat_giphy_catalog.dart';
 import '../../data/chat_streak_storage.dart';
 import '../../data/chat_pets_storage.dart';
 import '../../domain/entities/chat_pet.dart';
@@ -44,8 +44,11 @@ import '../../../stories/domain/entities/story_group_entity.dart';
 import '../../../stories/domain/repositories/stories_repository.dart';
 import '../../../stories/presentation/pages/story_viewer_args.dart';
 import '../../../post/domain/repositories/post_repository.dart';
-import '../widgets/chat_sticker_picker_tab.dart';
+import '../../../settings/domain/repositories/settings_repository.dart';
+import 'package:provider/provider.dart';
 import '../widgets/dm_hold_video_overlay.dart';
+import '../widgets/unified_message_composer_bar.dart';
+import '../widgets/chat_rich_emoji_panel.dart';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({
@@ -126,6 +129,9 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   // Переключение кнопки send/mic/camera в зависимости от ввода
   final ValueNotifier<bool> _textHasContent = ValueNotifier<bool>(false);
 
+  /// Текущий пользователь заблокировал собеседника (`blocked_users`).
+  bool? _peerBlockedByMe;
+
   /// Удержание кнопки видеокружка → через [ _videoCircleArmMs ] открывается запись.
   Timer? _videoCircleArmTimer;
   bool _dmVideoOpening = false;
@@ -153,6 +159,81 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         });
       });
     }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadPeerBlockedByMe());
+    });
+  }
+
+  Future<void> _loadPeerBlockedByMe() async {
+    final uid = _me();
+    if (uid == null) {
+      if (mounted) setState(() => _peerBlockedByMe = false);
+      return;
+    }
+    try {
+      final row = await _client
+          .from('blocked_users')
+          .select('blocked_user_id')
+          .eq('blocker_id', uid)
+          .eq('blocked_user_id', widget.peerId)
+          .maybeSingle();
+      if (!mounted) return;
+      setState(() => _peerBlockedByMe = row != null);
+    } catch (e) {
+      debugPrint('_loadPeerBlockedByMe: $e');
+      if (mounted) setState(() => _peerBlockedByMe = false);
+    }
+  }
+
+  Future<void> _confirmBlockPeer() async {
+    final uid = _me();
+    if (uid == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Заблокировать пользователя?'),
+        content: Text(
+          'Вы перестанете получать сообщения от ${widget.peerName}. '
+          'Разблокировать можно в любой момент в разделе '
+          '«Настройки» → «Заблокированные пользователи».',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Заблокировать'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await context.read<SettingsRepository>().blockUser(
+            blockerId: uid,
+            blockedUserId: widget.peerId,
+          );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Не удалось заблокировать: $e')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _peerBlockedByMe = true);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${widget.peerName} заблокирован(а)'),
+      ),
+    );
+    context.popOrGoHomeChats();
   }
 
   /// Актуальный id сессии (после смены аккаунта не остаётся «залипшим» в initState).
@@ -198,7 +279,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       await _client.from(SupabaseConstants.usersTable).update({
         'last_active_at': DateTime.now().toUtc().toIso8601String(),
       }).eq('id', uid);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   void _cancelDmVideoCircleArm() {
@@ -361,7 +442,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       await ctrl.initialize();
       durationSec = ctrl.value.duration.inSeconds;
       await ctrl.dispose();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
 
     final p = file.path;
     final dot = p.lastIndexOf('.');
@@ -391,6 +472,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'video_url': url,
         'duration_seconds': durationSec,
       });
+      unawaited(FeedbackManager.instance.messageSent());
       _forceScrollToLatest = true;
     } catch (e) {
       if (!mounted) return;
@@ -402,7 +484,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (mounted) setState(() => _sending = false);
       try {
         await file.delete();
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     }
   }
 
@@ -483,7 +565,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       if (!mounted) return;
       if (_reactionsMapsEqual(_reactionsByMessageId, next)) return;
       setState(() => _reactionsByMessageId = next);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   bool _reactionsMapsEqual(
@@ -527,7 +609,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'mark_dm_messages_read',
         params: {'p_peer_id': widget.peerId},
       );
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _setReactionForMessage(String messageId, String emoji) async {
@@ -639,7 +721,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .from(SupabaseConstants.usersTable)
           .select('id, name, avatar')
           .inFilter('id', peerIds);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     final byId = <String, Map<String, dynamic>>{
       for (final r in usersRows) (r['id'] ?? '').toString(): r,
     };
@@ -723,7 +805,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (out.length >= 50) break;
       }
       return out;
-    } catch (_) {
+    } catch (e) {
       return [];
     }
   }
@@ -775,6 +857,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         row['forward_of'] = srcId;
       }
       await _client.from(SupabaseConstants.messagesTable).insert(row);
+      unawaited(FeedbackManager.instance.messageSent());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Сообщение переслано')),
@@ -1410,7 +1493,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         } else {
           subtitle = 'Прочитано ${dt.day}.${dt.month.toString().padLeft(2, '0')} в $timeStr';
         }
-      } catch (_) {
+      } catch (e) {
         subtitle = 'Прочитано';
       }
     }
@@ -1486,7 +1569,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Stream<List<Map<String, dynamic>>> _messagesStream(String? me) {
     if (me == null) return const Stream.empty();
     final peer = widget.peerId;
-    final hiddenIds = context.read<ChatListStorage>().getHiddenMessageIds(peer);
+    final storage = context.read<ChatListStorage>();
 
     // Два стрима с серверной фильтрацией по sender_id —
     // клиент получает только сообщения отправленные me или peer, а не всю таблицу.
@@ -1501,15 +1584,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         .stream(primaryKey: ['id'])
         .eq('sender_id', peer);
 
-    return _mergeDialogStreams(sentStream, receivedStream, me, peer, hiddenIds);
+    return _mergeDialogStreams(storage, sentStream, receivedStream, me, peer);
   }
 
   Stream<List<Map<String, dynamic>>> _mergeDialogStreams(
+    ChatListStorage storage,
     Stream<List<Map<String, dynamic>>> stream1,
     Stream<List<Map<String, dynamic>>> stream2,
     String me,
     String peer,
-    Set<String> hiddenIds,
   ) {
     List<Map<String, dynamic>> latest1 = const [];
     List<Map<String, dynamic>> latest2 = const [];
@@ -1546,11 +1629,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 ((b['created_at'] ?? '') as Object).toString(),
               ),
         );
-      if (hiddenIds.isNotEmpty) {
-        result.removeWhere(
-          (m) => hiddenIds.contains((m['id'] ?? '').toString()),
-        );
-      }
+      final hiddenIds = storage.getHiddenMessageIds(peer);
+      final cutoffUtc = storage.getDmLocalClearCutoff(peer);
+      result.removeWhere((m) {
+        final id = (m['id'] ?? '').toString();
+        if (id.isNotEmpty && hiddenIds.contains(id)) return true;
+        if (cutoffUtc != null) {
+          final t = DateTime.tryParse((m['created_at'] ?? '').toString());
+          if (t != null && !t.toUtc().isAfter(cutoffUtc)) return true;
+        }
+        return false;
+      });
       const maxMessages = 200;
       if (result.length > maxMessages) {
         result = result.sublist(result.length - maxMessages);
@@ -1674,6 +1763,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       _replyingToMessageId = null;
       _replyingToSnippet = null;
     });
+    unawaited(FeedbackManager.instance.messageSent());
     // Очищаем поле и скроллим сразу — не ждём сервер
     _controller.clear();
     _textHasContent.value = false;
@@ -1830,7 +1920,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     final messenger = ScaffoldMessenger.of(context);
     try {
       await _client.rpc('delete_chat', params: {'peer_id': widget.peerId});
-    } catch (_) {
+    } catch (e) {
       await _client
           .from(SupabaseConstants.messagesTable)
           .delete()
@@ -2053,6 +2143,50 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
   }
 
+  /// Скрыть историю только на этом устройстве; в БД сообщения остаются, собеседник ничего не теряет.
+  Future<void> _confirmClearHistoryForMe() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Очистить историю у вас?'),
+        content: const Text(
+          'Сообщения исчезнут из этого чата только у вас. У собеседника переписка '
+          'останется. Новые сообщения будут видны как обычно.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Очистить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final storage = context.read<ChatListStorage>();
+    final unreadController = context.read<ChatUnreadBadgeController>();
+    final now = DateTime.now().toUtc();
+    await storage.setDmLocalClearCutoff(widget.peerId, now);
+    await storage.setLastReadAt(widget.peerId, now);
+    if (!mounted) return;
+    setState(() {
+      _didInitialAutoScroll = false;
+      _showNewMessagesHint = false;
+      _showScrollToBottom = false;
+    });
+    unawaited(unreadController.refresh());
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('История очищена у вас'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final authState = context.watch<AuthBloc>().state;
@@ -2210,6 +2344,45 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     onPressed: _confirmDeleteAll,
                   ),
                 ] else ...[
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.more_vert_rounded),
+                    onSelected: (v) async {
+                      if (v == 'clear') await _confirmClearHistoryForMe();
+                      if (v == 'block') await _confirmBlockPeer();
+                      if (v == 'delete_all') await _confirmDeleteAll();
+                    },
+                    itemBuilder: (ctx) {
+                      final blocked = _peerBlockedByMe == true;
+                      return [
+                        const PopupMenuItem(
+                          value: 'clear',
+                          child: Text('Очистить историю у меня'),
+                        ),
+                        const PopupMenuDivider(),
+                        if (!blocked)
+                          const PopupMenuItem(
+                            value: 'block',
+                            child: Text('Заблокировать пользователя'),
+                          ),
+                        if (blocked)
+                          const PopupMenuItem(
+                            value: 'noop',
+                            enabled: false,
+                            child: Text(
+                              'Заблокирован — снять в Настройках',
+                            ),
+                          ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem(
+                          value: 'delete_all',
+                          child: Text(
+                            'Удалить переписку навсегда',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ];
+                    },
+                  ),
                   // Pet & streak button in AppBar
                   _ChatPetAppBarButton(
                     peerId: widget.peerId,
@@ -2298,6 +2471,19 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                         final hasNewMessages = messages.length > _lastMessageCount;
                         _lastMessageCount = messages.length;
                         _lastLatestMessageId = latestMessageId;
+                        // Incoming message sound: only when a new message
+                        // from the peer arrives while this chat is open.
+                        if (hasNewLatestMessage && messages.isNotEmpty) {
+                          final latestSender =
+                              messages.last['sender_id'] as String?;
+                          if (latestSender != null &&
+                              latestSender != me &&
+                              latestSender == widget.peerId) {
+                            unawaited(
+                              FeedbackManager.instance.messageReceived(),
+                            );
+                          }
+                        }
                         if (_forceScrollToLatest) {
                           _forceScrollToLatest = false;
                           if (_showNewMessagesHint) {
@@ -2647,7 +2833,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                                                       'Публикация сохранена'),
                                                                 ),
                                                               );
-                                                            } catch (_) {
+                                                            } catch (e) {
                                                               if (!mounted) {
                                                                 return;
                                                               }
@@ -2735,7 +2921,57 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 if (!_selectionMode)
                   SafeArea(
                     top: false,
-                    child: Column(
+                    child: _peerBlockedByMe == true
+                        ? Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(
+                                      Icons.block_rounded,
+                                      color: Colors.deepOrange.shade800,
+                                      size: 22,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Text(
+                                        'Вы не получаете сообщения от '
+                                        '${widget.peerName}. Чтобы снова общаться, '
+                                        'откройте «Заблокированные пользователи» и нажмите '
+                                        '«Разблокировать».',
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          height: 1.35,
+                                          color: Colors.deepOrange.shade900,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    await context.push(
+                                      '/profile/settings/blocked-users',
+                                    );
+                                    if (mounted) await _loadPeerBlockedByMe();
+                                  },
+                                  icon: const Icon(
+                                    Icons.person_off_outlined,
+                                    size: 20,
+                                  ),
+                                  label: const Text(
+                                    'Заблокированные пользователи',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        : Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (_replyingToMessageId != null)
@@ -2764,12 +3000,12 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                               ),
                             ),
                           ),
-                        // ── Панель эмодзи (анимированная) ──
+                        // WhatsApp: сначала полноэкранная панель эмодзи/GIF/стикеров, затем TikTok-лента, затем поле ввода.
                         AnimatedSize(
                           duration: const Duration(milliseconds: 200),
                           curve: Curves.easeOut,
                           child: _showEmojiPanel
-                              ? _EmojiPanel(
+                              ? ChatRichEmojiPanel(
                                   onEmojiSelected: (emoji) {
                                     final ctrl = _controller;
                                     final sel = ctrl.selection;
@@ -2810,117 +3046,45 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                 )
                               : const SizedBox.shrink(),
                         ),
-                        // ── Input bar (WhatsApp-стиль) ──
-                        Material(
-                          color: ThemedContentSurface.scaffoldElevated,
+                        ChatQuickEmojiStrip(
+                          streakDays: context
+                              .read<ChatStreakStorage>()
+                              .getStreak(widget.peerId),
+                          onEmojiTap: (emoji) =>
+                              unawaited(_sendStickerEmoji(emoji)),
+                        ),
+                        UnifiedMessageComposerBar(
+                          controller: _controller,
+                          hintText: 'Сообщение',
+                          textHasContent: _textHasContent,
+                          onSend: _sendMessage,
+                          onChanged: (v) {
+                            _textHasContent.value = v.trim().isNotEmpty;
+                            if (_showEmojiPanel && v.isNotEmpty) {
+                              setState(() => _showEmojiPanel = false);
+                            }
+                          },
+                          onAttachment: _showAttachmentSheet,
+                          emojiPanelOpen: _showEmojiPanel,
+                          onEmojiToggle: () {
+                            FocusScope.of(context).unfocus();
+                            setState(
+                                () => _showEmojiPanel = !_showEmojiPanel);
+                          },
                           elevation: _showEmojiPanel ? 0 : 6,
-                          shadowColor: Colors.black26,
-                          child: Padding(
-                            padding:
-                                const EdgeInsets.fromLTRB(4, 6, 4, 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                // ➕ Вложения
-                                _ChatIconBtn(
-                                  icon: Icons.add_circle_outline_rounded,
-                                  onTap: _showAttachmentSheet,
-                                ),
-                                // 😊 Эмодзи
-                                _ChatIconBtn(
-                                  icon: _showEmojiPanel
-                                      ? Icons.keyboard_rounded
-                                      : Icons.emoji_emotions_outlined,
-                                  onTap: () {
-                                    FocusScope.of(context).unfocus();
-                                    setState(() => _showEmojiPanel =
-                                        !_showEmojiPanel);
-                                  },
-                                ),
-                                const SizedBox(width: 2),
-                                // Поле ввода
-                                Expanded(
-                                  child: Container(
-                                    constraints: const BoxConstraints(
-                                        maxHeight: 120),
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.shade100,
-                                      borderRadius:
-                                          BorderRadius.circular(24),
-                                    ),
-                                    child: TextField(
-                                      controller: _controller,
-                                      minLines: 1,
-                                      maxLines: 5,
-                                      textInputAction:
-                                          TextInputAction.newline,
-                                      onChanged: (v) {
-                                        _textHasContent.value =
-                                            v.trim().isNotEmpty;
-                                        if (_showEmojiPanel &&
-                                            v.isNotEmpty) {
-                                          setState(() =>
-                                              _showEmojiPanel = false);
-                                        }
-                                      },
-                                      onTap: () {
-                                        if (_showEmojiPanel) {
-                                          setState(() =>
-                                              _showEmojiPanel = false);
-                                        }
-                                      },
-                                      decoration: InputDecoration(
-                                        hintText: 'Сообщение',
-                                        hintStyle: TextStyle(
-                                            color: Colors.grey.shade500,
-                                            fontSize: 15),
-                                        contentPadding:
-                                            const EdgeInsets.symmetric(
-                                                horizontal: 16,
-                                                vertical: 11),
-                                        border: InputBorder.none,
-                                        isDense: true,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                // Кнопки справа
-                                ValueListenableBuilder<bool>(
-                                  valueListenable: _textHasContent,
-                                  builder: (context2, hasContent, child2) {
-                                    if (hasContent) {
-                                      return _SendBtn(
-                                          onTap: _sendMessage);
-                                    }
-                                    return Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // 🎬 Видеокружок (удерживать)
-                                        _VideoCircleHoldButton(
-                                          onHoldArm:
-                                              _scheduleDmVideoCircleIfHeld,
-                                          onHoldDisarm:
-                                              _cancelDmVideoCircleArm,
-                                        ),
-                                        // 🎤 Голосовое (удержать)
-                                        _VoiceMicButton(
-                                          isRecording:
-                                              _isRecordingVoice,
-                                          seconds: _voiceRecordSeconds,
-                                          onHoldStart:
-                                              _startVoiceRecording,
-                                          onHoldEnd: _stopVoiceRecording,
-                                          onHoldCancel:
-                                              _cancelVoiceRecording,
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
+                          onVideoHoldArm: _scheduleDmVideoCircleIfHeld,
+                          onVideoHoldDisarm: _cancelDmVideoCircleArm,
+                          isRecordingVoice: _isRecordingVoice,
+                          voiceRecordSeconds: _voiceRecordSeconds,
+                          onVoiceHoldStart: _startVoiceRecording,
+                          onVoiceHoldEnd: _stopVoiceRecording,
+                          onVoiceHoldCancel: _cancelVoiceRecording,
+                          sending: _sending,
+                          onFieldTap: () {
+                            if (_showEmojiPanel) {
+                              setState(() => _showEmojiPanel = false);
+                            }
+                          },
                         ),
                       ],
                     ),
@@ -3029,7 +3193,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     } on MissingPluginException {
       _showVoicePluginMissing();
       return;
-    } catch (_) {
+    } catch (e) {
       return;
     }
     _voiceRecordSeconds = 0;
@@ -3104,6 +3268,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'audio_url': url,
         'duration_seconds': durationSeconds,
       });
+      unawaited(FeedbackManager.instance.messageSent());
       _forceScrollToLatest = true;
     } catch (e) {
       if (!mounted) return;
@@ -3294,6 +3459,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'message_type': isGif ? 'gif' : 'image',
         'image_url': url,
       });
+      unawaited(FeedbackManager.instance.messageSent());
       if (mounted) {
         _forceScrollToLatest = true;
         setState(() {});
@@ -3323,15 +3489,18 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'text': e,
         'message_type': 'sticker',
       });
+      unawaited(FeedbackManager.instance.messageSent());
       if (mounted) {
         _forceScrollToLatest = true;
         setState(() {});
+        final streakStorage = context.read<ChatStreakStorage>();
+        unawaited(streakStorage.recordActivity(widget.peerId));
       }
     } catch (err) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-          'Не удалось отправить стикер. Примените миграцию sticker в Supabase: $err',
+          'Не удалось отправить стикер. В SQL Editor выполните миграцию: снимите constraints messages_message_type_check и messages_message_type_allowed с public.messages и добавьте messages_message_type_allowed со списком типов, включая sticker. Ошибка: $err',
         ),
         behavior: SnackBarBehavior.floating,
       ));
@@ -3351,6 +3520,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'message_type': 'sticker',
         'image_url': u,
       });
+      unawaited(FeedbackManager.instance.messageSent());
       if (mounted) {
         _forceScrollToLatest = true;
         setState(() {});
@@ -3402,7 +3572,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       stickerPath = cropped.path;
     } on MissingPluginException {
       // cropper недоступен — отправим исходное фото
-    } on PlatformException catch (_) {}
+    } on PlatformException catch (e) { debugPrint('$e'); }
     if (!mounted) return;
 
     final tempId = 'tmp_st_${DateTime.now().millisecondsSinceEpoch}';
@@ -3458,6 +3628,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           .select()
           .maybeSingle();
 
+      unawaited(FeedbackManager.instance.messageSent());
       _forceScrollToLatest = true;
       if (mounted && inserted != null) {
         setState(() {
@@ -3529,6 +3700,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         'file_url': url,
         'file_name': displayName,
       });
+      unawaited(FeedbackManager.instance.messageSent());
       if (mounted) _forceScrollToLatest = true;
     } catch (e) {
       if (!mounted) return;
@@ -3642,6 +3814,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                     'text': payload,
                     'message_type': 'event',
                   });
+                  unawaited(FeedbackManager.instance.messageSent());
                   if (mounted) {
                     _forceScrollToLatest = true;
                     setState(() {});
@@ -3706,7 +3879,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           ];
           address = parts.join(', ');
         }
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
 
       final payload = jsonEncode({
         'lat': pos.latitude,
@@ -3752,6 +3925,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         }
         return;
       }
+      unawaited(FeedbackManager.instance.messageSent());
       if (mounted && inserted != null) {
         setState(() {
           final idx = _optimisticMessages.indexWhere((m) => m['id'] == tempId);
@@ -3813,6 +3987,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                 'receiver_id': widget.peerId,
                 'text': text,
               });
+              unawaited(FeedbackManager.instance.messageSent());
               _forceScrollToLatest = true;
             },
             child: const Text('Отправить'),
@@ -3834,7 +4009,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
         if (lat == null || lng == null) return null;
         final label = (m['label'] as String?) ?? '';
         return (lat: lat, lng: lng, address: label);
-      } catch (_) {
+      } catch (e) {
         return null;
       }
     }
@@ -3863,7 +4038,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
       final when = whenRaw is String ? DateTime.tryParse(whenRaw) : null;
       final place = (m['place'] as String?)?.trim() ?? '';
       return (title: title, when: when, place: place);
-    } catch (_) {
+    } catch (e) {
       return null;
     }
   }
@@ -3899,7 +4074,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     String decode(String value) {
       try {
         return Uri.decodeComponent(value);
-      } catch (_) {
+      } catch (e) {
         return value;
       }
     }
@@ -3924,7 +4099,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     String decode(String value) {
       try {
         return Uri.decodeComponent(value);
-      } catch (_) {
+      } catch (e) {
         return value;
       }
     }
@@ -3991,7 +4166,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           initialGroupIndex: 0,
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось открыть сторис')),
@@ -4347,70 +4522,6 @@ String _formatCount(int value) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Кнопка микрофона (удерживать для записи)
-// ─────────────────────────────────────────────────────────────
-
-class _VoiceMicButton extends StatelessWidget {
-  const _VoiceMicButton({
-    required this.isRecording,
-    required this.seconds,
-    required this.onHoldStart,
-    required this.onHoldEnd,
-    required this.onHoldCancel,
-  });
-
-  final bool isRecording;
-  final int seconds;
-  final VoidCallback onHoldStart;
-  final VoidCallback onHoldEnd;
-  final VoidCallback onHoldCancel;
-
-  String get _timerLabel {
-    final m = seconds ~/ 60;
-    final s = (seconds % 60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    // Удержание пальцем (как в мессенджерах), без задержки long-press.
-    return Listener(
-      behavior: HitTestBehavior.opaque,
-      onPointerDown: (_) => onHoldStart(),
-      onPointerUp: (_) => onHoldEnd(),
-      onPointerCancel: (_) => onHoldCancel(),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        width: isRecording ? 90 : 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: isRecording ? Colors.red : primary,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: isRecording
-            ? Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.mic, color: Colors.white, size: 18),
-                  const SizedBox(width: 4),
-                  Text(
-                    _timerLabel,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              )
-            : const Icon(Icons.mic_none_rounded, color: Colors.white, size: 22),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────
 // Бабл голосового сообщения
 // ─────────────────────────────────────────────────────────────
 
@@ -4584,7 +4695,7 @@ class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
       ctrl.setLooping(false);
       ctrl.addListener(_onVideoUpdate);
       if (mounted) setState(() => _initialized = true);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   void _onVideoUpdate() {
@@ -4763,94 +4874,6 @@ class _RoundVideoBubbleState extends State<_RoundVideoBubble> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Видеокружок: удержание ~220 ms → запись (как голосовое рядом)
-// ══════════════════════════════════════════════════════════════
-
-class _VideoCircleHoldButton extends StatelessWidget {
-  const _VideoCircleHoldButton({
-    required this.onHoldArm,
-    required this.onHoldDisarm,
-  });
-
-  final VoidCallback onHoldArm;
-  final VoidCallback onHoldDisarm;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: 'Удерживайте для видеокружка',
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (_) => onHoldArm(),
-        onPointerUp: (_) => onHoldDisarm(),
-        onPointerCancel: (_) => onHoldDisarm(),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(
-            Icons.videocam_rounded,
-            size: 24,
-            color: cs.primary,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// _ChatIconBtn — маленькая кнопка иконки в input bar
-// ══════════════════════════════════════════════════════════════
-
-class _ChatIconBtn extends StatelessWidget {
-  const _ChatIconBtn({required this.icon, required this.onTap});
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Icon(icon, size: 24,
-              color: Theme.of(context).colorScheme.primary),
-        ),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// _SendBtn — кнопка отправки
-// ══════════════════════════════════════════════════════════════
-
-class _SendBtn extends StatelessWidget {
-  const _SendBtn({required this.onTap});
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.primary,
-          shape: BoxShape.circle,
-        ),
-        child: const Icon(Icons.send_rounded,
-            color: Colors.white, size: 20),
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
 // _AttachmentSheet — WhatsApp-стиль панель вложений
 // ══════════════════════════════════════════════════════════════
 
@@ -5005,343 +5028,6 @@ class _AttachItem {
   final VoidCallback onTap;
 }
 
-// ══════════════════════════════════════════════════════════════
-// _EmojiPanel — панель эмодзи / GIF / стикеров
-// ══════════════════════════════════════════════════════════════
-
-class _EmojiPanel extends StatefulWidget {
-  const _EmojiPanel({
-    required this.onEmojiSelected,
-    required this.onGifSelected,
-    required this.onStickerEmojiSelected,
-    required this.onStickerImageSelected,
-    required this.onCreateStickerFromGallery,
-  });
-  final ValueChanged<String> onEmojiSelected;
-  final ValueChanged<String> onGifSelected;
-  final ValueChanged<String> onStickerEmojiSelected;
-  final ValueChanged<String> onStickerImageSelected;
-  final Future<void> Function() onCreateStickerFromGallery;
-
-  @override
-  State<_EmojiPanel> createState() => _EmojiPanelState();
-}
-
-class _EmojiPanelState extends State<_EmojiPanel>
-    with SingleTickerProviderStateMixin {
-  late TabController _tab;
-  int _categoryIndex = 0;
-
-  static const _categories = [
-    ('😀', 'Смайлы'),
-    ('🙌', 'Жесты'),
-    ('❤️', 'Сердца'),
-    ('🐶', 'Животные'),
-    ('🍕', 'Еда'),
-    ('⚽', 'Спорт'),
-    ('✈️', 'Путешествия'),
-  ];
-
-  static const _emojiByCat = [
-    // Смайлы
-    ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','🙃','😉','😊','😇','🥰','😍','🤩','😘','😗','😚','😙','🥲','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤧','🥵','🥶','🥴','😵','🤯','🤠','🥳','😎','🤓','🧐','😕','😟','🙁','☹️','😮','😯','😲','😳','🥺','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱'],
-    // Жесты
-    ['👋','🤚','🖐','✋','🖖','👌','🤌','🤏','✌️','🤞','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','👍','👎','✊','👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','✍️','💅','🤳','💪','🦾','🦿','🦵','🦶','👂','🦻','👃','🫀','🫁','🧠','🦷','🦴','👀','👁','👅','👄'],
-    // Сердца
-    ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❣️','💕','💞','💓','💗','💖','💘','💝','💟','☮️','✝️','☪️','🕉','✡️','🔯','🛐','⛎','♈','♉','♊','♋','♌','♍','♎','♏','♐','♑','♒','♓','🆔','⚛️','🉑','☢️','☣️','📴','📳','🈶','🈚','🈸','🈺','🈷️','✴️','🆚','💮','🉐','㊙️','㊗️','🈴','🈵','🈹','🈲','🅰️','🅱️','🆎','🆑','🅾️','🆘','❌','⭕','🛑','⛔','📛','🚫'],
-    // Животные
-    ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🙈','🙉','🙊','🐒','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🪱','🐛','🦋','🐌','🐞','🐜','🪲','🦟','🦗','🕷','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🦭','🐊','🐅','🐆','🦓','🦍','🦧','🦣','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🪶','🐓','🦃','🦤','🦚','🦜','🦢','🦩','🕊','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿','🦔'],
-    // Еда
-    ['🍏','🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶','🫑','🧄','🧅','🥔','🍠','🥐','🥯','🍞','🥖','🥨','🧀','🥚','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🌭','🍔','🍟','🍕','🫓','🥪','🥙','🧆','🌮','🌯','🫔','🥗','🥘','🫕','🥫','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥮','🍢','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🧃','🥤','🧋','🍵','☕','🫖','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🧊','🥄','🍴','🍽','🥢','🧂'],
-    // Спорт
-    ['⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🥍','🏏','🪃','🥅','⛳','🪁','🎣','🤿','🎽','🎿','🛷','🥌','🎯','🪀','🎮','🎲','♟','🎭','🎨','🎬','🎤','🎧','🎼','🎹','🥁','🪘','🎷','🎺','🎸','🪕','🎻','🎲','♟','🎯','🎳','🎰','🎪'],
-    // Путешествия
-    ['✈️','🚀','🛸','🚁','🛶','⛵','🚤','🛥','🛳','⛴','🚢','🚂','🚃','🚄','🚅','🚆','🚇','🚈','🚉','🚊','🚝','🚞','🚋','🚌','🚍','🚎','🏎','🚓','🚑','🚒','🚐','🛻','🚚','🚛','🚜','🏍','🛵','🛺','🚲','🛴','🛹','🛼','🛤','⛽','🚨','🚥','🚦','🛑','🏔','⛰','🌋','🗻','🏕','🏖','🏗','🏘','🏙','🏚','🏛','🏟','🏠','🏡','🏢','🏣','🏤','🏥','🏦','🏧','🏨','🏩','🏪','🏫','🏬','🏭','🏯','🏰','💒','🗼','🗽','⛪','🕌','🛕','🕍','⛩','🕋'],
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _tab = TabController(length: 3, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tab.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 380,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Column(
-        children: [
-          // Tabs
-          TabBar(
-            controller: _tab,
-            labelColor: Theme.of(context).colorScheme.primary,
-            unselectedLabelColor: Colors.grey.shade500,
-            indicatorSize: TabBarIndicatorSize.tab,
-            tabs: const [
-              Tab(text: 'Эмодзи'),
-              Tab(text: 'GIF'),
-              Tab(text: 'Стикеры'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tab,
-              children: [
-                // ── Эмодзи ──
-                Column(
-                  children: [
-                    // Категории
-                    SizedBox(
-                      height: 42,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 6),
-                        itemCount: _categories.length,
-                        itemBuilder: (_, i) {
-                          final selected = i == _categoryIndex;
-                          return GestureDetector(
-                            onTap: () =>
-                                setState(() => _categoryIndex = i),
-                            child: AnimatedContainer(
-                              duration:
-                                  const Duration(milliseconds: 150),
-                              margin: const EdgeInsets.only(right: 6),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: selected
-                                    ? Theme.of(context)
-                                        .colorScheme
-                                        .primary
-                                        .withValues(alpha: 0.12)
-                                    : Colors.transparent,
-                                borderRadius:
-                                    BorderRadius.circular(16),
-                              ),
-                              child: Text(
-                                _categories[i].$1,
-                                style: const TextStyle(fontSize: 20),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                    // Эмодзи грид
-                    Expanded(
-                      child: GridView.builder(
-                        padding: const EdgeInsets.all(8),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 8,
-                          childAspectRatio: 1,
-                        ),
-                        itemCount:
-                            _emojiByCat[_categoryIndex].length,
-                        itemBuilder: (_, i) {
-                          final emoji =
-                              _emojiByCat[_categoryIndex][i];
-                          return GestureDetector(
-                            onTap: () =>
-                                widget.onEmojiSelected(emoji),
-                            child: Center(
-                              child: Text(emoji,
-                                  style: const TextStyle(
-                                      fontSize: 24)),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                // ── GIF ──
-                _GifCatalogTab(onGifSelected: widget.onGifSelected),
-
-                // ── Стикеры ──
-                ChatStickerPickerTab(
-                  onEmojiSticker: widget.onStickerEmojiSelected,
-                  onImageSticker: widget.onStickerImageSelected,
-                  onCreateFromGallery: widget.onCreateStickerFromGallery,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
-// _GifCatalogTab — каталог GIF как в Telegram
-// ══════════════════════════════════════════════════════════════
-
-class _GifCatalogTab extends StatefulWidget {
-  const _GifCatalogTab({required this.onGifSelected});
-  final ValueChanged<String> onGifSelected;
-
-  @override
-  State<_GifCatalogTab> createState() => _GifCatalogTabState();
-}
-
-class _GifCatalogTabState extends State<_GifCatalogTab> {
-  final _searchController = TextEditingController();
-  String _query = '';
-  int _categoryIndex = 0;
-
-  List<Map<String, String>> get _currentGifs {
-    final cat = kChatGiphyCategories[_categoryIndex];
-    final all = kChatGiphyCatalog[cat] ?? [];
-    if (_query.isEmpty) return all;
-    final q = _query.toLowerCase();
-    return all.where((g) => (g['label'] ?? '').toLowerCase().contains(q)).toList();
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final gifs = _currentGifs;
-    return Column(
-      children: [
-        // Поиск
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 4),
-          child: TextField(
-            controller: _searchController,
-            onChanged: (v) => setState(() => _query = v),
-            style: const TextStyle(fontSize: 13),
-            decoration: InputDecoration(
-              hintText: 'Поиск GIF...',
-              hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-              prefixIcon: Icon(Icons.search, size: 18, color: Colors.grey.shade400),
-              filled: true,
-              fillColor: Colors.grey.shade100,
-              contentPadding: const EdgeInsets.symmetric(vertical: 6),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(20),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-        ),
-        // Категории
-        SizedBox(
-          height: 36,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            itemCount: kChatGiphyCategories.length,
-            itemBuilder: (_, i) {
-              final selected = i == _categoryIndex;
-              return GestureDetector(
-                onTap: () => setState(() => _categoryIndex = i),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.15)
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: selected
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.grey.shade300,
-                    ),
-                  ),
-                  child: Text(
-                    kChatGiphyCategories[i],
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected
-                          ? Theme.of(context).colorScheme.primary
-                          : Colors.grey.shade600,
-                    ),
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 4),
-        // GIF сетка
-        Expanded(
-          child: gifs.isEmpty
-              ? Center(
-                  child: Text(
-                    'Ничего не найдено',
-                    style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
-                  ),
-                )
-              : GridView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 4,
-                    mainAxisSpacing: 4,
-                    childAspectRatio: 1,
-                  ),
-                  itemCount: gifs.length,
-                  itemBuilder: (_, i) {
-                    final gif = gifs[i];
-                    final url = gif['url']!;
-                    return Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => widget.onGifSelected(url),
-                        borderRadius: BorderRadius.circular(8),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: CachedNetworkImage(
-                            imageUrl: url,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => Container(
-                              color: Colors.grey.shade100,
-                              child: const Center(
-                                child: SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                ),
-                              ),
-                            ),
-                            errorWidget: (context, url, error) => Container(
-                              color: Colors.grey.shade200,
-                              child: Icon(Icons.gif_box_outlined,
-                                  color: Colors.grey.shade400),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
-    );
-  }
-}
-
-// ══════════════════════════════════════════════════════════════
 // _ImageMessageBubble — пузырь с изображением
 // ══════════════════════════════════════════════════════════════
 

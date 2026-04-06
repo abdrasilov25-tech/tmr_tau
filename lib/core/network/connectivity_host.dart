@@ -82,7 +82,7 @@ class _ConnectivityHostState extends State<ConnectivityHost> {
         _offline = false;
       }
       return;
-    } catch (_) {
+    } catch (e) {
       return;
     }
 

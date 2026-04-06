@@ -109,7 +109,7 @@ class _TapGameScreenState extends State<TapGameScreen>
     try {
       final list = await _localHallRepo.getTop50();
       if (mounted) setState(() => _localHall = list);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _mergeLeaderboardIntoLocalHall() async {
@@ -117,7 +117,7 @@ class _TapGameScreenState extends State<TapGameScreen>
     try {
       await _localHallRepo.mergeFromLeaderboard(_leaderboard);
       await _reloadLocalHall();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   void _recordLocalBestFromCurrentScore() {
@@ -244,7 +244,7 @@ class _TapGameScreenState extends State<TapGameScreen>
         _stamina = row.staminaRemaining;
       });
       _recordLocalBestFromCurrentScore();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _maybeFinalizeAndClaim() async {
@@ -359,7 +359,7 @@ class _TapGameScreenState extends State<TapGameScreen>
             _stamina = r.staminaRemaining;
           });
           _recordLocalBestFromCurrentScore();
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }
       if (msg.contains('insufficient_stamina')) {
         unawaited(_syncMyPlayState());

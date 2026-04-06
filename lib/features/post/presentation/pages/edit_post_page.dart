@@ -184,7 +184,7 @@ class _EditPostPageState extends State<EditPostPage> {
       await controller.initialize();
       durationSeconds = controller.value.duration.inSeconds;
       await controller.dispose();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось определить длительность видео')),

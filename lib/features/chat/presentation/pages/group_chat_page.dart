@@ -14,10 +14,14 @@ import 'package:video_player/video_player.dart';
 import 'package:camera/camera.dart';
 
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/feedback/feedback_manager.dart';
 import '../../../../core/router/go_router_pop_safe.dart';
 import '../../../../core/storage/chat_list_storage.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
+import '../../data/chat_streak_storage.dart';
+import '../widgets/unified_message_composer_bar.dart';
+import '../widgets/chat_rich_emoji_panel.dart';
 import '../../domain/city_chat_threads.dart';
 import '../../domain/city_chat_moderation_codes.dart';
 import '../../domain/temirtau_city_group_config.dart';
@@ -25,6 +29,16 @@ import '../city_thread_icons.dart';
 import '../widgets/city_chat_fixed_avatar.dart';
 import '../chat_unread_badge_controller.dart';
 import '../widgets/dm_hold_video_overlay.dart';
+
+bool _groupMessageVisibleAfterLocalClear(
+  Map<String, dynamic> m,
+  DateTime? cutoffUtc,
+) {
+  if (cutoffUtc == null) return true;
+  final t = DateTime.tryParse((m['created_at'] ?? '').toString());
+  if (t == null) return true;
+  return t.toUtc().isAfter(cutoffUtc);
+}
 
 class GroupChatPage extends StatefulWidget {
   const GroupChatPage({
@@ -50,7 +64,10 @@ class _GroupChatPageState extends State<GroupChatPage> {
   late Stream<List<Map<String, dynamic>>> _allCityMessages$;
   String? _currentUserId;
   final TextEditingController _controller = TextEditingController();
+  late final ValueNotifier<bool> _textHasContentNotifier;
   final ScrollController _scrollController = ScrollController();
+  Timer? _videoCircleArmTimer;
+  static const int _videoCircleArmMs = 220;
   bool _sending = false;
   bool _recordingVoice = false;
   int _voiceRecordSeconds = 0;
@@ -63,10 +80,13 @@ class _GroupChatPageState extends State<GroupChatPage> {
   String _selectedCityThread = CityChatThreads.defaultThreadId;
   int _lastRenderedMessagesCount = 0;
   bool _wasNearBottom = true;
+  String? _lastGroupLatestMessageId;
+  bool _didInitialGroupMessagesSound = false;
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   String? _playingAudioMessageId;
   bool _groupRoundVideoOpening = false;
+  bool _showEmojiPanel = false;
 
   @override
   void initState() {
@@ -83,6 +103,10 @@ class _GroupChatPageState extends State<GroupChatPage> {
     _messages$ = _messagesStream();
     _allCityMessages$ = _allCityMessagesStream();
     _scrollController.addListener(_trackScrollPosition);
+    _textHasContentNotifier = ValueNotifier(false);
+    _controller.addListener(() {
+      _textHasContentNotifier.value = _controller.text.trim().isNotEmpty;
+    });
     _loadGroupMeta();
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final chatStorage = context.read<ChatListStorage>();
@@ -135,7 +159,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         _cityBanUntil = until;
         _cityPermanentBan = row?['permanent_ban'] == true;
       });
-    } catch (_) {
+    } catch (e) {
       // Таблица ещё не создана — игнорируем.
     }
   }
@@ -152,8 +176,86 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
   }
 
+  String get _groupStreakKey => 'group:${widget.groupId}';
+
+  void _cancelGroupVideoArm() {
+    _videoCircleArmTimer?.cancel();
+    _videoCircleArmTimer = null;
+  }
+
+  void _scheduleGroupVideoIfHeld() {
+    _cancelGroupVideoArm();
+    _videoCircleArmTimer = Timer(
+      Duration(milliseconds: _videoCircleArmMs),
+      () {
+        if (!mounted) return;
+        unawaited(_pickAndSendRoundVideo());
+      },
+    );
+  }
+
+  Future<void> _recordGroupChatStreak() async {
+    final uid = _currentUserId;
+    if (uid == null || !mounted) return;
+    try {
+      await context.read<ChatStreakStorage>().recordActivity(_groupStreakKey);
+      if (mounted) setState(() {});
+    } catch (e) { debugPrint('$e'); }
+  }
+
+  Future<void> _sendQuickEmoji(String emoji) async {
+    final senderId = _currentUserId;
+    final e = emoji.trim();
+    if (e.isEmpty || senderId == null || _sending) return;
+    if (_officialCity && _cityPostingBlocked) return;
+    final chatStorage = context.read<ChatListStorage>();
+    setState(() => _sending = true);
+    try {
+      await _client.from(SupabaseConstants.chatGroupMessagesTable).insert({
+        'group_id': widget.groupId,
+        'sender_id': senderId,
+        'text': e,
+        'kind': 'text',
+        if (_officialCity) 'city_thread': _selectedCityThread,
+      });
+      await chatStorage.setLastReadAtForGroupThread(
+        widget.groupId,
+        _selectedCityThread,
+        DateTime.now(),
+      );
+      await _recordGroupChatStreak();
+      unawaited(FeedbackManager.instance.messageSent());
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      final blob = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}';
+      if (CityChatModerationCodes.isModerationCode(blob)) {
+        _showCityModerationFeedback(blob);
+        await _refreshCityModeration();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось отправить: ${e.message}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      final s = e.toString();
+      if (CityChatModerationCodes.isModerationCode(s)) {
+        _showCityModerationFeedback(s);
+        await _refreshCityModeration();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось отправить: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
   @override
   void dispose() {
+    _cancelGroupVideoArm();
+    _textHasContentNotifier.dispose();
     _scrollController.removeListener(_trackScrollPosition);
     _voiceTimer?.cancel();
     _audioRecorder.dispose();
@@ -201,7 +303,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         'city_thread': CityChatThreads.defaultThreadId,
       });
       await storage.setSeenCityChatRules(widget.groupId);
-    } catch (_) {
+    } catch (e) {
       // Колонка kind / RLS — повторим при следующем входе.
     }
   }
@@ -224,12 +326,66 @@ class _GroupChatPageState extends State<GroupChatPage> {
         .map((list) => list.cast<Map<String, dynamic>>());
   }
 
+  Future<void> _confirmClearGroupHistoryForMe() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Очистить историю у вас?'),
+        content: Text(
+          _officialCity
+              ? 'Сообщения этой ветки исчезнут только у вас. У других участников '
+                  'ничего не изменится. Новые сообщения будут видны как обычно.'
+              : 'Сообщения исчезнут только у вас. У других участников ничего не '
+                  'изменится. Новые сообщения будут видны как обычно.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Очистить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final storage = context.read<ChatListStorage>();
+    final unreadController = context.read<ChatUnreadBadgeController>();
+    final now = DateTime.now().toUtc();
+    await storage.setGroupLocalClearCutoff(
+      widget.groupId,
+      now,
+      cityThreadId: _officialCity ? _selectedCityThread : '',
+    );
+    await storage.setLastReadAt(widget.groupId, now);
+    if (_officialCity) {
+      await storage.setLastReadAtForGroupThread(
+        widget.groupId,
+        _selectedCityThread,
+        now,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _lastRenderedMessagesCount = 0;
+      _lastGroupLatestMessageId = null;
+    });
+    unawaited(unreadController.refresh());
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('История очищена у вас')),
+    );
+  }
+
   void _changeCityThread(String threadId) {
     if (!_officialCity) return;
     if (_selectedCityThread == threadId) return;
     setState(() {
       _selectedCityThread = threadId;
       _lastRenderedMessagesCount = 0;
+      _lastGroupLatestMessageId = null;
+      _didInitialGroupMessagesSound = false;
       _messages$ = _messagesStream();
     });
     unawaited(
@@ -279,7 +435,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         _officialCity = isCity;
       });
       if (isCity) await _refreshCityModeration();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         final isCity =
             widget.officialCityChat ||
@@ -325,6 +481,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
         _selectedCityThread,
         DateTime.now(),
       );
+      await _recordGroupChatStreak();
+      unawaited(FeedbackManager.instance.messageSent());
     } on PostgrestException catch (e) {
       if (!mounted) return;
       final blob = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}';
@@ -350,6 +508,26 @@ class _GroupChatPageState extends State<GroupChatPage> {
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  void _maybePlaySoundForNewGroupMessage(List<Map<String, dynamic>> messages) {
+    final me = _currentUserId;
+    if (me == null || messages.isEmpty) return;
+    final latest = messages.last;
+    final latestId = (latest['id'] ?? '').toString();
+    final latestSender = latest['sender_id'] as String?;
+    if (latestId.isEmpty) return;
+    if (!_didInitialGroupMessagesSound) {
+      _didInitialGroupMessagesSound = true;
+      _lastGroupLatestMessageId = latestId;
+      return;
+    }
+    if (latestId != _lastGroupLatestMessageId &&
+        latestSender != null &&
+        latestSender != me) {
+      unawaited(FeedbackManager.instance.messageReceived());
+    }
+    _lastGroupLatestMessageId = latestId;
   }
 
   Future<void> _startVoiceRecord() async {
@@ -380,7 +558,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
       });
     } on MissingPluginException {
       _showVoicePluginMissing();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _cancelVoiceRecord() async {
@@ -460,6 +638,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
         _selectedCityThread,
         DateTime.now(),
       );
+      await _recordGroupChatStreak();
+      unawaited(FeedbackManager.instance.messageSent());
     } catch (e) {
       if (!mounted) return;
       final msg = e is StorageException &&
@@ -550,7 +730,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
         await ctrl.initialize();
         durationSec = ctrl.value.duration.inSeconds;
         await ctrl.dispose();
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
 
       final p = file.path;
       final dot = p.lastIndexOf('.');
@@ -583,9 +763,11 @@ class _GroupChatPageState extends State<GroupChatPage> {
         _selectedCityThread,
         DateTime.now(),
       );
+      await _recordGroupChatStreak();
+      unawaited(FeedbackManager.instance.messageSent());
       try {
         await file.delete();
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     } catch (e) {
       if (!mounted) return;
       final msg = e is StorageException &&
@@ -705,6 +887,20 @@ class _GroupChatPageState extends State<GroupChatPage> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.popOrGoHomeChats(),
         ),
+        actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded),
+            onSelected: (v) async {
+              if (v == 'clear') await _confirmClearGroupHistoryForMe();
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: 'clear',
+                child: Text('Очистить историю у меня'),
+              ),
+            ],
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -758,27 +954,49 @@ class _GroupChatPageState extends State<GroupChatPage> {
                   return const Center(child: Text('Ошибка загрузки сообщений'));
                 }
                 final rawMessages = snapshot.data ?? const <Map<String, dynamic>>[];
-                final messages = _officialCity
+                final threadScoped = _officialCity
                     ? rawMessages.where((m) {
                         final thread = (m['city_thread'] as String?)?.trim();
                         final normalized =
                             CityChatThreads.normalizeThreadId(thread);
                         return normalized == _selectedCityThread;
                       }).toList(growable: false)
-                    : rawMessages;
+                    : List<Map<String, dynamic>>.from(rawMessages);
+                final clearCutoff =
+                    context.read<ChatListStorage>().getGroupLocalClearCutoff(
+                  widget.groupId,
+                  cityThreadId: _officialCity ? _selectedCityThread : '',
+                );
+                final messages = clearCutoff == null
+                    ? threadScoped
+                    : threadScoped
+                        .where((m) => _groupMessageVisibleAfterLocalClear(
+                              m,
+                              clearCutoff,
+                            ))
+                        .toList(growable: false);
                 if (_officialCity && messages.isNotEmpty) {
                   unawaited(_markSelectedThreadRead(messages));
                 }
                 if (messages.isEmpty) {
                   _lastRenderedMessagesCount = 0;
+                  final historyHiddenLocally =
+                      clearCutoff != null && threadScoped.isNotEmpty;
                   return Center(
-                    child: Text(
-                      _officialCity
-                          ? 'Напишите первое сообщение соседям.'
-                          : 'Групповой чат создан. Напишите сообщение.',
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        historyHiddenLocally
+                            ? 'История очищена только у вас. Новые сообщения будут здесь.'
+                            : _officialCity
+                                ? 'Напишите первое сообщение соседям.'
+                                : 'Групповой чат создан. Напишите сообщение.',
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   );
                 }
+                _maybePlaySoundForNewGroupMessage(messages);
                 _scheduleAutoScrollIfNeeded(messages.length);
                 return ListView.builder(
                   controller: _scrollController,
@@ -818,7 +1036,7 @@ class _GroupChatPageState extends State<GroupChatPage> {
                             await _audioPlayer.play(UrlSource(audioUrl));
                             if (!mounted) return;
                             setState(() => _playingAudioMessageId = messageId);
-                          } catch (_) {}
+                          } catch (e) { debugPrint('$e'); }
                         },
                       );
                     }
@@ -887,14 +1105,13 @@ class _GroupChatPageState extends State<GroupChatPage> {
           ),
           SafeArea(
             top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (_recordingVoice)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_recordingVoice)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+                    child: Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 12,
                         vertical: 8,
@@ -918,74 +1135,117 @@ class _GroupChatPageState extends State<GroupChatPage> {
                         ],
                       ),
                     ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _controller,
-                          readOnly: _cityPostingBlocked,
-                          minLines: 1,
-                          maxLines: 4,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => _sendMessage(),
-                          decoration: InputDecoration(
-                            hintText: _cityPostingBlocked
-                                ? 'Отправка временно недоступна'
-                                : (_officialCity
-                                      ? 'Сообщение в «${CityChatThreads.metaFor(_selectedCityThread).label}»'
-                                      : 'Сообщение в группу'),
-                            border: const OutlineInputBorder(),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton(
-                        onPressed:
-                            _sending || _cityPostingBlocked ? null : _pickAndSendRoundVideo,
-                        icon: const Icon(Icons.videocam_rounded),
-                      ),
-                      Listener(
-                        behavior: HitTestBehavior.opaque,
-                        onPointerDown: (_) {
-                          if (_sending || _cityPostingBlocked) return;
-                          unawaited(_startVoiceRecord());
-                        },
-                        onPointerUp: (_) {
-                          if (_sending || _cityPostingBlocked) return;
-                          unawaited(_stopAndSendVoice());
-                        },
-                        onPointerCancel: (_) {
-                          if (_sending || _cityPostingBlocked) return;
-                          unawaited(_cancelVoiceRecord());
-                        },
-                        child: CircleAvatar(
-                          radius: 20,
-                          backgroundColor:
-                              _recordingVoice ? Colors.redAccent : Colors.grey.shade800,
-                          child: Icon(
-                            _recordingVoice
-                                ? Icons.mic_rounded
-                                : Icons.mic_none_rounded,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      IconButton.filled(
-                        onPressed:
-                            _sending || _cityPostingBlocked ? null : _sendMessage,
-                        icon: _sending
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send),
-                      ),
-                    ],
                   ),
-                ],
-              ),
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut,
+                  child: _showEmojiPanel && !_cityPostingBlocked
+                      ? ChatRichEmojiPanel(
+                          height: 360,
+                          enableGifTab: false,
+                          enableStickerTab: false,
+                          onEmojiSelected: (emoji) {
+                            final ctrl = _controller;
+                            final sel = ctrl.selection;
+                            final pos = sel.isValid
+                                ? sel.start
+                                : ctrl.text.length;
+                            final t = ctrl.text;
+                            final newText =
+                                t.substring(0, pos) + emoji + t.substring(pos);
+                            ctrl.value = TextEditingValue(
+                              text: newText,
+                              selection: TextSelection.collapsed(
+                                offset: pos + emoji.length,
+                              ),
+                            );
+                            _textHasContentNotifier.value =
+                                newText.trim().isNotEmpty;
+                          },
+                          onGifSelected: (_) {},
+                          onStickerEmojiSelected: (_) {},
+                          onStickerImageSelected: (_) {},
+                          onCreateStickerFromGallery: () async {},
+                        )
+                      : const SizedBox.shrink(),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+                  child: ChatQuickEmojiStrip(
+                    streakDays: context.read<ChatStreakStorage>().getStreak(
+                          _groupStreakKey,
+                        ),
+                    onEmojiTap: _cityPostingBlocked
+                        ? (_) {}
+                        : (e) => unawaited(_sendQuickEmoji(e)),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 0, 0, 8),
+                  child: UnifiedMessageComposerBar(
+                    controller: _controller,
+                    readOnly: _cityPostingBlocked,
+                    hintText: _cityPostingBlocked
+                        ? 'Отправка временно недоступна'
+                        : (_officialCity
+                            ? 'Сообщение в «${CityChatThreads.metaFor(_selectedCityThread).label}»'
+                            : 'Сообщение'),
+                    textHasContent: _textHasContentNotifier,
+                    onSend: _sendMessage,
+                    onChanged: (v) {
+                      _textHasContentNotifier.value = v.trim().isNotEmpty;
+                      if (_showEmojiPanel && v.isNotEmpty) {
+                        setState(() => _showEmojiPanel = false);
+                      }
+                    },
+                    showAttachmentButton: true,
+                    onAttachment: _cityPostingBlocked
+                        ? null
+                        : () {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                behavior: SnackBarBehavior.floating,
+                                content: Text(
+                                  'Вложения из галереи скоро. Пока — видеокружок и голосовое.',
+                                ),
+                              ),
+                            );
+                          },
+                    emojiPanelOpen: _showEmojiPanel,
+                    onEmojiToggle: _cityPostingBlocked
+                        ? null
+                        : () {
+                            FocusScope.of(context).unfocus();
+                            setState(
+                              () => _showEmojiPanel = !_showEmojiPanel,
+                            );
+                          },
+                    elevation: _showEmojiPanel ? 0 : 6,
+                    showVoiceVideoWhenEmpty: !_cityPostingBlocked,
+                    onVideoHoldArm:
+                        _cityPostingBlocked ? null : _scheduleGroupVideoIfHeld,
+                    onVideoHoldDisarm:
+                        _cityPostingBlocked ? null : _cancelGroupVideoArm,
+                    isRecordingVoice: _recordingVoice,
+                    voiceRecordSeconds: _voiceRecordSeconds,
+                    onVoiceHoldStart: _cityPostingBlocked
+                        ? null
+                        : () => unawaited(_startVoiceRecord()),
+                    onVoiceHoldEnd: _cityPostingBlocked
+                        ? null
+                        : () => unawaited(_stopAndSendVoice()),
+                    onVoiceHoldCancel: _cityPostingBlocked
+                        ? null
+                        : () => unawaited(_cancelVoiceRecord()),
+                    sending: _sending,
+                    onFieldTap: () {
+                      if (_showEmojiPanel) {
+                        setState(() => _showEmojiPanel = false);
+                      }
+                    },
+                  ),
+                ),
+              ],
             ),
           ),
         ],

@@ -89,7 +89,7 @@ class _ChannelPageState extends State<ChannelPage> {
         _metaLoaded = true;
       });
       await _refreshSubscriberCount();
-    } catch (_) {
+    } catch (e) {
       try {
         final row = await _client
             .from(SupabaseConstants.userChannelsTable)
@@ -107,7 +107,7 @@ class _ChannelPageState extends State<ChannelPage> {
           setState(() => _metaLoaded = true);
         }
         await _refreshSubscriberCount();
-      } catch (_) {
+      } catch (e) {
         if (mounted) setState(() => _metaLoaded = true);
       }
     }
@@ -120,7 +120,7 @@ class _ChannelPageState extends State<ChannelPage> {
           .count(CountOption.exact)
           .eq('channel_id', widget.channelId);
       if (mounted) setState(() => _subscriberCount = n);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _subscriberCount = null);
     }
   }
@@ -140,7 +140,7 @@ class _ChannelPageState extends State<ChannelPage> {
           .eq('user_id', uid)
           .maybeSingle();
       if (mounted) setState(() => _isSubscribed = row != null);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _isSubscribed = false);
     }
   }

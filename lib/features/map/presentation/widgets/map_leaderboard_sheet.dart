@@ -44,7 +44,7 @@ class _MapLeaderboardSheetState extends State<MapLeaderboardSheet>
         _friends = friends;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
   }

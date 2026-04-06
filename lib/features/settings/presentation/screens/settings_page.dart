@@ -3,8 +3,10 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/theme/themed_content_surface.dart';
+import '../../../../core/feedback/feedback_preferences_storage.dart';
 import '../widgets/settings_expandable_section.dart';
 import '../widgets/settings_item_tile.dart';
 
@@ -191,6 +193,7 @@ class SettingsPage extends StatelessWidget {
               ),
             ],
           ),
+          const _FeedbackSettingsSection(),
           SettingsExpandableSection(
             title: 'Поддержка',
             icon: Icons.support_agent_outlined,
@@ -254,3 +257,71 @@ class SettingsPage extends StatelessWidget {
   }
 }
 
+// ─── Звук и вибрация ──────────────────────────────────────────────────────────
+
+class _FeedbackSettingsSection extends StatefulWidget {
+  const _FeedbackSettingsSection();
+
+  @override
+  State<_FeedbackSettingsSection> createState() =>
+      _FeedbackSettingsSectionState();
+}
+
+class _FeedbackSettingsSectionState extends State<_FeedbackSettingsSection> {
+  late bool _soundsEnabled;
+  late bool _hapticsEnabled;
+  late FeedbackPreferencesStorage _storage;
+
+  @override
+  void initState() {
+    super.initState();
+    _storage = context.read<FeedbackPreferencesStorage>();
+    _soundsEnabled = _storage.soundsEnabled;
+    _hapticsEnabled = _storage.hapticsEnabled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SettingsExpandableSection(
+      title: 'Звук и вибрация',
+      icon: Icons.vibration_outlined,
+      children: [
+        SettingsItemTile(
+          title: 'Звуки интерфейса',
+          icon: Icons.volume_up_outlined,
+          subtitle: 'Звуки при отправке сообщений и действиях',
+          trailing: Switch.adaptive(
+            value: _soundsEnabled,
+            onChanged: (v) {
+              setState(() => _soundsEnabled = v);
+              _storage.setSoundsEnabled(v);
+            },
+            activeTrackColor: scheme.primary,
+          ),
+          onTap: () {
+            setState(() => _soundsEnabled = !_soundsEnabled);
+            _storage.setSoundsEnabled(_soundsEnabled);
+          },
+        ),
+        SettingsItemTile(
+          title: 'Вибрация',
+          icon: Icons.vibration_outlined,
+          subtitle: 'Тактильная отдача при нажатиях',
+          trailing: Switch.adaptive(
+            value: _hapticsEnabled,
+            onChanged: (v) {
+              setState(() => _hapticsEnabled = v);
+              _storage.setHapticsEnabled(v);
+            },
+            activeTrackColor: scheme.primary,
+          ),
+          onTap: () {
+            setState(() => _hapticsEnabled = !_hapticsEnabled);
+            _storage.setHapticsEnabled(_hapticsEnabled);
+          },
+        ),
+      ],
+    );
+  }
+}

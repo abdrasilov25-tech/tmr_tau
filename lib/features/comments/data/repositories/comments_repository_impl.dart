@@ -18,7 +18,7 @@ class CommentsRepositoryImpl implements CommentsRepository {
           .eq('product_id', productId)
           .order('created_at', ascending: true);
       return (res as List).map((e) => _mapComment(e as Map<String, dynamic>)).toList();
-    } catch (_) {
+    } catch (e) {
       // Fallback: load without join (e.g. if RLS blocks users or relation name differs)
       final res = await _client
           .from(SupabaseConstants.productCommentsTable)

@@ -1,4 +1,6 @@
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -58,7 +60,7 @@ class MultiAccountStorage {
       return list
           .map((e) => SavedAccount.fromJson(e as Map<String, dynamic>))
           .toList();
-    } catch (_) {
+    } catch (e) {
       return [];
     }
   }
@@ -98,7 +100,7 @@ class MultiAccountStorage {
     try {
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
       return decoded.map((k, v) => MapEntry(k, v as String));
-    } catch (_) {
+    } catch (e) {
       return {};
     }
   }
@@ -112,7 +114,7 @@ class MultiAccountStorage {
     try {
       await _secure.write(key: _passwordKeyPrefix + key, value: password);
       _prefs.remove(_passwordPrefsPrefix + key);
-    } catch (_) {
+    } catch (e) {
       _prefs.setString(_passwordPrefsPrefix + key, password);
     }
   }
@@ -139,7 +141,7 @@ class MultiAccountStorage {
     await _prefs.setString(_accountsKey, jsonEncode(list.map((e) => e.toJson()).toList()));
     try {
       await _secure.delete(key: _passwordKeyPrefix + key);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     _prefs.remove(_passwordPrefsPrefix + key);
     if (email != null && email.isNotEmpty) {
       final normEmail = _normEmail(email);
@@ -174,7 +176,7 @@ class MultiAccountStorage {
         final v = await _secure.read(key: _passwordKeyPrefix + k);
         if (v != null && v.isNotEmpty) return v;
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     return null;
   }
 

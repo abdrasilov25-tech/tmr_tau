@@ -51,7 +51,7 @@ class _StickerPackSheetState extends State<StickerPackSheet> {
         _ownedPackIds = (results[0] as List<String>).toSet();
         _loadingPackIds = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loadingPackIds = false);
     }
   }
@@ -66,7 +66,7 @@ class _StickerPackSheetState extends State<StickerPackSheet> {
           .eq('id', uid)
           .maybeSingle();
       if (mounted) setState(() => _balance = (row?['qarmet_balance'] as num?)?.toInt());
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     return null;
   }
 
@@ -92,7 +92,7 @@ class _StickerPackSheetState extends State<StickerPackSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.userMessage), backgroundColor: const Color(0xFFDC2626)),
       );
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _purchasingPackId = null);
     }
   }
@@ -115,7 +115,7 @@ class _StickerPackSheetState extends State<StickerPackSheet> {
           backgroundColor: const Color(0xFF16A34A),
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _settingSticker = null);
     }
   }

@@ -67,7 +67,7 @@ String _displayTextForDirectThread(String rawText) {
   String decode(String value) {
     try {
       return Uri.decodeComponent(value);
-    } catch (_) {
+    } catch (e) {
       return value;
     }
   }
@@ -351,7 +351,7 @@ class _ChatsPageState extends State<ChatsPage> {
       _blockedPeerIdsCache = blocked;
       _blockedPeerIdsCacheAt = now;
       return blocked;
-    } catch (_) {
+    } catch (e) {
       return const {};
     }
   }
@@ -631,7 +631,7 @@ class _ChatsPageState extends State<ChatsPage> {
         }
       }
       return (notes: notes, locations: locations);
-    } catch (_) {
+    } catch (e) {
       // If migration is not applied yet, keep chat list functional without notes.
       return (
         notes: const <String, String>{},
@@ -887,7 +887,7 @@ class _ChatsPageState extends State<ChatsPage> {
         _pageFuture = Future.value(merged);
         _storeWarmCache(merged);
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted || gen != _storiesLoadGeneration) return;
     }
   }
@@ -980,7 +980,7 @@ class _ChatsPageState extends State<ChatsPage> {
                                       suggestions = res;
                                       loading = false;
                                     });
-                                  } catch (_) {
+                                  } catch (e) {
                                     if (!mounted ||
                                         !sheetOpen ||
                                         !ctx.mounted) {
@@ -1140,7 +1140,7 @@ class _ChatsPageState extends State<ChatsPage> {
                     .toList();
                 if (!ctx.mounted) return;
                 setModal(() { searchResults = list; searching = false; });
-              } catch (_) {
+              } catch (e) {
                 if (!ctx.mounted) return;
                 setModal(() => searching = false);
               }
@@ -1337,7 +1337,7 @@ class _ChatsPageState extends State<ChatsPage> {
                                                 'group_id': gid,
                                                 'user_id': m.userId,
                                               });
-                                        } catch (_) {}
+                                        } catch (e) { debugPrint('$e'); }
                                       }
                                       if (!ctx.mounted) return;
                                       Navigator.pop(ctx);
@@ -1483,7 +1483,7 @@ class _ChatsPageState extends State<ChatsPage> {
           unreadCount: existing.unreadCount,
         );
       }
-    } catch (_) {
+    } catch (e) {
       // Keep fallback names and avatars.
     }
 
@@ -1549,7 +1549,7 @@ class _ChatsPageState extends State<ChatsPage> {
             );
           })
           .toList(growable: false);
-    } catch (_) {
+    } catch (e) {
       return const [];
     }
   }
@@ -1691,7 +1691,7 @@ class _ChatsPageState extends State<ChatsPage> {
               'is_discoverable': true,
             })
             .eq('id', id);
-      } catch (_) {
+      } catch (e) {
         // Старый проект без колонки — после миграции заработает.
       }
     } else {
@@ -1816,7 +1816,7 @@ class _ChatsPageState extends State<ChatsPage> {
             );
           })
           .toList(growable: false);
-    } catch (_) {
+    } catch (e) {
       return const [];
     }
   }
@@ -1832,7 +1832,7 @@ class _ChatsPageState extends State<ChatsPage> {
       return (res as List)
           .map((e) => (e as Map)['blocked_user_id'] as String)
           .toSet();
-    } catch (_) {
+    } catch (e) {
       return const {};
     }
   }
@@ -1846,7 +1846,7 @@ class _ChatsPageState extends State<ChatsPage> {
       return (res as List)
           .map((e) => (e as Map)['following_id'] as String)
           .toSet();
-    } catch (_) {
+    } catch (e) {
       return const {};
     }
   }
@@ -2612,7 +2612,7 @@ class _ChatsPageState extends State<ChatsPage> {
               content: Text('Обновление заняло слишком много времени'),
             ),
           );
-        } catch (_) {
+        } catch (e) {
           // Error state will be shown by FutureBuilder.
         }
         if (mounted) _syncChatBadge();

@@ -15,15 +15,16 @@ fi
 
 deploy_fn() {
   local fn_name="$1"
+  local extra_flag="${2:-}"
   echo "==> Deploy ${fn_name}"
   if [ -n "${SUPABASE_PROJECT_REF:-}" ]; then
-    "${SUPABASE_BIN[@]}" functions deploy "${fn_name}" --project-ref "$SUPABASE_PROJECT_REF"
+    "${SUPABASE_BIN[@]}" functions deploy "${fn_name}" ${extra_flag} --project-ref "$SUPABASE_PROJECT_REF"
   else
-    "${SUPABASE_BIN[@]}" functions deploy "${fn_name}"
+    "${SUPABASE_BIN[@]}" functions deploy "${fn_name}" ${extra_flag}
   fi
 }
 
-deploy_fn "verifyPurchase"
+deploy_fn "verifyPurchase" "--no-verify-jwt"
 deploy_fn "updateUserPremium"
 deploy_fn "updateBoostStatus"
 

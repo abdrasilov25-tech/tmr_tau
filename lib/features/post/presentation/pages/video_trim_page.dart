@@ -87,7 +87,7 @@ class _VideoTrimPageState extends State<VideoTrimPage> {
           Navigator.of(context).pop<File>(File(path));
         },
       );
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() => _saving = false);
         ScaffoldMessenger.of(context).showSnackBar(

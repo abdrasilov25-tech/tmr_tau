@@ -78,7 +78,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
       _controller = controller;
       setState(() => _initialized = true);
       if (widget.isActive) controller.play();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _error = true);
     }
   }

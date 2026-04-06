@@ -247,7 +247,7 @@ class _PublicationDiscoverSearchPageState
         _topSuggested = _mergeTopAndPersonal(prepared);
         _loadingTopSuggested = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _loadingTopSuggested = false);
     }
@@ -327,7 +327,7 @@ class _PublicationDiscoverSearchPageState
           _similarAccounts = _buildSimilarAccounts(raw, ranked);
           _loadingPeople = false;
         });
-      } catch (_) {
+      } catch (e) {
         if (!mounted || peopleGen != _peopleGen) return;
         setState(() => _loadingPeople = false);
       }
@@ -359,7 +359,7 @@ class _PublicationDiscoverSearchPageState
           _hasMoreVideos = list.length >= _pageSize;
           _videoCursor = list.isEmpty ? null : list.last.createdAt;
         });
-      } catch (_) {
+      } catch (e) {
         if (!mounted || videosGen != _videosGen) return;
         setState(() => _loadingVideos = false);
       }
@@ -523,7 +523,7 @@ class _PublicationDiscoverSearchPageState
         _hasMoreVideos = more.length >= _pageSize;
         _loadingMoreVideos = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted || gen != _videosGen) return;
       setState(() => _loadingMoreVideos = false);
     }

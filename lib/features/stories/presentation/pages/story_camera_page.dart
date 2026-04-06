@@ -163,7 +163,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
   Future<void> _bootstrapCamerasAfterPermission() async {
     try {
       _cameras = await availableCameras();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _initializing = false);
       return;
     }
@@ -208,7 +208,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
           });
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _initializing = false);
     }
   }
@@ -228,7 +228,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     try {
       await ctrl.setFlashMode(next);
       if (mounted) setState(() => _flashMode = next);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _takePicture() async {
@@ -245,7 +245,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
         '/add-story',
         extra: StoryCameraResult(file: File(xFile.path), isVideo: false),
       );
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _runCountdownAndShoot(CameraController ctrl) async {
@@ -279,7 +279,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
         '/add-story',
         extra: StoryCameraResult(file: File(xFile.path), isVideo: false),
       );
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _startRecording() async {
@@ -296,7 +296,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
         setState(() => _recordedSeconds++);
       });
       if (mounted) setState(() => _isRecording = true);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _stopRecording() async {
@@ -312,7 +312,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
         '/add-story?video=1',
         extra: StoryCameraResult(file: File(xFile.path), isVideo: true),
       );
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _isRecording = false);
     }
   }
@@ -328,8 +328,8 @@ class _StoryCameraPageState extends State<StoryCameraPage>
       try {
         final f = File(xFile.path);
         if (await f.exists()) await f.delete();
-      } catch (_) {}
-    } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
+    } catch (e) { debugPrint('$e'); }
     if (mounted) setState(() => _isRecording = false);
   }
 
@@ -397,7 +397,7 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                                 await ctrl.setFlashMode(mode);
                                 setState(() => _flashMode = mode);
                                 setModal(() {});
-                              } catch (_) {}
+                              } catch (e) { debugPrint('$e'); }
                             },
                             child: Container(
                               width: 42,

@@ -1,7 +1,8 @@
 import 'dart:async';
 
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../domain/entities/app_user.dart';
@@ -38,7 +39,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     }
     try {
       await _multiAccountStorage.setLastActiveAccountId(stub.id);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     if (!isClosed) {
       emit(AuthAuthenticated(stub, fromSessionOnly: true));
     }
@@ -50,7 +51,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           emit(AuthAuthenticated(full, fromSessionOnly: false));
         }
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _onSignInRequested(AuthSignInRequested event, Emitter<AuthState> emit) async {
@@ -305,7 +306,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           }
           return;
         }
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     }
   }
 

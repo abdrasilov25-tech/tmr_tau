@@ -544,7 +544,7 @@ class _CountdownStickerState extends State<_CountdownSticker> {
     DateTime? until;
     try {
       until = DateTime.parse(widget.untilIso);
-    } catch (_) {
+    } catch (e) {
       return const SizedBox.shrink();
     }
     final now = DateTime.now();

@@ -69,7 +69,7 @@ class SearchPreferencesStorage {
             return SavedSearchFilter.fromJson(
               Map<String, dynamic>.from(jsonDecode(e) as Map),
             );
-          } catch (_) {
+          } catch (e) {
             return null;
           }
         })

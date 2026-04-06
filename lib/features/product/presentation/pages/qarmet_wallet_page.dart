@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../../core/widgets/wow_entry_overlay.dart';
 import '../../data/services/payment_service.dart';
 import '../../domain/entities/qarmet_promotion_history_item.dart';
 import '../../domain/entities/qarmet_product.dart';
@@ -71,7 +72,9 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
+    return WowEntryOverlay(
+      type: WowEntryType.wallet,
+      child: Scaffold(
         backgroundColor: scheme.surface,
         appBar: AppBar(
           elevation: 0,
@@ -298,6 +301,7 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
           },
         ),
         ),
+      ),
     );
   }
 }

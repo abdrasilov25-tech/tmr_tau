@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/notification_entity.dart';
@@ -51,7 +52,7 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
           .isFilter('read_at', null)
           .order('created_at', ascending: false)
           .limit(32);
-    } catch (_) {
+    } catch (e) {
       return [];
     }
     final out = <String>[];
@@ -86,7 +87,7 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
           .eq('user_id', userId)
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
-    } catch (_) {
+    } catch (e) {
       res = await _client
           .from(SupabaseConstants.notificationsTable)
           .select()
@@ -153,7 +154,7 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
           (row['newsCount'] as num?)?.toInt() ??
           0;
       return NotificationFeedUnreadCounts(publications: p, news: n);
-    } catch (_) {
+    } catch (e) {
       return const NotificationFeedUnreadCounts(publications: 0, news: 0);
     }
   }
@@ -198,7 +199,8 @@ class NotificationsRepositoryImpl implements NotificationsRepository {
           .order('total_received_post_likes', ascending: false)
           .order('followers_count', ascending: false)
           .limit(limit);
-    } on PostgrestException catch (_) {
+    } on PostgrestException catch (e) {
+      debugPrint('$e');
       // Fallback for old schema without total_received_post_likes.
       res = await _client
           .from(SupabaseConstants.usersTable)

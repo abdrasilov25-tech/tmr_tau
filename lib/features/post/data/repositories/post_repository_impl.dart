@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../domain/entities/post_comment_entity.dart';
@@ -86,7 +87,7 @@ class PostRepositoryImpl implements PostRepository {
         followingAuthorIds = (fr as List)
             .map((e) => (e as Map)['following_id'] as String)
             .toSet();
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     }
 
     return list
@@ -192,14 +193,27 @@ class PostRepositoryImpl implements PostRepository {
     final followingIdsSet =
         followingUserIds.where((id) => id != me).toSet();
 
+    /// Релиз / мало контента: если «чистых» рекомендаций (не я, не подписки) мало,
+    /// подмешиваем подписки, затем свои публикации — иначе вкладка «Рекомендации» пустая.
     final targetPool = math.max(limit * 4, limit);
-    final discoveryPosts = <PostEntity>[];
+    final strictPool = <PostEntity>[];
+    final relaxFollowingPool = <PostEntity>[];
+    final relaxSelfPool = <PostEntity>[];
+    final seenIds = <String>{};
+
+    bool addUniqueTo(List<PostEntity> bucket, PostEntity p) {
+      if (bucket.length >= targetPool) return false;
+      if (!seenIds.add(p.id)) return false;
+      bucket.add(p);
+      return true;
+    }
+
     var nextDiscoveryDb = discoveryDbOffset;
     const batchSize = 40;
     var scanned = 0;
     const maxScan = 2000;
 
-    while (discoveryPosts.length < targetPool && scanned < maxScan) {
+    while (strictPool.length < targetPool && scanned < maxScan) {
       final res = await _client
           .from(SupabaseConstants.postsTable)
           .select(_postSelect)
@@ -214,19 +228,38 @@ class PostRepositoryImpl implements PostRepository {
       }
       for (final p in batch) {
         if (me != null && p.userId == me) {
+          addUniqueTo(relaxSelfPool, p);
           continue;
         }
         if (followingIdsSet.contains(p.userId)) {
+          addUniqueTo(relaxFollowingPool, p);
           continue;
         }
-        discoveryPosts.add(p);
-        if (discoveryPosts.length >= targetPool) {
+        addUniqueTo(strictPool, p);
+        if (strictPool.length >= targetPool) {
           break;
         }
       }
       nextDiscoveryDb += batch.length;
       scanned += batch.length;
     }
+
+    final discoveryPosts = <PostEntity>[];
+    void mergePools(List<PostEntity> src) {
+      for (final p in src) {
+        if (discoveryPosts.length >= targetPool) {
+          return;
+        }
+        if (discoveryPosts.any((x) => x.id == p.id)) {
+          continue;
+        }
+        discoveryPosts.add(p);
+      }
+    }
+
+    mergePools(strictPool);
+    mergePools(relaxFollowingPool);
+    mergePools(relaxSelfPool);
 
     final rng = math.Random();
     List<PostEntity> ranked;
@@ -268,7 +301,7 @@ class PostRepositoryImpl implements PostRepository {
           'p_completed': completed,
         },
       );
-    } catch (_) {
+    } catch (e) {
       // Таблица/RPC могут быть ещё не применены на стенде.
     }
   }
@@ -758,7 +791,7 @@ class PostRepositoryImpl implements PostRepository {
               .eq('following_id', userId)
               .maybeSingle();
           followingProfile = row != null;
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }
       return list
           .map((p) => PostModel(
@@ -854,7 +887,7 @@ class PostRepositoryImpl implements PostRepository {
             );
           })
           .toList(growable: false);
-    } catch (_) {
+    } catch (e) {
       return posts;
     }
   }
@@ -1295,7 +1328,7 @@ class PostRepositoryImpl implements PostRepository {
           .toList(growable: false);
       if (currentUserId == null || list.isEmpty) return list;
       return await _applyPostUserState(list, currentUserId);
-    } catch (_) {
+    } catch (e) {
       return const [];
     }
   }
@@ -1338,7 +1371,7 @@ class PostRepositoryImpl implements PostRepository {
               .eq('following_id', post.userId)
               .maybeSingle();
           followingAuthor = row != null;
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }
       return PostModel(
         id: post.id,

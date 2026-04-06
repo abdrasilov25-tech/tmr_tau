@@ -31,7 +31,7 @@ class TapGameLocalHallRepositoryImpl implements TapGameLocalHallRepository {
       return out.take(TapGameLocalHallRepository.maxEntries).toList(
             growable: false,
           );
-    } catch (_) {
+    } catch (e) {
       return const [];
     }
   }

@@ -86,7 +86,7 @@ class _MysterySpotRevealSheetState extends State<MysterySpotRevealSheet>
         _scaleCtrl.forward(from: 0);
         widget.onRevealed?.call();
       }
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _state = _RevealState.idle);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -473,7 +473,7 @@ class _MysterySpotPurchaseSheetState
         _loading = false;
         _error = e.userMessage;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loading = false);
     }
   }

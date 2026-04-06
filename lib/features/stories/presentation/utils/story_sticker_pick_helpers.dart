@@ -229,7 +229,7 @@ class StoryStickerPickHelpers {
           label = parts.take(2).join(', ');
         }
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     return _base('location', {
       'label': label,
       'lat': pos.latitude,

@@ -19,6 +19,7 @@ import '../../domain/repositories/post_repository.dart';
 import '../widgets/post_photo_gallery.dart';
 import '../widgets/post_share_sheet.dart';
 import '../../../product/data/services/payment_service.dart';
+import '../../../chat/presentation/widgets/unified_message_composer_bar.dart';
 
 class PostDetailPage extends StatefulWidget {
   const PostDetailPage({
@@ -43,6 +44,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   List<PostCommentEntity> _commentsOrdered = [];
   bool _commentsLoading = true;
   final _commentController = TextEditingController();
+  late final ValueNotifier<bool> _commentHasText;
   final _commentFocusNode = FocusNode();
   final _scrollController = ScrollController();
   bool _sending = false;
@@ -64,6 +66,10 @@ class _PostDetailPageState extends State<PostDetailPage> {
   @override
   void initState() {
     super.initState();
+    _commentHasText = ValueNotifier(false);
+    _commentController.addListener(() {
+      _commentHasText.value = _commentController.text.trim().isNotEmpty;
+    });
     _post = widget.post;
     _loadComments();
     _loadFollowState();
@@ -86,7 +92,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
           .eq('following_id', _post.userId)
           .maybeSingle();
       if (mounted) setState(() => _isFollowing = row != null);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _toggleFollow() async {
@@ -97,7 +103,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
       final wasFollowing = _isFollowing ?? false;
       await context.read<ProfileRepository>().toggleFollow(uid, _post.userId);
       if (mounted) setState(() => _isFollowing = !wasFollowing);
-    } catch (_) {
+    } catch (e) {
       if (mounted) await _loadFollowState();
     } finally {
       if (mounted) setState(() => _followLoading = false);
@@ -107,6 +113,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
   @override
   void dispose() {
     _followingChangeSub?.cancel();
+    _commentHasText.dispose();
     _commentController.dispose();
     _commentFocusNode.dispose();
     _scrollController.dispose();
@@ -134,7 +141,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
           if (replyTarget != null) _replyingToComment = replyTarget;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _commentsLoading = false);
     }
   }
@@ -155,6 +162,20 @@ class _PostDetailPageState extends State<PostDetailPage> {
   }
 
   Future<void> _sendComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+    _commentController.clear();
+    _commentHasText.value = false;
+    await _submitPostComment(text);
+  }
+
+  Future<void> _sendQuickPostComment(String emoji) async {
+    final text = emoji.trim();
+    if (text.isEmpty) return;
+    await _submitPostComment(text);
+  }
+
+  Future<void> _submitPostComment(String text) async {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -162,11 +183,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
       );
       return;
     }
-    final text = _commentController.text.trim();
-    if (text.isEmpty) return;
     final parentId = _replyingToComment?.id;
     setState(() => _sending = true);
-    _commentController.clear();
     setState(() => _replyingToComment = null);
     try {
       await widget.postRepository.addComment(
@@ -177,7 +195,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
           );
       if (!mounted) return;
       await _loadComments();
-    } on PostCommentReplyFallbackException catch (_) {
+    } on PostCommentReplyFallbackException catch (e) {
+      debugPrint('$e');
       if (!mounted) return;
       await _loadComments();
       if (!mounted) return;
@@ -295,7 +314,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
     });
     try {
       await widget.postRepository.toggleLike(_post.id, uid);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _post = prev);
     }
@@ -315,7 +334,7 @@ class _PostDetailPageState extends State<PostDetailPage> {
     });
     try {
       await widget.postRepository.toggleRepost(_post.id, uid);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _post = prev);
     }
@@ -551,8 +570,8 @@ class _PostDetailPageState extends State<PostDetailPage> {
           if (currentUserId != null)
             Container(
               padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
+                left: 12,
+                right: 12,
                 top: 8,
                 bottom: 8 + MediaQuery.of(context).padding.bottom,
               ),
@@ -590,35 +609,44 @@ class _PostDetailPageState extends State<PostDetailPage> {
                         ],
                       ),
                     ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _commentController,
-                          focusNode: _commentFocusNode,
-                          decoration: InputDecoration(
-                            hintText: _replyingToComment != null
-                                ? 'Написать ответ...'
-                                : 'Написать комментарий...',
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ChatQuickEmojiStrip(
+                    compact: true,
+                    onEmojiTap: (e) => unawaited(_sendQuickPostComment(e)),
+                  ),
+                  UnifiedMessageComposerBar(
+                    controller: _commentController,
+                    focusNode: _commentFocusNode,
+                    hintText: _replyingToComment != null
+                        ? 'Написать ответ...'
+                        : 'Сообщение',
+                    textHasContent: _commentHasText,
+                    onSend: _sendComment,
+                    onChanged: (_) {},
+                    showVoiceVideoWhenEmpty: false,
+                    onAttachment: () {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Фото к комментарию скоро. Пока — текст и эмодзи.',
                           ),
-                          maxLines: 2,
-                          textInputAction: TextInputAction.send,
-                          onSubmitted: (_) => _sendComment(),
                         ),
-                      ),
-                      IconButton(
-                        onPressed: _sending ? null : _sendComment,
-                        icon: _sending
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send_outlined),
-                      ),
-                    ],
+                      );
+                    },
+                    onEmojiToggle: () {
+                      FocusScope.of(context).unfocus();
+                      showCommentEmojiPickerSheet(
+                        context,
+                        onEmoji: (emoji) {
+                          final c = _commentController;
+                          c.text = c.text + emoji;
+                          c.selection =
+                              TextSelection.collapsed(offset: c.text.length);
+                          _commentHasText.value = c.text.trim().isNotEmpty;
+                        },
+                      );
+                    },
+                    sending: _sending,
+                    onFieldTap: () {},
                   ),
                 ],
               ),
@@ -894,7 +922,7 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
       setState(() => _ready = true);
       c.setVolume(_audioState.isMuted.value ? 0 : 1);
       c.play();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _ready = false);
     }
   }

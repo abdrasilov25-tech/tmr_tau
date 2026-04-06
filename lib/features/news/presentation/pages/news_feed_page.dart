@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../../../core/media/cached_video_controller.dart';
+import '../../../../core/storage/hidden_posts_storage.dart';
 import '../../../../core/widgets/app_loading.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/verified_badge.dart';
@@ -314,7 +315,7 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
                                         : 'Сохранено'),
                                     behavior: SnackBarBehavior.floating,
                                   ));
-                                } catch (_) {
+                                } catch (e) {
                                   if (!context.mounted) return;
                                   ScaffoldMessenger.of(context)
                                       .showSnackBar(const SnackBar(
@@ -427,8 +428,10 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
                     label: 'Редактировать',
                     onTap: () async {
                       Navigator.pop(sheetCtx);
-                      await context.push('/edit-post/${post.id}',
-                          extra: post);
+                      await context.push(
+                        '/post/${post.id}/edit',
+                        extra: post,
+                      );
                       if (context.mounted) onRefresh();
                     },
                   ),
@@ -460,7 +463,7 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
                           behavior: SnackBarBehavior.floating,
                         ),
                       );
-                    } catch (_) {}
+                    } catch (e) { debugPrint('$e'); }
                   },
                 ),
                 _OptionTile(
@@ -482,6 +485,30 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
                 ),
                 // Other user options
                 if (!isOwn) ...[
+                  _OptionTile(
+                    icon: Icons.hide_source_outlined,
+                    label: 'Скрыть',
+                    onTap: () async {
+                      Navigator.pop(sheetCtx);
+                      await HiddenPostsStorage.hidePost(post.id);
+                      if (!context.mounted) return;
+                      context
+                          .read<NewsBloc>()
+                          .add(NewsRemovePost(postId: post.id));
+                    },
+                  ),
+                  _OptionTile(
+                    icon: Icons.thumb_down_outlined,
+                    label: 'Не интересует',
+                    onTap: () async {
+                      Navigator.pop(sheetCtx);
+                      await HiddenPostsStorage.hidePost(post.id);
+                      if (!context.mounted) return;
+                      context
+                          .read<NewsBloc>()
+                          .add(NewsRemovePost(postId: post.id));
+                    },
+                  ),
                   const Divider(height: 12),
                   _OptionTile(
                     icon: Icons.block_rounded,
@@ -563,7 +590,7 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
-              } catch (_) {
+              } catch (e) {
                 if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
@@ -1858,7 +1885,7 @@ class _PostVideoPlayerState extends State<_PostVideoPlayer> {
         return;
       }
       setState(() => _controller = c);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() {});
     }
   }

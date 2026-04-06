@@ -104,7 +104,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen> {
         _hasMore = more.length >= _pageSize;
         _loadingMore = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loadingMore = false);
     }
   }
@@ -132,7 +132,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen> {
               : post.likesCount + 1,
         );
       });
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _toggleSave(PostEntity post) async {
@@ -144,7 +144,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen> {
       setState(() {
         _posts[idx] = post.copyWith(isSavedByMe: !post.isSavedByMe);
       });
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override

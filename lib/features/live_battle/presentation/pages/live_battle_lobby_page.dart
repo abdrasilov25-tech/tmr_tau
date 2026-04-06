@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/widgets/wow_entry_overlay.dart';
 import '../../domain/repositories/live_battle_repository.dart';
 
 const _bg = Color(0xFF0A0A0F);
@@ -79,7 +80,7 @@ class _LiveBattleLobbyPageState extends State<LiveBattleLobbyPage> {
         _users = list;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
     }
@@ -120,7 +121,9 @@ class _LiveBattleLobbyPageState extends State<LiveBattleLobbyPage> {
     final users = _filtered;
     final onlineCount = _users.where((u) => u['is_online'] == true).length;
 
-    return Scaffold(
+    return WowEntryOverlay(
+      type: WowEntryType.battle,
+      child: Scaffold(
       backgroundColor: _bg,
       body: SafeArea(
         child: Column(
@@ -347,6 +350,7 @@ class _LiveBattleLobbyPageState extends State<LiveBattleLobbyPage> {
           ],
         ),
       ),
+    ),
     );
   }
 }

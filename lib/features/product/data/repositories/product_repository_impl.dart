@@ -166,7 +166,7 @@ class ProductRepositoryImpl implements ProductRepository {
         subjectPrice: subjectPrice,
         peerPrices: prices,
       );
-    } catch (_) {
+    } catch (e) {
       return null;
     }
   }
@@ -392,7 +392,7 @@ class ProductRepositoryImpl implements ProductRepository {
             )
           : sortedList;
       return await _enrichWithUserState(ranked, currentUserId);
-    } catch (_) {
+    } catch (e) {
       // При ошибке возвращаем ленту как "похожие".
       return getFeedProducts(
         limit: safeLimit,
@@ -691,7 +691,7 @@ class ProductRepositoryImpl implements ProductRepository {
         repostCounts[productId] = (repostCounts[productId] ?? 0) + 1;
       }
       return repostCounts;
-    } catch (_) {
+    } catch (e) {
       return {};
     }
   }
@@ -766,7 +766,7 @@ class ProductRepositoryImpl implements ProductRepository {
       return (rows as List)
           .map((e) => (e as Map)['product_id'] as String)
           .toSet();
-    } catch (_) {
+    } catch (e) {
       return {};
     }
   }
@@ -782,7 +782,7 @@ class ProductRepositoryImpl implements ProductRepository {
       return (rows as List)
           .map((e) => (e as Map)['following_id'] as String)
           .toSet();
-    } catch (_) {
+    } catch (e) {
       return {};
     }
   }
@@ -798,7 +798,7 @@ class ProductRepositoryImpl implements ProductRepository {
       return (rows as List)
           .map((e) => (e as Map)['product_id'] as String)
           .toSet();
-    } catch (_) {
+    } catch (e) {
       return {};
     }
   }

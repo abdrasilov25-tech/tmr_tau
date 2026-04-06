@@ -25,7 +25,7 @@ This project is a Flutter application.
 flutter run -d "iPhone 16e"
 ```
 
-Скрипт: закрывает Simulator, `simctl shutdown all`, снимает установку приложения (`com.example.tmrTau` / `com.bazar.tmr-tau`), перезапускает **CoreSimulator** (`sudo`), удаляет `build/.../Runner.app`, снова открывает симулятор.
+Скрипт: закрывает Simulator, `simctl shutdown all`, снимает установку приложения (актуальный **`com.tmrtau.app`**, а также **`kz.tmrtau.app`** и устаревшие **`com.example.tmrTau`** / **`com.bazar.tmr-tau`** для старых установок), перезапускает **CoreSimulator** (`sudo`), удаляет `build/.../Runner.app`, снова открывает симулятор.
 
 - Без запроса sudo: `IOS_SIM_REPAIR_SUDO=0 ./scripts/repair_ios_simulator.sh`
 - С `flutter clean` + `pub get`: `IOS_SIM_FULL_CLEAN=1 ./scripts/repair_ios_simulator.sh`

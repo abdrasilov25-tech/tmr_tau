@@ -27,7 +27,7 @@ class ThemeRepositoryImpl implements ThemeRepository {
       try {
         final f = File(oldPath);
         if (await f.exists()) await f.delete();
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     }
     await _storage.setCustomThemeImagePath(null);
     await _storage.setLoginThemeIndex(clamped);
@@ -48,7 +48,7 @@ class ThemeRepositoryImpl implements ThemeRepository {
       try {
         final f = File(oldPath);
         if (await f.exists()) await f.delete();
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     }
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final prefix = _customThemePrefix;

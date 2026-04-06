@@ -55,7 +55,7 @@ class ChatUnreadBadgeController extends ChangeNotifier {
         _total = sum;
         notifyListeners();
       }
-    } catch (_) {
+    } catch (e) {
       // Оставляем последнее известное значение.
     } finally {
       _busy = false;

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import '../../domain/entities/product_entity.dart';
 
 String _categoryNameFromJson(Map<String, dynamic> json) {
@@ -32,7 +34,7 @@ List<String> _imageUrlsFromJson(Map<String, dynamic> json) {
             .where((s) => s.isNotEmpty)
             .toList();
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
   return <String>[t];
 }

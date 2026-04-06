@@ -50,7 +50,7 @@ class TapGameLocalHallEntry extends Equatable {
     DateTime at;
     try {
       at = DateTime.parse(m['updatedAt']?.toString() ?? '');
-    } catch (_) {
+    } catch (e) {
       at = DateTime.now();
     }
     return TapGameLocalHallEntry(

@@ -99,7 +99,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
             avatarUrl: user.avatarUrl,
           ),
         );
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
       if (!mounted) return;
       // Обновим профиль в AuthBloc.
       context.read<AuthBloc>().add(const AuthCheckRequested());
@@ -154,7 +154,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       _telegramController.text = (row['telegram_username'] ?? '').toString();
       _websiteController.text = (row['website_url'] ?? '').toString();
       setState(() {});
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override

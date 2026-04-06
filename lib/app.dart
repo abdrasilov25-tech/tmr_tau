@@ -71,6 +71,17 @@ import 'features/tap_game/data/tap_game_local_hall_repository_impl.dart';
 import 'features/tap_game/data/tap_game_repository_impl.dart';
 import 'features/tap_game/domain/repositories/tap_game_local_hall_repository.dart';
 import 'features/tap_game/domain/repositories/tap_game_repository.dart';
+import 'core/feedback/feedback_preferences_storage.dart';
+
+/// Чаты: до ~500 сообщений + группы; уведомления: отдельный запрос. Не конкурируют с первой
+/// отрисовкой ленты на «Публикациях».
+void _scheduleDeferredTabBadgeRefresh(BuildContext context) {
+  Future<void>.delayed(const Duration(milliseconds: 500), () {
+    if (!context.mounted) return;
+    unawaited(context.read<ChatUnreadBadgeController>().refresh());
+    unawaited(context.read<NotificationTabBadgeController>().refresh());
+  });
+}
 
 class TmrTauApp extends StatefulWidget {
   const TmrTauApp({
@@ -86,12 +97,14 @@ class TmrTauApp extends StatefulWidget {
     required this.chatStickerFavoritesStorage,
     required this.multiAccountStorage,
     required this.accountRepository,
+    required this.feedbackPreferencesStorage,
   });
 
   final String supabaseUrl;
   final String supabaseAnonKey;
   final bool supabaseInitialized;
   final LocalReactionsStorage localReactionsStorage;
+  final FeedbackPreferencesStorage feedbackPreferencesStorage;
   final ChatListStorage chatListStorage;
   final ChatStoryListStorage chatStoryListStorage;
   final ChatStreakStorage chatStreakStorage;
@@ -313,6 +326,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         RepositoryProvider<TapGameLocalHallRepository>.value(
           value: TapGameLocalHallRepositoryImpl(),
         ),
+        RepositoryProvider<FeedbackPreferencesStorage>.value(
+          value: widget.feedbackPreferencesStorage,
+        ),
         RepositoryProvider<GeoService>.value(value: _geoService),
         ChangeNotifierProvider<SearchTabActivationController>.value(
           value: _searchTabActivation,
@@ -358,11 +374,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                 );
                 await context.read<AccountManager>().addOrUpdateAccount(account);
                 if (context.mounted) {
-                  final chatBadge = context.read<ChatUnreadBadgeController>();
-                  final notificationBadge =
-                      context.read<NotificationTabBadgeController>();
-                  await chatBadge.refresh();
-                  await notificationBadge.refresh();
+                  _scheduleDeferredTabBadgeRefresh(context);
                   unawaited(paymentCubit.initStore());
                 }
               }
@@ -385,16 +397,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                   },
                   listener: (context, state) {
                     if (state is AuthAuthenticated) {
-                      context.read<FeedBloc>().add(
-                            FeedLoaded(currentUserId: state.user.id),
-                          );
-                      context.read<NewsBloc>().add(
-                            NewsLoaded(currentUserId: state.user.id),
-                          );
-                      context.read<ChatUnreadBadgeController>().refresh();
-                      unawaited(
-                        context.read<NotificationTabBadgeController>().refresh(),
-                      );
+                      // Лента товаров [FeedBloc] и новости [NewsBloc] грузятся при первом
+                      // открытии соответствующих экранов — не при каждом входе в приложение.
+                      _scheduleDeferredTabBadgeRefresh(context);
                     }
                   },
                   child: BlocListener<AuthBloc, AuthState>(

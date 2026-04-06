@@ -71,3 +71,10 @@ final class NewsRefresh extends NewsEvent {
 final class NewsCleared extends NewsEvent {
   const NewsCleared();
 }
+
+final class NewsRemovePost extends NewsEvent {
+  const NewsRemovePost({required this.postId});
+  final String postId;
+  @override
+  List<Object?> get props => [postId];
+}

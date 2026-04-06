@@ -175,7 +175,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
           }
           setState(() => _quickAccounts = byId.values.toList());
         }).catchError((_) {});
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     });
   }
 
@@ -738,7 +738,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       context.read<AuthBloc>().add(const AuthCheckRequested());
       if (!mounted) return;
       context.go('/home/feed');
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

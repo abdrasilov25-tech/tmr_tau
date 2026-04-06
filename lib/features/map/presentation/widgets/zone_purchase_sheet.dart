@@ -80,7 +80,7 @@ class _ZonePurchaseSheetState extends State<ZonePurchaseSheet> {
       if (!mounted) return;
       setState(() =>
           _balance = (row?['qarmet_balance'] as num?)?.toInt() ?? 0);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _purchase() async {
@@ -119,7 +119,7 @@ class _ZonePurchaseSheetState extends State<ZonePurchaseSheet> {
         _loading = false;
         _error = e.userMessage;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;

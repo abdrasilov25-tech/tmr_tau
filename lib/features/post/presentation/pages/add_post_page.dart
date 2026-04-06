@@ -321,7 +321,7 @@ class _AddPostPageState extends State<AddPostPage> {
       await controller.initialize();
       durationSeconds = controller.value.duration.inSeconds;
       await controller.dispose();
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось определить длительность видео')),
@@ -369,7 +369,7 @@ class _AddPostPageState extends State<AddPostPage> {
           .clamp(1, 1 << 20);
       await controller.dispose();
       return sec;
-    } catch (_) {
+    } catch (e) {
       return null;
     }
   }
@@ -498,7 +498,7 @@ class _AddPostPageState extends State<AddPostPage> {
         if (_isPublication || _newsAttachLocation) {
           location = await geoService.getCurrentLocation();
         }
-      } catch (_) {
+      } catch (e) {
         location = null;
       }
 

@@ -98,7 +98,7 @@ class _LiveScreenState extends State<LiveScreen> {
       engine.unregisterEventHandler(_handler);
       await engine.leaveChannel();
       await engine.release();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override

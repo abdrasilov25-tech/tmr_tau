@@ -29,6 +29,15 @@ class ChatListStorage {
   String _declinedKey(String peerId) => '${_base}declined_$peerId';
   String _declinedMsgEpochKey(String peerId) => '${_base}declined_msg_$peerId';
   String _hiddenMessagesKey(String peerId) => '${_base}hidden_messages_$peerId';
+  String _dmLocalClearCutoffKey(String peerId) =>
+      '${_base}dm_local_clear_cutoff_$peerId';
+  String _groupLocalClearCutoffKey(String groupId, String cityThreadId) {
+    final g = groupId.trim();
+    final t = cityThreadId.trim();
+    if (t.isEmpty) return '${_base}g_local_clear_$g';
+    return '${_base}g_local_clear_${g}_$t';
+  }
+
   String _starredDmMessagesKey(String peerId) =>
       '${_base}dm_starred_messages_$peerId';
 
@@ -160,6 +169,58 @@ class ChatListStorage {
     await _prefs.remove(_declinedMsgEpochKey(prefsPeer));
     await _prefs.remove(_hiddenMessagesKey(prefsPeer));
     await _prefs.remove(_starredDmMessagesKey(prefsPeer));
+    if (conversationStorageKey.startsWith('group:')) {
+      await _removeAllGroupLocalClearCutoffs(prefsPeer);
+    } else {
+      await _prefs.remove(_dmLocalClearCutoffKey(prefsPeer));
+    }
+  }
+
+  /// Локально скрыть все сообщения личного чата до этой отметки (только у вас, в БД не трогаем).
+  DateTime? getDmLocalClearCutoff(String peerId) {
+    final ms = _prefs.getInt(_dmLocalClearCutoffKey(peerId));
+    return ms != null ? DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true) : null;
+  }
+
+  Future<void> setDmLocalClearCutoff(String peerId, DateTime atUtc) async {
+    if (_activeAccountId.isEmpty) return;
+    await _prefs.setInt(
+      _dmLocalClearCutoffKey(peerId),
+      atUtc.toUtc().millisecondsSinceEpoch,
+    );
+  }
+
+  DateTime? getGroupLocalClearCutoff(
+    String groupId, {
+    String cityThreadId = '',
+  }) {
+    final ms =
+        _prefs.getInt(_groupLocalClearCutoffKey(groupId, cityThreadId));
+    return ms != null ? DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true) : null;
+  }
+
+  Future<void> setGroupLocalClearCutoff(
+    String groupId,
+    DateTime atUtc, {
+    String cityThreadId = '',
+  }) async {
+    if (_activeAccountId.isEmpty) return;
+    await _prefs.setInt(
+      _groupLocalClearCutoffKey(groupId, cityThreadId),
+      atUtc.toUtc().millisecondsSinceEpoch,
+    );
+  }
+
+  Future<void> _removeAllGroupLocalClearCutoffs(String groupId) async {
+    final g = groupId.trim();
+    await _prefs.remove(_groupLocalClearCutoffKey(g, ''));
+    final prefix = '${_base}g_local_clear_${g}_';
+    final keys = _prefs.getKeys().toList(growable: false);
+    for (final key in keys) {
+      if (key.startsWith(prefix)) {
+        await _prefs.remove(key);
+      }
+    }
   }
 
   /// Локальные «избранные» сообщения в диалоге с [peerId] (id сообщений).

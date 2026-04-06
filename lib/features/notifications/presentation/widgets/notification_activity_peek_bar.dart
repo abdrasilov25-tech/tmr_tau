@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/feedback/feedback_manager.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/utils/notification_badge_format.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -61,7 +62,7 @@ class NotificationActivityPeekBarState extends State<NotificationActivityPeekBar
       summary = await context
           .read<NotificationsRepository>()
           .getUnreadSummary(userId);
-    } catch (_) {
+    } catch (e) {
       return;
     }
     if (!mounted) return;
@@ -71,6 +72,7 @@ class NotificationActivityPeekBarState extends State<NotificationActivityPeekBar
       _summary = summary;
       _visible = true;
     });
+    unawaited(FeedbackManager.instance.notificationActivity());
 
     _hideTimer = Timer(_showDuration, () {
       if (mounted) setState(() => _visible = false);

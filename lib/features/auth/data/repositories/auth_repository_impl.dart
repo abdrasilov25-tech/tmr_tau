@@ -45,7 +45,7 @@ class AuthRepositoryImpl implements AuthRepository {
         return profile;
       }
       return null;
-    } catch (_) {
+    } catch (e) {
       return null;
     }
   }
@@ -91,7 +91,7 @@ class AuthRepositoryImpl implements AuthRepository {
       try {
         await _ensureUserRow(uid, email, _getName(authUser) ?? email);
         _cachedUser = await _dataSource.fetchUserProfile(uid);
-      } catch (_) {
+      } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
       _cachedUser ??= AppUser(
@@ -176,7 +176,7 @@ class AuthRepositoryImpl implements AuthRepository {
       try {
         await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
         _cachedUser = await _dataSource.fetchUserProfile(uid);
-      } catch (_) {
+      } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
       _cachedUser ??= AppUser(
@@ -216,7 +216,7 @@ class AuthRepositoryImpl implements AuthRepository {
       try {
         await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
         _cachedUser = await _dataSource.fetchUserProfile(uid);
-      } catch (_) {
+      } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
       _cachedUser ??= AppUser(
@@ -254,7 +254,7 @@ class AuthRepositoryImpl implements AuthRepository {
       try {
         await _ensureUserRow(uid, phone, _getName(authUser) ?? phone);
         _cachedUser = await _dataSource.fetchUserProfile(uid);
-      } catch (_) {
+      } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
       _cachedUser ??= AppUser(
@@ -446,7 +446,7 @@ class AuthRepositoryImpl implements AuthRepository {
               data: {'name': combinedName, 'full_name': combinedName},
             ),
           );
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }());
     }
 
@@ -476,7 +476,7 @@ class AuthRepositoryImpl implements AuthRepository {
       if (profile != null && _client.auth.currentUser?.id == uid) {
         _cachedUser = profile;
       }
-    } catch (_) {
+    } catch (e) {
       // Остаётся сессионный stub из [_signInWithAppleNative].
     }
   }

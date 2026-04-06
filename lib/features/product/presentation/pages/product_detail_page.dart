@@ -10,6 +10,7 @@ import '../../../feed/presentation/bloc/feed_bloc.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../widgets/product_image_gallery.dart';
+import '../widgets/product_overflow_sheet.dart';
 import '../widgets/product_promo_badges.dart';
 import '../widgets/product_promotion_sheet.dart';
 import '../../../../core/widgets/verified_badge.dart';
@@ -17,6 +18,7 @@ import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../comments/domain/entities/product_comment_entity.dart';
 import '../../../comments/domain/repositories/comments_repository.dart';
 import '../../../chat/presentation/widgets/start_chat_button.dart';
+import '../../../chat/presentation/widgets/unified_message_composer_bar.dart';
 import '../../../orders/domain/repositories/orders_repository.dart';
 import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/product_repository.dart';
@@ -46,6 +48,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   List<ProductCommentEntity> _comments = [];
   bool _commentsLoading = true;
   final _commentController = TextEditingController();
+  late final ValueNotifier<bool> _commentHasText;
   bool _sending = false;
   bool _isInFavorites = false;
   bool _favoriteToggling = false;
@@ -55,6 +58,10 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   @override
   void initState() {
     super.initState();
+    _commentHasText = ValueNotifier(false);
+    _commentController.addListener(() {
+      _commentHasText.value = _commentController.text.trim().isNotEmpty;
+    });
     _product = widget.product;
     _loadComments();
     _loadIsInFavorites();
@@ -89,7 +96,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       if (refreshed != null && mounted) {
         setState(() => _product = refreshed);
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _loadPriceInsight() async {
@@ -111,7 +118,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         _priceInsight = insight;
         _priceInsightReady = true;
       });
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _priceInsightReady = true);
     }
   }
@@ -135,11 +142,12 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       if (mounted) {
         setState(() => _isInFavorites = list.any((p) => p.id == _product.id));
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override
   void dispose() {
+    _commentHasText.dispose();
     _commentController.dispose();
     super.dispose();
   }
@@ -153,12 +161,26 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         _commentsLoading = false;
       });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _commentsLoading = false);
     }
   }
 
   Future<void> _sendComment() async {
+    final text = _commentController.text.trim();
+    if (text.isEmpty) return;
+    _commentController.clear();
+    _commentHasText.value = false;
+    await _submitProductComment(text);
+  }
+
+  Future<void> _sendQuickProductComment(String emoji) async {
+    final text = emoji.trim();
+    if (text.isEmpty) return;
+    await _submitProductComment(text);
+  }
+
+  Future<void> _submitProductComment(String text) async {
     final authState = context.read<AuthBloc>().state;
     if (authState is! AuthAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -166,16 +188,13 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       );
       return;
     }
-    final text = _commentController.text.trim();
-    if (text.isEmpty) return;
     setState(() => _sending = true);
-    _commentController.clear();
     try {
       await widget.commentsRepository.addComment(
-            productId: _product.id,
-            userId: authState.user.id,
-            text: text,
-          );
+        productId: _product.id,
+        userId: authState.user.id,
+        text: text,
+      );
       if (!mounted) return;
       await _loadComments();
     } catch (e) {
@@ -352,28 +371,35 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
           SliverAppBar(
             expandedHeight: 320,
             pinned: true,
-            actions: isOwner
-                ? [
-                    IconButton(
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () async {
-                        final updated = await context.push<ProductEntity?>(
-                          '/product/${_product.id}/edit',
-                          extra: _product,
-                        );
-                        if (updated != null && mounted) {
-                          setState(() => _product = updated);
-                        }
-                      },
-                      tooltip: 'Редактировать',
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      onPressed: () => _deleteProduct(context),
-                      tooltip: 'Удалить',
-                    ),
-                  ]
-                : null,
+            actions: [
+              if (!isOwner)
+                IconButton(
+                  icon: const Icon(Icons.more_vert_rounded),
+                  tooltip: 'Ещё',
+                  onPressed: () =>
+                      showProductOverflowSheet(context, product: _product),
+                ),
+              if (isOwner) ...[
+                IconButton(
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: () async {
+                    final updated = await context.push<ProductEntity?>(
+                      '/product/${_product.id}/edit',
+                      extra: _product,
+                    );
+                    if (updated != null && mounted) {
+                      setState(() => _product = updated);
+                    }
+                  },
+                  tooltip: 'Редактировать',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline),
+                  onPressed: () => _deleteProduct(context),
+                  tooltip: 'Удалить',
+                ),
+              ],
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: DoubleTapLikeBurst(
                 iconSize: 88,
@@ -588,34 +614,41 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                     ),
                   if (authState is AuthAuthenticated) ...[
                     const SizedBox(height: 16),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _commentController,
-                            decoration: const InputDecoration(
-                              hintText: 'Написать комментарий...',
-                              border: OutlineInputBorder(),
-                              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ChatQuickEmojiStrip(
+                      compact: true,
+                      onEmojiTap: (e) => unawaited(_sendQuickProductComment(e)),
+                    ),
+                    UnifiedMessageComposerBar(
+                      controller: _commentController,
+                      hintText: 'Сообщение',
+                      textHasContent: _commentHasText,
+                      onSend: _sendComment,
+                      onChanged: (_) {},
+                      showVoiceVideoWhenEmpty: false,
+                      onAttachment: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Фото к комментарию скоро. Пока — текст и эмодзи.',
                             ),
-                            maxLines: 2,
-                            textInputAction: TextInputAction.send,
-                            onSubmitted: (_) => _sendComment(),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          onPressed: _sending ? null : _sendComment,
-                          icon: _sending
-                              ? const SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.send_outlined),
-                        ),
-                      ],
+                        );
+                      },
+                      onEmojiToggle: () {
+                        FocusScope.of(context).unfocus();
+                        showCommentEmojiPickerSheet(
+                          context,
+                          onEmoji: (emoji) {
+                            final c = _commentController;
+                            c.text = c.text + emoji;
+                            c.selection =
+                                TextSelection.collapsed(offset: c.text.length);
+                            _commentHasText.value = c.text.trim().isNotEmpty;
+                          },
+                        );
+                      },
+                      sending: _sending,
+                      onFieldTap: () {},
                     ),
                   ],
                 ],

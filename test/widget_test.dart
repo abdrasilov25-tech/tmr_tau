@@ -4,6 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tmr_tau/app.dart';
 import 'package:tmr_tau/core/accounts/account_repository.dart';
+import 'package:tmr_tau/core/feedback/feedback_preferences_storage.dart';
 import 'package:tmr_tau/core/storage/chat_list_storage.dart';
 import 'package:tmr_tau/core/storage/chat_story_list_storage.dart';
 import 'package:tmr_tau/core/storage/local_reactions_storage.dart';
@@ -21,6 +22,7 @@ void main() {
   late ChatStickerFavoritesStorage chatStickerFavoritesStorage;
   late MultiAccountStorage multiAccountStorage;
   late AccountRepository accountRepository;
+  late FeedbackPreferencesStorage feedbackPreferencesStorage;
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -33,6 +35,7 @@ void main() {
     chatStickerFavoritesStorage = ChatStickerFavoritesStorage(prefs);
     multiAccountStorage = MultiAccountStorage(prefs, const FlutterSecureStorage());
     accountRepository = AccountRepositoryImpl(prefs);
+    feedbackPreferencesStorage = FeedbackPreferencesStorage(prefs);
   });
 
   group('TmrTauApp', () {
@@ -52,6 +55,7 @@ void main() {
           chatStickerFavoritesStorage: chatStickerFavoritesStorage,
           multiAccountStorage: multiAccountStorage,
           accountRepository: accountRepository,
+          feedbackPreferencesStorage: feedbackPreferencesStorage,
         ),
       );
       await tester.pumpAndSettle();

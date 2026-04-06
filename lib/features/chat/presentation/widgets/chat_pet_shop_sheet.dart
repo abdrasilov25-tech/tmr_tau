@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/widgets/wow_entry_overlay.dart';
+
 import '../../../../features/product/presentation/bloc/payment_cubit.dart';
 import '../../data/chat_pets_storage.dart';
 import '../../data/chat_streak_storage.dart';
@@ -144,7 +146,7 @@ class _ChatPetShopSheetState extends State<ChatPetShopSheet>
       if (!mounted) return;
       setState(() => _purchasing = false);
       _showSuccess('Серийчик теперь ваш!');
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _purchasing = false);
     }
@@ -309,23 +311,26 @@ class _ChatPetShopSheetState extends State<ChatPetShopSheet>
   @override
   Widget build(BuildContext context) {
     final mediaHeight = MediaQuery.of(context).size.height;
-    return DraggableScrollableSheet(
-      initialChildSize: 0.85,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      builder: (ctx, scrollController) => _ShopBody(
-        scrollController: scrollController,
-        streak: _streak,
-        hasFreePet: _hasFreePet,
-        owned: _owned,
-        activePet: _activePet,
-        shimmerController: _shimmerController,
-        purchasing: _purchasing,
-        onClaimFreePet: _claimFreePet,
-        onBuyPet: _buyPet,
-        onActivatePet: _activatePet,
-        onDeactivate: _deactivatePet,
-        mediaHeight: mediaHeight,
+    return WowEntryOverlay(
+      type: WowEntryType.shop,
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        builder: (ctx, scrollController) => _ShopBody(
+          scrollController: scrollController,
+          streak: _streak,
+          hasFreePet: _hasFreePet,
+          owned: _owned,
+          activePet: _activePet,
+          shimmerController: _shimmerController,
+          purchasing: _purchasing,
+          onClaimFreePet: _claimFreePet,
+          onBuyPet: _buyPet,
+          onActivatePet: _activatePet,
+          onDeactivate: _deactivatePet,
+          mediaHeight: mediaHeight,
+        ),
       ),
     );
   }

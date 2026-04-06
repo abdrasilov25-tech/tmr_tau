@@ -112,7 +112,6 @@ flutter:
   uses-material-design: true
 
   assets:
-    - .env
     - assets/icons.png
     - assets/coverage/tmr_tau_coverage.geojson
     - assets/share_icons/instagram.png
@@ -126,6 +125,7 @@ flutter:
     - assets/city_thread_discussion.png
     - assets/splash_tram_photo.png
     - assets/splash_qarmet_hero.png
+    - assets/sounds/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

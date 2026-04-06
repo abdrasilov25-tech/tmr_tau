@@ -8,6 +8,8 @@ import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:video_player/video_player.dart';
 
 import '../../../../core/following/following_change_bus.dart';
+import '../../../live_streaming/domain/entities/live_room_entity.dart';
+import '../../../live_streaming/domain/repositories/live_streaming_repository.dart';
 import '../../../../core/media/cached_video_controller.dart';
 import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/app_loading.dart';
@@ -27,6 +29,7 @@ import '../../../notifications/presentation/widgets/notification_activity_peek_b
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_author_follow_pill.dart';
+import '../../../post/presentation/widgets/post_feed_overflow_menu.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../widgets/user_avatar_tap.dart';
@@ -35,7 +38,7 @@ import '../widgets/user_avatar_tap.dart';
 String? _supabaseAuthUserIdOrNull() {
   try {
     return supa.Supabase.instance.client.auth.currentUser?.id;
-  } catch (_) {
+  } catch (e) {
     return null;
   }
 }
@@ -63,6 +66,26 @@ enum _FeedTab {
   recommendations,
   /// Только авторы из подписок.
   subscriptions,
+  /// Активные прямые эфиры и батлы.
+  live,
+}
+
+extension _FeedTabIndex on _FeedTab {
+  int get pageIndex {
+    switch (this) {
+      case _FeedTab.recommendations: return 0;
+      case _FeedTab.subscriptions:   return 1;
+      case _FeedTab.live:            return 2;
+    }
+  }
+
+  static _FeedTab fromIndex(int i) {
+    switch (i) {
+      case 0: return _FeedTab.recommendations;
+      case 1: return _FeedTab.subscriptions;
+      default: return _FeedTab.live;
+    }
+  }
 }
 
 class _MainHomePageState extends State<MainHomePage> {
@@ -74,6 +97,8 @@ class _MainHomePageState extends State<MainHomePage> {
   /// Отдельный вертикальный «экран» на вкладку — свайп как в TikTok.
   late final PageController _pageRecommendationsController;
   late final PageController _pageSubscriptionsController;
+  /// Горизонтальный PageController для переключения вкладок свайпом (как TikTok).
+  late final PageController _tabPageController;
 
   /// Индекс текущей «карточки» в вертикальной ленте (отдельно для каждой вкладки).
   int _pageIndexRecommendations = 0;
@@ -134,6 +159,7 @@ class _MainHomePageState extends State<MainHomePage> {
     super.initState();
     _pageRecommendationsController = PageController();
     _pageSubscriptionsController = PageController();
+    _tabPageController = PageController();
 
     // Текущий userId: AuthBloc; если ещё не успел эмитнуть — fallback на сессию Supabase.
     final authState = context.read<AuthBloc>().state;
@@ -190,18 +216,22 @@ class _MainHomePageState extends State<MainHomePage> {
     try {
       final repo = context.read<PostRepository>();
       final followingIds = await _getFollowingUserIdsCached();
-      final rec = await repo.getPublicationsFeedRecommendations(
-        currentUserId: _currentUserId,
-        followingUserIds: followingIds,
-        limit: _pageSize,
-        discoveryDbOffset: 0,
-      );
-      final sub = await repo.getPublicationsFeedSubscriptions(
-        currentUserId: _currentUserId,
-        followingUserIds: followingIds,
-        limit: _pageSize,
-        offset: 0,
-      );
+      final recSub = await Future.wait([
+        repo.getPublicationsFeedRecommendations(
+          currentUserId: _currentUserId,
+          followingUserIds: followingIds,
+          limit: _pageSize,
+          discoveryDbOffset: 0,
+        ),
+        repo.getPublicationsFeedSubscriptions(
+          currentUserId: _currentUserId,
+          followingUserIds: followingIds,
+          limit: _pageSize,
+          offset: 0,
+        ),
+      ]);
+      final rec = recSub[0];
+      final sub = recSub[1];
       if (!mounted) return;
       setState(() {
         _postsRecommendations
@@ -225,7 +255,7 @@ class _MainHomePageState extends State<MainHomePage> {
         _lastPrecachedFeedIndex = null;
         _precacheNeighborsForCurrentFeedPost();
       });
-    } catch (_) {
+    } catch (e) {
       // Оставляем последний успешный кэш на экране.
     }
   }
@@ -246,6 +276,7 @@ class _MainHomePageState extends State<MainHomePage> {
     _cancelImpressionTimer();
     _pageRecommendationsController.dispose();
     _pageSubscriptionsController.dispose();
+    _tabPageController.dispose();
     super.dispose();
   }
 
@@ -508,7 +539,7 @@ class _MainHomePageState extends State<MainHomePage> {
       debugPrint(
         '[MainHomePage] loaded tab=$_feedTab count=${_posts.length}',
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _initialLoading = false;
@@ -611,11 +642,21 @@ class _MainHomePageState extends State<MainHomePage> {
 
   void _onFeedTabChanged(_FeedTab tab) {
     if (_feedTab == tab) return;
-    if (tab == _FeedTab.subscriptions) {
+    if (tab != _FeedTab.recommendations) {
       _cancelImpressionTimer();
     }
     _lastPrecachedFeedIndex = null;
     setState(() => _feedTab = tab);
+
+    // Синхронизируем горизонтальный PageView при нажатии на вкладку.
+    if (_tabPageController.hasClients) {
+      _tabPageController.animateToPage(
+        tab.pageIndex,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeInOut,
+      );
+    }
+
     if (tab == _FeedTab.recommendations) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -623,6 +664,7 @@ class _MainHomePageState extends State<MainHomePage> {
         _ensureImpressionTimer();
       });
     }
+    if (tab == _FeedTab.live) return; // нет вертикальных лент для live-вкладки
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_feedTab != tab) return;
@@ -655,7 +697,7 @@ class _MainHomePageState extends State<MainHomePage> {
       await _fetchPageForTab(_feedTab, reset: false);
       if (!mounted) return;
       setState(() => _isLoadingMore = false);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _isLoadingMore = false);
     }
@@ -692,7 +734,7 @@ class _MainHomePageState extends State<MainHomePage> {
               notesMap[id] = note;
             }
           }
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }
       if (!mounted) return;
       setState(() {
@@ -708,7 +750,7 @@ class _MainHomePageState extends State<MainHomePage> {
         if (!mounted) return;
         _precacheStoryStripMedia();
       });
-    } catch (_) {
+    } catch (e) {
       // Не очищаем уже загруженные сторис при временной ошибке,
       // чтобы блок сторис в ленте не становился пустым.
     }
@@ -725,7 +767,7 @@ class _MainHomePageState extends State<MainHomePage> {
       return groups
           .where((g) => g.userId == uid || set.contains(g.userId))
           .toList(growable: false);
-    } catch (_) {
+    } catch (e) {
       return groups;
     }
   }
@@ -760,7 +802,7 @@ class _MainHomePageState extends State<MainHomePage> {
       final ids = await _getFollowingUserIdsCached();
       if (!mounted) return;
       setState(() => _reconcileFollowFlagsInLists(ids.toSet()));
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<List<String>> _getFollowingUserIdsCached() async {
@@ -783,7 +825,7 @@ class _MainHomePageState extends State<MainHomePage> {
         _followingIdsCacheUserId = uid;
       }
       return ids;
-    } catch (_) {
+    } catch (e) {
       return const [];
     } finally {
       _followingIdsLoadFuture = null;
@@ -791,7 +833,15 @@ class _MainHomePageState extends State<MainHomePage> {
   }
 
   Future<void> _openAddStoryAndRefresh() async {
-    await context.push('/add-story');
+    final uid = _currentUserId ?? _supabaseAuthUserIdOrNull();
+    if (uid == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы снять сторис')),
+      );
+      return;
+    }
+    await context.push('/story-camera');
     if (!mounted) return;
     await _loadStories();
   }
@@ -840,7 +890,7 @@ class _MainHomePageState extends State<MainHomePage> {
       await context.read<PostRepository>().toggleLike(post.id, userId);
       if (!mounted) return;
       await _refreshPost(post.id);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       await _refreshPost(post.id);
     }
@@ -870,7 +920,7 @@ class _MainHomePageState extends State<MainHomePage> {
       await context.read<PostRepository>().toggleRepost(post.id, userId);
       if (!mounted) return;
       await _refreshPost(post.id);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       await _refreshPost(post.id);
     }
@@ -895,7 +945,7 @@ class _MainHomePageState extends State<MainHomePage> {
       await context.read<PostRepository>().toggleSave(post.id, userId);
       if (!mounted) return;
       await _refreshPost(post.id);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       await _refreshPost(post.id);
     }
@@ -934,9 +984,17 @@ class _MainHomePageState extends State<MainHomePage> {
 
     try {
       await context.read<ProfileRepository>().toggleFollow(userId, authorId);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => applyFollow(was));
     }
+  }
+
+  void _removePostFromFeeds(String postId) {
+    if (!mounted) return;
+    setState(() {
+      _postsRecommendations.removeWhere((p) => p.id == postId);
+      _postsSubscriptions.removeWhere((p) => p.id == postId);
+    });
   }
 
   Future<void> _shareToUser(PostEntity post) async {
@@ -1015,6 +1073,7 @@ class _MainHomePageState extends State<MainHomePage> {
           child: _InstagramPostItem(
             height: itemHeight,
             post: post,
+            postRepository: context.read<PostRepository>(),
             currentUserId: _currentUserId,
             onFollow: _currentUserId != null && _currentUserId != post.userId
                 ? () => unawaited(_toggleFollow(post))
@@ -1022,12 +1081,106 @@ class _MainHomePageState extends State<MainHomePage> {
             onLike: () => _toggleLike(post),
             onRepost: () => _toggleRepost(post),
             onSave: () => _toggleSave(post),
+            onHidePost: () => _removePostFromFeeds(post.id),
             onComment: () async {
               await context.push('/post/${post.id}', extra: post);
               await _refreshPost(post.id);
             },
             onShare: () => _shareToUser(post),
           ),
+        );
+      },
+    );
+  }
+
+  /// Вкладка «Live» — список активных эфиров + кнопка баттла.
+  Widget _buildLiveTab() {
+    return StreamBuilder<List<LiveRoomEntity>>(
+      stream: context.read<LiveStreamingRepository>().watchActiveLiveRooms(),
+      builder: (context, snapshot) {
+        final rooms = snapshot.data ?? const [];
+        return CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () => context.push('/live/host'),
+                        icon: const Icon(Icons.videocam_rounded),
+                        label: const Text('Начать эфир'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => context.push('/live-battle-lobby'),
+                        icon: const Icon(Icons.sports_kabaddi_rounded),
+                        label: const Text('Баттл'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (snapshot.connectionState == ConnectionState.waiting && rooms.isEmpty)
+              const SliverFillRemaining(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (rooms.isEmpty)
+              SliverFillRemaining(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.live_tv_outlined,
+                          size: 64,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.25)),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Нет активных эфиров',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.45),
+                            ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Начните первый или ждите других',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.3),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                sliver: SliverList.separated(
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemCount: rooms.length,
+                  itemBuilder: (context, i) {
+                    final room = rooms[i];
+                    return _LiveRoomCard(
+                      room: room,
+                      onTap: () => context.push('/live/watch/${room.id}'),
+                    );
+                  },
+                ),
+              ),
+          ],
         );
       },
     );
@@ -1126,38 +1279,115 @@ class _MainHomePageState extends State<MainHomePage> {
                     ),
                   ),
                   Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final itemHeight = constraints.maxHeight.isFinite &&
-                                constraints.maxHeight > 0
-                            ? constraints.maxHeight
-                            : h;
-                        _feedItemHeight = itemHeight;
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final itemHeight = constraints.maxHeight.isFinite &&
+                                    constraints.maxHeight > 0
+                                ? constraints.maxHeight
+                                : h;
+                            _feedItemHeight = itemHeight;
 
-                        return IndexedStack(
-                          index: _feedTab == _FeedTab.recommendations ? 0 : 1,
-                          sizing: StackFit.expand,
-                          children: [
-                            _buildVerticalFeed(
-                              tab: _FeedTab.recommendations,
-                              posts: _postsRecommendations,
-                              controller: _pageRecommendationsController,
-                              itemHeight: itemHeight,
-                            ),
-                            _buildVerticalFeed(
-                              tab: _FeedTab.subscriptions,
-                              posts: _postsSubscriptions,
-                              controller: _pageSubscriptionsController,
-                              itemHeight: itemHeight,
-                            ),
-                          ],
-                        );
-                      },
+                            // Горизонтальный PageView: свайп влево/вправо меняет вкладку.
+                            // Внутри каждой вкладки — вертикальный PageView (свайп вверх/вниз).
+                            // Flutter разграничивает жесты по направлению — конфликтов нет.
+                            return PageView(
+                              controller: _tabPageController,
+                              scrollDirection: Axis.horizontal,
+                              physics: const ClampingScrollPhysics(),
+                              onPageChanged: (i) {
+                                final tab = _FeedTabIndex.fromIndex(i);
+                                if (_feedTab != tab) {
+                                  _onFeedTabChanged(tab);
+                                }
+                              },
+                              children: [
+                                _buildVerticalFeed(
+                                  tab: _FeedTab.recommendations,
+                                  posts: _postsRecommendations,
+                                  controller: _pageRecommendationsController,
+                                  itemHeight: itemHeight,
+                                ),
+                                _buildVerticalFeed(
+                                  tab: _FeedTab.subscriptions,
+                                  posts: _postsSubscriptions,
+                                  controller: _pageSubscriptionsController,
+                                  itemHeight: itemHeight,
+                                ),
+                                _buildLiveTab(),
+                              ],
+                            );
+                          },
+                        ),
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width:
+                              _StoryCameraEdgeSwipeDetector.edgeWidthLogical,
+                          child: _StoryCameraEdgeSwipeDetector(
+                            onOpenStoryCamera: () =>
+                                unawaited(_openAddStoryAndRefresh()),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
               ),
       ),
+    );
+  }
+}
+
+/// Левый край ленты: свайп **вправо** открывает камеру сторис (как в Instagram),
+/// без перехвата вертикального скролла — зона узкая, поверх ленты.
+class _StoryCameraEdgeSwipeDetector extends StatefulWidget {
+  const _StoryCameraEdgeSwipeDetector({
+    required this.onOpenStoryCamera,
+  });
+
+  final VoidCallback onOpenStoryCamera;
+
+  /// Логические пиксели ширины чувствительной полосы (совпадает с Positioned).
+  static const double edgeWidthLogical = 28;
+
+  static const double _minFlingVelocity = 380;
+  static const double _minDragDx = 56;
+
+  @override
+  State<_StoryCameraEdgeSwipeDetector> createState() =>
+      _StoryCameraEdgeSwipeDetectorState();
+}
+
+class _StoryCameraEdgeSwipeDetectorState
+    extends State<_StoryCameraEdgeSwipeDetector> {
+  double _accumDx = 0;
+
+  void _maybeOpen(double velocity) {
+    if (velocity > _StoryCameraEdgeSwipeDetector._minFlingVelocity ||
+        _accumDx >= _StoryCameraEdgeSwipeDetector._minDragDx) {
+      widget.onOpenStoryCamera();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: (_) => _accumDx = 0,
+      onHorizontalDragUpdate: (details) {
+        if (details.delta.dx > 0) {
+          _accumDx += details.delta.dx;
+        }
+      },
+      onHorizontalDragEnd: (details) {
+        _maybeOpen(details.primaryVelocity ?? 0);
+        _accumDx = 0;
+      },
+      onHorizontalDragCancel: () => _accumDx = 0,
     );
   }
 }
@@ -1195,6 +1425,15 @@ class _PublicationFeedTabStrip extends StatelessWidget {
           scheme: scheme,
           onTap: () => onChanged(_FeedTab.subscriptions),
         ),
+        Text('·', style: TextStyle(color: subtle, fontSize: 12)),
+        _PublicationFeedTabLabel(
+          label: 'Live',
+          selected: selected == _FeedTab.live,
+          subtleColor: subtle,
+          scheme: scheme,
+          isLive: true,
+          onTap: () => onChanged(_FeedTab.live),
+        ),
       ],
     );
   }
@@ -1207,6 +1446,7 @@ class _PublicationFeedTabLabel extends StatelessWidget {
     required this.subtleColor,
     required this.scheme,
     required this.onTap,
+    this.isLive = false,
   });
 
   final String label;
@@ -1214,6 +1454,7 @@ class _PublicationFeedTabLabel extends StatelessWidget {
   final Color subtleColor;
   final ColorScheme scheme;
   final VoidCallback onTap;
+  final bool isLive;
 
   @override
   Widget build(BuildContext context) {
@@ -1226,14 +1467,32 @@ class _PublicationFeedTabLabel extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                color: selected ? scheme.onSurface : subtleColor,
-                letterSpacing: -0.1,
-              ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isLive) ...[
+                  Container(
+                    width: 6,
+                    height: 6,
+                    margin: const EdgeInsets.only(right: 4),
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFEF4444),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                    color: selected
+                        ? (isLive ? const Color(0xFFEF4444) : scheme.onSurface)
+                        : subtleColor,
+                    letterSpacing: -0.1,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 2),
             AnimatedContainer(
@@ -1242,9 +1501,98 @@ class _PublicationFeedTabLabel extends StatelessWidget {
               width: selected ? 22 : 0,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(2),
-                color: selected ? scheme.primary.withValues(alpha: 0.85) : Colors.transparent,
+                color: selected
+                    ? (isLive
+                        ? const Color(0xFFEF4444)
+                        : scheme.primary.withValues(alpha: 0.85))
+                    : Colors.transparent,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Live room card ───────────────────────────────────────────────────────────
+
+class _LiveRoomCard extends StatelessWidget {
+  const _LiveRoomCard({required this.room, required this.onTap});
+
+  final LiveRoomEntity room;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 72,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.live_tv_rounded,
+                color: Color(0xFFEF4444),
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    room.title.isNotEmpty ? room.title : 'Прямой эфир',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Container(
+                        width: 7,
+                        height: 7,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFEF4444),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        'LIVE',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: const Color(0xFFEF4444),
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded, size: 22),
           ],
         ),
       ),
@@ -1320,7 +1668,7 @@ class _FeedNotificationsButtonState extends State<_FeedNotificationsButton> {
           .read<NotificationsRepository>()
           .getUnreadCount(userId);
       if (mounted) setState(() => _unread = n);
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _unread = 0);
     }
   }
@@ -1379,6 +1727,7 @@ class _InstagramPostItem extends StatelessWidget {
   const _InstagramPostItem({
     required this.height,
     required this.post,
+    required this.postRepository,
     required this.currentUserId,
     this.onFollow,
     required this.onLike,
@@ -1386,10 +1735,12 @@ class _InstagramPostItem extends StatelessWidget {
     required this.onRepost,
     required this.onSave,
     required this.onShare,
+    required this.onHidePost,
   });
 
   final double height;
   final PostEntity post;
+  final PostRepository postRepository;
   final String? currentUserId;
   final VoidCallback? onFollow;
 
@@ -1398,6 +1749,7 @@ class _InstagramPostItem extends StatelessWidget {
   final VoidCallback onRepost;
   final VoidCallback onSave;
   final VoidCallback onShare;
+  final VoidCallback onHidePost;
 
   @override
   Widget build(BuildContext context) {
@@ -1457,6 +1809,24 @@ class _InstagramPostItem extends StatelessWidget {
                         compact: true,
                       ),
                     ],
+                    IconButton(
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(
+                        minWidth: 40,
+                        minHeight: 40,
+                      ),
+                      icon: const Icon(Icons.more_vert_rounded,
+                          color: Colors.white, size: 24),
+                      onPressed: () => showPostFeedOverflowMenu(
+                        context,
+                        post: p,
+                        postRepository: postRepository,
+                        goRouter: GoRouter.of(context),
+                        currentUserId: currentUserId,
+                        onSave: onSave,
+                        onHide: onHidePost,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1708,7 +2078,7 @@ class _VideoMediaState extends State<_VideoMedia> {
       setState(() => _ready = true);
       // Играем только если вкладка активна.
       if (TickerMode.of(context)) c.play();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _ready = false);
     }
   }

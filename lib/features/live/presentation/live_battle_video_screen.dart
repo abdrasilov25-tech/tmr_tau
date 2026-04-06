@@ -254,7 +254,7 @@ class _LiveBattleVideoScreenState extends State<LiveBattleVideoScreen> {
       e.unregisterEventHandler(_handler);
       await e.leaveChannel();
       await e.release();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override

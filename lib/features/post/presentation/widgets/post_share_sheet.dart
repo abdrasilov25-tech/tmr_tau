@@ -158,7 +158,7 @@ class _PostShareSheetState extends State<PostShareSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Отправлено: ${friend.name}')),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось отправить')),
@@ -246,7 +246,7 @@ class _PostShareSheetState extends State<PostShareSheet> {
             'body': 'Вашу публикацию добавили в историю [post:${widget.post.id}]',
             'post_id': widget.post.id,
           });
-        } catch (_) {
+        } catch (e) {
           // Mention-notification failure should not break sharing flow.
         }
       }
@@ -255,7 +255,7 @@ class _PostShareSheetState extends State<PostShareSheet> {
         const SnackBar(content: Text('Публикация добавлена в историю')),
       );
       Navigator.of(context).pop();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось добавить в историю')),

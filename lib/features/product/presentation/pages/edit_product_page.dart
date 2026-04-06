@@ -5,7 +5,6 @@ import 'package:geocoding/geocoding.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/router/go_router_pop_safe.dart';
@@ -18,6 +17,7 @@ import '../../domain/entities/product_entity.dart';
 import '../../domain/repositories/categories_repository.dart';
 import '../../domain/repositories/product_repository.dart';
 import '../constants/product_photos.dart';
+import '../utils/product_photo_picker_util.dart';
 import '../widgets/draft_photos_viewer.dart';
 import '../widgets/product_form_city_autocomplete_field.dart';
 import '../widgets/product_form_kz_phone_field.dart';
@@ -129,7 +129,7 @@ class _EditProductPageState extends State<EditProductPage> {
           _categoriesLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _categoriesLoading = false);
     }
   }
@@ -146,7 +146,7 @@ class _EditProductPageState extends State<EditProductPage> {
         main.id,
       );
       if (mounted) setState(() => _subcategories = list);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override
@@ -272,7 +272,7 @@ class _EditProductPageState extends State<EditProductPage> {
       if (overwrite || _cityController.text.trim().isEmpty) {
         setState(() => _cityController.text = city);
       }
-    } catch (_) {
+    } catch (e) {
       // Ignore reverse geocoding errors, coordinates are still saved.
     }
   }
@@ -287,8 +287,10 @@ class _EditProductPageState extends State<EditProductPage> {
   Future<void> _pickMorePhotos() async {
     final space = kMaxProductPhotos - _totalPhotoCount;
     if (space <= 0) return;
-    final picker = ImagePicker();
-    final list = await picker.pickMultiImage(imageQuality: 85);
+    final list = await pickProductImageFiles(
+      context,
+      remainingSlots: space,
+    );
     if (!mounted || list.isEmpty) return;
     setState(() {
       for (final x in list) {

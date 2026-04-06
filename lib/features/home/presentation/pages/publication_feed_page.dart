@@ -229,7 +229,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
         _loadingMore = false;
       });
       _schedulePrefetchIfNeeded();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _loadingMore = false);
     }
   }
@@ -246,7 +246,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
         if (!mounted) return;
         if (page.posts.isEmpty) return;
         _prefetchedNextPage = page;
-      } catch (_) {
+      } catch (e) {
         // Prefetch must never break visible feed rendering.
       } finally {
         _prefetching = false;
@@ -273,7 +273,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
     // Записываем в БД в фоне
     try {
       await _postRepo.toggleLike(post.id, uid);
-    } catch (_) {
+    } catch (e) {
       // Откатываем при ошибке
       _updatePost(post);
     }
@@ -285,7 +285,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
     _updatePost(post.copyWith(isSavedByMe: !post.isSavedByMe));
     try {
       await _postRepo.toggleSave(post.id, uid);
-    } catch (_) {
+    } catch (e) {
       _updatePost(post);
     }
   }
@@ -301,7 +301,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
     ));
     try {
       await _postRepo.toggleRepost(post.id, uid);
-    } catch (_) {
+    } catch (e) {
       _updatePost(post);
     }
   }
@@ -315,6 +315,13 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
         copy[idx] = updated;
         _posts = copy;
       }
+    });
+  }
+
+  void _hidePost(PostEntity post) {
+    if (!mounted) return;
+    setState(() {
+      _posts = _posts.where((p) => p.id != post.id).toList(growable: false);
     });
   }
 
@@ -336,7 +343,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
             })
             .toList(growable: false);
       });
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   // ── Follow ─────────────────────────────────────────────────
@@ -348,7 +355,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
     try {
       final profileRepo = context.read<ProfileRepository>();
       await profileRepo.toggleFollow(uid, post.userId);
-    } catch (_) {
+    } catch (e) {
       _updatePost(post.copyWith(isFollowingAuthor: prev));
     }
   }
@@ -398,6 +405,7 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
                     _currentUserId != post.userId
                 ? () => _toggleFollow(post)
                 : null,
+            onHide: () => _hidePost(post),
           );
         },
       ),

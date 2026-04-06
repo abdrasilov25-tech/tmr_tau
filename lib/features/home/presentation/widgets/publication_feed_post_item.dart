@@ -6,6 +6,7 @@ import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_author_follow_pill.dart';
+import '../../../post/presentation/widgets/post_feed_overflow_menu.dart';
 import '../pages/post_detail_modal.dart';
 import '../pages/video_feed_screen.dart';
 import 'user_avatar_tap.dart';
@@ -34,6 +35,7 @@ class PublicationFeedPostItem extends StatelessWidget {
     this.onSave,
     this.onRepost,
     this.onFollow,
+    this.onHide,
   });
 
   final PostEntity post;
@@ -49,6 +51,8 @@ class PublicationFeedPostItem extends StatelessWidget {
   final VoidCallback? onSave;
   final VoidCallback? onRepost;
   final VoidCallback? onFollow;
+  /// Вызывается при скрытии поста — родитель убирает его из ленты.
+  final VoidCallback? onHide;
 
   bool get _isOwnPost => currentUserId != null && currentUserId == post.userId;
 
@@ -96,6 +100,9 @@ class PublicationFeedPostItem extends StatelessWidget {
             currentUserId: currentUserId,
             isOwnPost: _isOwnPost,
             onFollow: onFollow,
+            postRepository: postRepository,
+            onSave: onSave,
+            onHide: onHide,
           ),
 
           // ── Медиа (фото галерея или видео превью) ───────────
@@ -148,12 +155,18 @@ class _PostHeader extends StatelessWidget {
     required this.currentUserId,
     required this.isOwnPost,
     required this.onFollow,
+    required this.postRepository,
+    this.onSave,
+    this.onHide,
   });
 
   final PostEntity post;
   final String? currentUserId;
   final bool isOwnPost;
   final VoidCallback? onFollow;
+  final PostRepository postRepository;
+  final VoidCallback? onSave;
+  final VoidCallback? onHide;
 
   @override
   Widget build(BuildContext context) {
@@ -207,8 +220,19 @@ class _PostHeader extends StatelessWidget {
               compact: true,
             ),
 
-          // Меню (три точки)
-          _OptionsMenu(post: post, currentUserId: currentUserId),
+          IconButton(
+            icon: const Icon(Icons.more_vert_rounded, size: 22),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => showPostFeedOverflowMenu(
+              context,
+              post: post,
+              postRepository: postRepository,
+              goRouter: GoRouter.of(context),
+              currentUserId: currentUserId,
+              onSave: onSave,
+              onHide: onHide,
+            ),
+          ),
         ],
       ),
     );
@@ -222,75 +246,6 @@ class _PostHeader extends StatelessWidget {
     if (diff.inDays < 7) return '${diff.inDays} д';
     if (diff.inDays < 30) return '${(diff.inDays / 7).floor()} нед';
     return '${(diff.inDays / 30).floor()} мес';
-  }
-}
-
-class _OptionsMenu extends StatelessWidget {
-  const _OptionsMenu({required this.post, required this.currentUserId});
-
-  final PostEntity post;
-  final String? currentUserId;
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      icon: const Icon(Icons.more_horiz_rounded, size: 22),
-      visualDensity: VisualDensity.compact,
-      onPressed: () => _showOptions(context),
-    );
-  }
-
-  void _showOptions(BuildContext context) {
-    final isOwn = currentUserId != null && currentUserId == post.userId;
-    // Захватываем router до показа модалки — предотвращает stale context
-    // и rebuild нижележащей страницы при открытии/закрытии шита.
-    final router = GoRouter.of(context);
-
-    showModalBottomSheet<void>(
-      context: context,
-      // useRootNavigator: true — модалка монтируется поверх root navigator,
-      // нижележащая страница не получает didChangeDependencies и не перестраивается.
-      useRootNavigator: true,
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (isOwn) ...[
-              ListTile(
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Редактировать'),
-                onTap: () {
-                  Navigator.of(sheetCtx).pop();
-                  router.push('/edit-post', extra: post);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline, color: Colors.red),
-                title: const Text(
-                  'Удалить',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: () => Navigator.of(sheetCtx).pop(),
-              ),
-            ] else ...[
-              ListTile(
-                leading: const Icon(Icons.flag_outlined),
-                title: const Text('Пожаловаться'),
-                onTap: () {
-                  Navigator.of(sheetCtx).pop();
-                  router.push('/report-post', extra: post);
-                },
-              ),
-            ],
-            ListTile(
-              leading: const Icon(Icons.link_outlined),
-              title: const Text('Скопировать ссылку'),
-              onTap: () => Navigator.of(sheetCtx).pop(),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 

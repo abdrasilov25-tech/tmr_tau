@@ -70,7 +70,7 @@ class _MapBoostSheetState extends State<MapBoostSheet> {
           .maybeSingle();
       if (!mounted) return;
       setState(() => _currentBalance = (row?['qarmet_balance'] as num?)?.toInt() ?? 0);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   int get _totalCost {
@@ -103,7 +103,7 @@ class _MapBoostSheetState extends State<MapBoostSheet> {
           backgroundColor: const Color(0xFFDC2626),
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

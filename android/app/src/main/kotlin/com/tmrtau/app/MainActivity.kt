@@ -1,4 +1,4 @@
-package com.example.tmr_tau
+package com.tmrtau.app
 
 import android.content.pm.PackageManager
 import io.flutter.embedding.engine.FlutterEngine
@@ -27,7 +27,8 @@ class MainActivity : FlutterActivity() {
             )
             val key = appInfo.metaData?.getString("com.google.android.geo.API_KEY")?.trim()
             !key.isNullOrEmpty()
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", e.toString())
             false
         }
     }

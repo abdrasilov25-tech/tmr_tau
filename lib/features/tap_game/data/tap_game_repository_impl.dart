@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/constants/supabase_constants.dart';
@@ -152,7 +153,7 @@ class TapGameRepositoryImpl implements TapGameRepository {
       if (se != null) {
         try {
           shieldEnd = DateTime.parse(se.toString());
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }
       final shieldActive =
           shieldEnd != null && shieldEnd.isAfter(now);

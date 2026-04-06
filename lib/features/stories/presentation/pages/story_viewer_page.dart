@@ -412,7 +412,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
       );
       if (!mounted) return;
       setState(() => _viewsCount = count);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _viewsCount = 0);
     } finally {
@@ -461,7 +461,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           ),
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось загрузить просмотры')),
@@ -480,7 +480,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         storyId: storyId,
         viewerId: viewerId,
       );
-    } catch (_) {
+    } catch (e) {
       // Viewing metrics should never break story playback.
     }
   }
@@ -510,7 +510,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           const SnackBar(content: Text('Ответ отправлен'), duration: Duration(seconds: 2)),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Не удалось отправить')),
@@ -547,7 +547,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
           duration: const Duration(seconds: 1),
         ),
       );
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось отправить реакцию')),
@@ -702,7 +702,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         'receiver_id': receiverId,
         'text': structuredText,
       });
-    } catch (_) {
+    } catch (e) {
       // Chat delivery should not block story reaction flow.
     }
   }
@@ -727,7 +727,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
         'body': '$cleanedBody $storyTag',
         'story_id': _currentStory.id,
       });
-    } catch (_) {
+    } catch (e) {
       // Notifications should not block story interactions.
     }
   }
@@ -743,7 +743,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     try {
       await widget.storiesRepository.updateStory(_currentStory.id, caption: newCaption.isEmpty ? null : newCaption);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Сохранено')));
-    } catch (_) {
+    } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка')));
     }
   }
@@ -764,7 +764,7 @@ class _StoryGroupViewState extends State<_StoryGroupView> {
     try {
       await widget.storiesRepository.deleteStory(_currentStory.id, widget.currentUserId!);
       if (mounted) widget.onNext();
-    } catch (_) {
+    } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ошибка удаления')));
     }
   }
@@ -1488,7 +1488,7 @@ class _StoryVideoContentState extends State<_StoryVideoContent> {
       _controller = c;
       setState(() {});
       if (!widget.paused) c.play();
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() {});
     }
   }
@@ -1625,7 +1625,7 @@ class _StoryMusicAmbientPlayerState extends State<_StoryMusicAmbientPlayer> {
       await _player.setVolume(1);
       await _player.play(UrlSource(widget.audioUrl));
       if (widget.paused) await _player.pause();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _applyPause() async {
@@ -1655,7 +1655,7 @@ class _StoryMusicAmbientPlayerState extends State<_StoryMusicAmbientPlayer> {
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.play(UrlSource(widget.audioUrl));
       await _applyPause();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   @override

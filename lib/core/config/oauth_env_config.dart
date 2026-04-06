@@ -7,8 +7,8 @@ class OAuthEnvConfig {
   static String get googleWebClientId =>
       (dotenv.env['GOOGLE_WEB_CLIENT_ID'] ?? '').trim();
 
-  static String get googleWebClientSecret =>
-      (dotenv.env['GOOGLE_WEB_CLIENT_SECRET'] ?? '').trim();
+  // Client Secret хранится только на стороне Supabase Dashboard.
+  // В мобильном клиенте (PKCE) он не нужен — не добавляй его в .env.
 
   static String get redirectTo =>
       (dotenv.env['OAUTH_REDIRECT_TO'] ?? 'tmrtau://auth/callback').trim();

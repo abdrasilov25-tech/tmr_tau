@@ -71,7 +71,7 @@ class _FollowersPageState extends State<FollowersPage> {
     try {
       await context.read<ProfileRepository>().toggleFollow(me, user.id);
       _reload();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Не удалось выполнить действие')),

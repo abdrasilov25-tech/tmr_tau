@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import '../../../../features/product/domain/entities/product_entity.dart';
 import '../../../../features/product/domain/repositories/product_repository.dart';
 import '../../../../features/profile/domain/repositories/profile_repository.dart';
@@ -58,7 +60,7 @@ class FeedRepositoryImpl implements FeedRepository {
           repository: _settingsRepository,
           blockerId: currentUserId,
         );
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
     }
     final list = await _productRepository.getFeedProducts(
       limit: limit,

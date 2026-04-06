@@ -407,7 +407,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
             .toList(growable: false);
         _loadingPublications = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _loadingPublications = false);
     }
@@ -445,7 +445,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
         _peerFollowsMe = peerFollowsMe;
         _isMutualFollow = widget.profile.isFollowingByMe && peerFollowsMe;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() { _peerFollowsMe = false; _isMutualFollow = false; });
     }
@@ -517,7 +517,7 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
           .toList(growable: false);
       if (!mounted) return;
       setState(() => _commonFollowers = mapped);
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _commonFollowers = const []);
     }

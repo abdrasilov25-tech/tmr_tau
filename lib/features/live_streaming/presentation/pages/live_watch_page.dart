@@ -63,7 +63,7 @@ class _LiveWatchPageState extends State<LiveWatchPage> {
       e.unregisterEventHandler(_handler);
       await e.leaveChannel();
       await e.release();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _bootstrap() async {

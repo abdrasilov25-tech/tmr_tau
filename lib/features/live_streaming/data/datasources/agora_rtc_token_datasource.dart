@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Запрос RTC-токена у Edge Function [agora-rtc-token].
@@ -24,7 +25,7 @@ class AgoraRtcTokenDatasource {
       if (data is Map && data['token'] is String) {
         return data['token'] as String;
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     return null;
   }
 }

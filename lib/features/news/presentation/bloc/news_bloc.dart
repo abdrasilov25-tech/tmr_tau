@@ -1,7 +1,8 @@
 import 'dart:math' as math;
 
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../profile/domain/repositories/profile_repository.dart';
@@ -19,6 +20,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     on<NewsToggleFollow>(_onToggleFollow);
     on<NewsRefresh>(_onRefresh);
     on<NewsCleared>(_onCleared);
+    on<NewsRemovePost>(_onRemovePost);
   }
 
   final PostRepository _repository;
@@ -27,6 +29,15 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
 
   void _onCleared(NewsCleared event, Emitter<NewsState> emit) {
     emit(NewsInitial());
+  }
+
+  void _onRemovePost(NewsRemovePost event, Emitter<NewsState> emit) {
+    final current = state;
+    if (current is! NewsSuccess) return;
+    final updated = current.posts
+        .where((p) => p.id != event.postId)
+        .toList(growable: false);
+    emit(current.copyWith(posts: updated));
   }
 
   Future<void> _onLoaded(NewsLoaded event, Emitter<NewsState> emit) async {
@@ -101,7 +112,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
           selectedCity: current.selectedCity,
         ));
       }
-    } catch (_) {
+    } catch (e) {
       if (!isClosed) emit(current.copyWith(isLoadingMore: false));
     }
   }
@@ -146,7 +157,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
         userId: event.userId,
         optionIndex: event.optionIndex,
       );
-    } catch (_) {
+    } catch (e) {
       if (!isClosed) emit(previous);
     }
   }
@@ -164,7 +175,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     if (!isClosed) emit(current.copyWith(posts: updated));
     try {
       await _repository.toggleLike(event.postId, event.userId);
-    } catch (_) {
+    } catch (e) {
       if (!isClosed) emit(current);
     }
   }
@@ -184,7 +195,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
         );
       }).toList();
       if (!isClosed) emit(current.copyWith(posts: updated));
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _onToggleFollow(
@@ -213,7 +224,7 @@ class NewsBloc extends Bloc<NewsEvent, NewsState> {
     if (!isClosed) emit(current.copyWith(posts: optimistic));
     try {
       await _profileRepository.toggleFollow(event.followerId, authorId);
-    } catch (_) {
+    } catch (e) {
       if (!isClosed) {
         final reverted = current.posts
             .map(

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../core/constants/supabase_constants.dart';
 import '../../../../core/following/following_change_bus.dart';
@@ -22,7 +23,8 @@ class ProfileRepositoryImpl implements ProfileRepository {
         sum += (m['likes_count'] as int? ?? 0);
       }
       return sum;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('$e');
       return 0;
     }
   }
@@ -48,7 +50,8 @@ class ProfileRepositoryImpl implements ProfileRepository {
       } else if (v is num) {
         totalReceivedPostLikes = v.toInt();
       }
-    } on PostgrestException catch (_) {
+    } on PostgrestException catch (e) {
+      debugPrint('$e');
       try {
         final userRes = await _client
             .from(SupabaseConstants.usersTable)
@@ -58,7 +61,8 @@ class ProfileRepositoryImpl implements ProfileRepository {
         if (userRes == null) return null;
         userMap = Map<String, dynamic>.from(userRes as Map);
         totalReceivedPostLikes = await _sumLikesFromPosts(sellerId);
-      } on PostgrestException catch (_) {
+      } on PostgrestException catch (e) {
+        debugPrint('$e');
         // Совместимость со старой схемой БД без части полей монетизации.
         final userRes = await _client
             .from(SupabaseConstants.usersTable)
@@ -140,7 +144,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       products = (secondaryResults[0] as List)
           .map((e) => _mapProduct(e as Map<String, dynamic>))
           .toList();
-    } catch (_) {
+    } catch (e) {
       products = const <ProductModel>[];
     }
     isFollowingByMe = secondaryResults[1] != null;
@@ -197,7 +201,8 @@ class ProfileRepositoryImpl implements ProfileRepository {
           officialPageActive: m['official_page_active'] as bool? ?? false,
         );
       }).toList();
-    } on PostgrestException catch (_) {
+    } on PostgrestException catch (e) {
+      debugPrint('$e');
       // Колонка is_verified или following_count ещё не добавлена в БД
       return [];
     }
@@ -365,7 +370,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
         newFollowers: (m['new_followers'] as num?)?.toInt() ?? 0,
         sharedPosts: (m['shared_posts'] as num?)?.toInt() ?? 0,
       );
-    } catch (_) {
+    } catch (e) {
       return const CreatorMonthlyStats(eligible: false);
     }
   }
@@ -399,7 +404,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
             'title': 'Новый подписчик',
             'body': 'Подписался на вас',
           });
-        } catch (_) {}
+        } catch (e) { debugPrint('$e'); }
       }
       FollowingChangeBus.instance.notify();
     } on PostgrestException catch (e) {

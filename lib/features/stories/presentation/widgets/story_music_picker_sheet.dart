@@ -133,7 +133,7 @@ class _StoryMusicPickerScaffoldState extends State<_StoryMusicPickerScaffold> {
     try {
       await _player.stop();
       await _player.play(UrlSource(t.previewUrl));
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _playing = null);
     }
@@ -143,7 +143,7 @@ class _StoryMusicPickerScaffoldState extends State<_StoryMusicPickerScaffold> {
   Future<void> _confirmTrack(StoryMusicTrack t) async {
     try {
       await _player.stop();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     if (!mounted) return;
     widget.navigator.pop(t);
   }

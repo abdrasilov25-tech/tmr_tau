@@ -1,5 +1,6 @@
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../domain/entities/notification_entity.dart';
 import '../../domain/repositories/notifications_repository.dart';
 
@@ -58,7 +59,7 @@ class NotificationsBloc extends Bloc<NotificationsEvent, NotificationsState> {
               : n)
           .toList();
       if (!isClosed) emit(NotificationsLoaded(updated));
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _onMarkAllRead(
@@ -66,6 +67,6 @@ class NotificationsBloc extends Bloc<NotificationsEvent, NotificationsState> {
     try {
       await _repository.markAllAsRead(_userId);
       add(NotificationsRequested());
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 }

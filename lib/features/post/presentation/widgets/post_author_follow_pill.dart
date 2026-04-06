@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../../core/feedback/feedback_manager.dart';
+
 /// Красная «Подписаться» / зелёная «Отписаться» для авторов в лентах.
 class PostAuthorFollowPill extends StatelessWidget {
   const PostAuthorFollowPill({
@@ -20,7 +22,14 @@ class PostAuthorFollowPill extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: () {
+          if (isFollowing) {
+            FeedbackManager.instance.buttonTap();
+          } else {
+            FeedbackManager.instance.success();
+          }
+          onTap();
+        },
         borderRadius: BorderRadius.circular(20),
         child: Container(
           padding: EdgeInsets.symmetric(

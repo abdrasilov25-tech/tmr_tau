@@ -16,7 +16,7 @@ class SplashPage extends StatefulWidget {
 class _SplashPageState extends State<SplashPage>
     with SingleTickerProviderStateMixin {
   /// Только для успешной авторизации: короткий брендинг. На логин не задерживаем.
-  static const _minSplashAuthenticated = Duration(milliseconds: 1400);
+  static const _minSplashAuthenticated = Duration(milliseconds: 700);
 
   late final DateTime _splashStartedAt;
   late AnimationController _fadeOutController;

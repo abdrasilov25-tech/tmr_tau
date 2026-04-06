@@ -6,6 +6,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 
+import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/feedback/feedback_manager.dart';
 import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/formatting/compact_count_format.dart';
@@ -43,6 +45,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   List<NotificationEntity> _items = const [];
   List<TopUserRankEntity> _topUsers = const [];
   supa.RealtimeChannel? _topUsersChannel;
+  supa.RealtimeChannel? _notificationsInboxChannel;
   Timer? _topUsersRefreshDebounce;
 
   static const _groupableTypes = {
@@ -64,6 +67,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   void initState() {
     super.initState();
     _attachTopUsersRealtime();
+    _attachNotificationsInboxRealtime();
     _load();
   }
 
@@ -71,7 +75,42 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
   void dispose() {
     _topUsersRefreshDebounce?.cancel();
     _detachTopUsersRealtime();
+    _detachNotificationsInboxRealtime();
     super.dispose();
+  }
+
+  void _detachNotificationsInboxRealtime() {
+    final ch = _notificationsInboxChannel;
+    _notificationsInboxChannel = null;
+    if (ch != null) {
+      supa.Supabase.instance.client.removeChannel(ch);
+    }
+  }
+
+  void _attachNotificationsInboxRealtime() {
+    _detachNotificationsInboxRealtime();
+    final authState = context.read<AuthBloc>().state;
+    final userId = authState is AuthAuthenticated ? authState.user.id : null;
+    if (userId == null) return;
+    final ch =
+        supa.Supabase.instance.client.channel('notifications_inbox_$userId');
+    _notificationsInboxChannel = ch;
+    ch
+        .onPostgresChanges(
+          event: supa.PostgresChangeEvent.insert,
+          schema: 'public',
+          table: SupabaseConstants.notificationsTable,
+          filter: supa.PostgresChangeFilter(
+            type: supa.PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: (_) {
+            if (!mounted) return;
+            unawaited(FeedbackManager.instance.notificationActivity());
+          },
+        )
+        .subscribe();
   }
 
   void _attachTopUsersRealtime() {
@@ -109,7 +148,7 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
       final top = await context.read<NotificationsRepository>().getTopUsersByLikes(limit: 50);
       if (!mounted) return;
       setState(() => _topUsers = top);
-    } catch (_) {
+    } catch (e) {
       // Не ломаем экран уведомлений, если realtime-подгрузка не удалась.
     }
   }
@@ -175,10 +214,10 @@ class _NotificationsActivityPageState extends State<NotificationsActivityPage> {
     if (!context.mounted) return;
     try {
       context.read<NotificationActivityPeekBus>().notifyUnreadMayHaveChanged();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
     try {
       unawaited(context.read<NotificationTabBadgeController>().refresh());
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _markGroupRead(List<String> ids) async {
@@ -1421,7 +1460,7 @@ class _NotificationTileState extends State<_NotificationTile> {
           _likeStateReady = true;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) setState(() => _likeStateReady = true);
     }
   }
@@ -1432,7 +1471,7 @@ class _NotificationTileState extends State<_NotificationTile> {
     try {
       await widget.onLikeComment!();
       if (mounted) setState(() => _heartFilled = !_heartFilled);
-    } catch (_) {
+    } catch (e) {
       /* сообщение уже в родителе */
     } finally {
       if (mounted) setState(() => _likeBusy = false);

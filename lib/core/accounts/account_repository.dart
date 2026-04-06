@@ -27,7 +27,7 @@ class AccountRepositoryImpl implements AccountRepository {
       return list
           .map((e) => AccountModel.fromJson(e as Map<String, dynamic>))
           .toList();
-    } catch (_) {
+    } catch (e) {
       return [];
     }
   }

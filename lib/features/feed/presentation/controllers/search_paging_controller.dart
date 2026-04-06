@@ -233,7 +233,7 @@ class SearchPagingController extends ChangeNotifier {
         repository: settings,
         blockerId: uid,
       );
-    } catch (_) {
+    } catch (e) {
       _cachedExcludeSellerIds = {};
     }
     return _cachedExcludeSellerIds!;

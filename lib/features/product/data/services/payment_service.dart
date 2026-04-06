@@ -53,7 +53,7 @@ class PaymentService {
   /// Единственный Product ID авто-подписки Official Page (ASC, Sandbox, StoreKit config).
   /// Дубликатов и legacy ID для этой подписки нет.
   static const String monthlySubscriptionProductId =
-      'com.example.tmrTau.subscription.monthly';
+      'com.tmrtau.app.subscription.monthly';
 
   /// Алиас к [monthlySubscriptionProductId] (совместимость с остальным кодом).
   static const String officialPageProductId = monthlySubscriptionProductId;
@@ -61,7 +61,7 @@ class PaymentService {
   static const String promotePostProductId = 'promote_post';
   /// Non-consumable: оформление профиля (рамки, бейджи, галочка) + стикеры на карте.
   static const String profileCosmeticsLifetimeProductId =
-      'com.example.tmrTau.premium';
+      'com.tmrtau.app.premium';
 
   /// Уровни, выставляемые на сервере при успешной покупке [profileCosmeticsLifetimeProductId].
   static const int profileCosmeticsIapMaxFrameLevel = 3;
@@ -83,6 +83,7 @@ class PaymentService {
   void clearWalletMemoryCache() {
     _walletCache = null;
     _officialPageMonthlyRpcSucceededKeys.clear();
+    _qarmetPackChainDoneSession.clear();
   }
   WalletSnapshot? _walletCache;
   DateTime? _lastMonthlyCreditCheckAt;
@@ -91,6 +92,10 @@ class PaymentService {
   final Set<String> _officialPageMonthlyRpcSucceededKeys = <String>{};
   static const String _walletCachePrefix = 'qarmet_wallet_snapshot_v1_';
   static const String _premiumIapLocalPrefix = 'premium_iap_unlocked_v1_';
+  /// После полной цепочки verify + начисления Qarmet для пакета (защита от двойного credit_qarmet).
+  static const String _qarmetPackChainDonePrefix = 'iap_qarmet_pack_chain_done_v1_';
+
+  final Set<String> _qarmetPackChainDoneSession = <String>{};
 
   static const Map<String, QarmetProduct> _qarmetCatalog = {
     // LIVE-battle mapping: qarmet_10 -> 100.
@@ -445,7 +450,7 @@ class PaymentService {
       // остаётся «мёртвым» до полного перезапуска приложения.
       try {
         _storeAvailable = await _iap.isAvailable();
-      } catch (_) {
+      } catch (e) {
         _storeAvailable = false;
       }
       _storeInitError = e is PlatformException
@@ -466,13 +471,65 @@ class PaymentService {
     return _purchase(
       storeProductId: productId,
       onVerified: (purchase) async {
+        final auth = _requireAuthUser();
+        final chainKey = '${auth.id}::${_iapPurchaseDedupeKey(purchase)}';
+        if (_qarmetPackChainDoneSession.contains(chainKey) ||
+            await _isQarmetPackChainDonePersisted(auth.id, purchase)) {
+          debugPrint(
+            'IAP buyQarmet: chain already completed, skip re-credit key=$chainKey',
+          );
+          return;
+        }
         await _verifyPurchase(purchase, productId);
         if (package.isSubscription) {
           await _creditOfficialPageMonthlyAfterSubscriptionPurchase(purchase);
         }
         await _creditPurchasedQarmet(package);
+        await _markQarmetPackChainDone(auth.id, purchase);
       },
     );
+  }
+
+  Future<bool> _isQarmetPackChainDonePersisted(String userId, PurchaseDetails p) async {
+    final dedupe = _iapPurchaseDedupeKey(p);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('$_qarmetPackChainDonePrefix$userId');
+      if (raw == null || raw.isEmpty) return false;
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map((e) => e.toString()).contains(dedupe);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  Future<void> _markQarmetPackChainDone(String userId, PurchaseDetails p) async {
+    final dedupe = _iapPurchaseDedupeKey(p);
+    _qarmetPackChainDoneSession.add('$userId::$dedupe');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final key = '$_qarmetPackChainDonePrefix$userId';
+      List<String> keys = [];
+      final existing = prefs.getString(key);
+      if (existing != null && existing.isNotEmpty) {
+        try {
+          keys = (jsonDecode(existing) as List<dynamic>)
+              .map((e) => e.toString())
+              .toList();
+        } catch (e) {
+          keys = [];
+        }
+      }
+      if (!keys.contains(dedupe)) {
+        keys.add(dedupe);
+        while (keys.length > 80) {
+          keys.removeAt(0);
+        }
+        await prefs.setString(key, jsonEncode(keys));
+      }
+    } catch (e) {
+      // Некритично: сессионный сет всё равно защищает от повторов до перезапуска.
+    }
   }
 
   Future<void> restorePurchases() async {
@@ -559,7 +616,7 @@ class PaymentService {
       final now = DateTime.now().toUtc();
       final byDate = until != null && until.isAfter(now);
       return (active: flag || byDate, until: until);
-    } catch (_) {
+    } catch (e) {
       return (active: false, until: null);
     }
   }
@@ -710,10 +767,16 @@ class PaymentService {
     }
   }
 
-  String _officialPagePurchaseDedupeKey(PurchaseDetails p) {
+  /// Ключ для дедупа одной транзакции (Official Page RPC, цепочка Qarmet-пакета).
+  /// Совпадает по смыслу с [buildIapDedupeKey] в Edge: сначала purchaseId, затем id из JWS/SK2.
+  String _iapPurchaseDedupeKey(PurchaseDetails p) {
     final pid = (p.purchaseID ?? '').trim();
     if (pid.isNotEmpty) {
       return '${p.productID}|$pid';
+    }
+    final sk2 = _tryExtractSk2FinishTransactionId(p);
+    if (sk2 != null && sk2 > 0) {
+      return '${p.productID}|$sk2';
     }
     final blob = p.verificationData.serverVerificationData.trim();
     if (blob.isNotEmpty) {
@@ -730,7 +793,7 @@ class PaymentService {
       'IAP official_page subscription: purchase received '
       'status=${purchase.status.name} id=${purchase.productID}',
     );
-    final key = _officialPagePurchaseDedupeKey(purchase);
+    final key = _iapPurchaseDedupeKey(purchase);
     if (_officialPageMonthlyRpcSucceededKeys.contains(key)) {
       debugPrint(
         'Qarmet RPC: skip credit_official_page_monthly_qarmet (already succeeded) key=$key',
@@ -813,7 +876,7 @@ class PaymentService {
       );
       _walletCache = snapshot;
       return snapshot;
-    } catch (_) {
+    } catch (e) {
       return null;
     }
   }
@@ -889,7 +952,7 @@ class PaymentService {
         officialPageActive: row['official_page_active'] as bool? ?? false,
         cosmeticsUnlocked: localUnlocked || serverCosmetics,
       );
-    } catch (_) {
+    } catch (e) {
       return const _UserWalletFields();
     }
   }
@@ -924,7 +987,7 @@ class PaymentService {
         '$_walletCachePrefix${auth.id}',
         jsonEncode(payload),
       );
-    } catch (_) {
+    } catch (e) {
       // Non-critical optimization path.
     }
   }
@@ -1175,7 +1238,7 @@ class PaymentService {
         if (decoded is Map) {
           return fromMap(Map<String, dynamic>.from(decoded));
         }
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
       return null;
     }
 
@@ -1195,7 +1258,7 @@ class PaymentService {
         if (decoded is Map) {
           return fromMap(Map<String, dynamic>.from(decoded));
         }
-      } catch (_) {}
+      } catch (e) { debugPrint('$e'); }
       return null;
     }
 
@@ -1244,75 +1307,80 @@ class PaymentService {
 
     final completer = Completer<PaymentResult>();
     late final StreamSubscription<List<PurchaseDetails>> sub;
+    // StoreKit может прислать второй пакет событий до завершения async-обработки первого;
+    // без очереди возможны двойные verify/credit. Обрабатываем строго по одному за раз.
+    Future<void> processingChain = Future<void>.value();
     sub = _iap.purchaseStream.listen(
-      (purchases) async {
-        for (final purchase in purchases) {
-          if (!acceptedStoreIds.contains(purchase.productID)) continue;
+      (List<PurchaseDetails> purchases) {
+        processingChain = processingChain.then((_) async {
+          for (final purchase in purchases) {
+            if (!acceptedStoreIds.contains(purchase.productID)) continue;
 
-          debugPrint(
-            'IAP purchase stream: id=${purchase.productID} '
-            'status=${purchase.status.name} '
-            'pendingComplete=${purchase.pendingCompletePurchase} '
-            'error=${purchase.error}',
-          );
+            debugPrint(
+              'IAP purchase stream: id=${purchase.productID} '
+              'status=${purchase.status.name} '
+              'pendingComplete=${purchase.pendingCompletePurchase} '
+              'error=${purchase.error}',
+            );
 
-          try {
-            switch (purchase.status) {
-              case PurchaseStatus.pending:
-                debugPrint('IAP purchase stream: pending (awaiting StoreKit)');
-                break;
-              case PurchaseStatus.purchased:
-              case PurchaseStatus.restored:
-                debugPrint(
-                  'IAP purchase stream: ${purchase.status.name} -> verify',
+            try {
+              switch (purchase.status) {
+                case PurchaseStatus.pending:
+                  debugPrint('IAP purchase stream: pending (awaiting StoreKit)');
+                  break;
+                case PurchaseStatus.purchased:
+                case PurchaseStatus.restored:
+                  debugPrint(
+                    'IAP purchase stream: ${purchase.status.name} -> verify',
+                  );
+                  await onVerified(purchase);
+                  await _completeIapPurchase(purchase);
+                  if (!completer.isCompleted) {
+                    completer.complete(
+                      const PaymentResult(status: PaymentResultStatus.success),
+                    );
+                  }
+                  break;
+                case PurchaseStatus.canceled:
+                  debugPrint('IAP purchase stream: canceled');
+                  if (!completer.isCompleted) {
+                    completer.complete(
+                      const PaymentResult(
+                        status: PaymentResultStatus.cancelled,
+                        message: 'Покупка отменена',
+                      ),
+                    );
+                  }
+                  break;
+                case PurchaseStatus.error:
+                  final iapErr = purchase.error;
+                  debugPrint(
+                    'IAP purchase stream: error code=${iapErr?.code} '
+                    'message=${iapErr?.message} details=${iapErr?.details}',
+                  );
+                  if (!completer.isCompleted) {
+                    completer.complete(
+                      PaymentResult(
+                        status: PaymentResultStatus.error,
+                        message: _friendlyIapUserMessage(iapErr?.message),
+                      ),
+                    );
+                  }
+                  break;
+              }
+            } catch (e, st) {
+              debugPrint('IAP processing error: $e\n$st');
+              if (!completer.isCompleted) {
+                completer.complete(
+                  PaymentResult(
+                    status: PaymentResultStatus.error,
+                    message: _friendlyPurchaseProcessingError(e),
+                  ),
                 );
-                await onVerified(purchase);
-                await _completeIapPurchase(purchase);
-                if (!completer.isCompleted) {
-                  completer.complete(
-                    const PaymentResult(status: PaymentResultStatus.success),
-                  );
-                }
-                break;
-              case PurchaseStatus.canceled:
-                debugPrint('IAP purchase stream: canceled');
-                if (!completer.isCompleted) {
-                  completer.complete(
-                    const PaymentResult(
-                      status: PaymentResultStatus.cancelled,
-                      message: 'Покупка отменена',
-                    ),
-                  );
-                }
-                break;
-              case PurchaseStatus.error:
-                final iapErr = purchase.error;
-                debugPrint(
-                  'IAP purchase stream: error code=${iapErr?.code} '
-                  'message=${iapErr?.message} details=${iapErr?.details}',
-                );
-                if (!completer.isCompleted) {
-                  completer.complete(
-                    PaymentResult(
-                      status: PaymentResultStatus.error,
-                      message: _friendlyIapUserMessage(iapErr?.message),
-                    ),
-                  );
-                }
-                break;
-            }
-          } catch (e, st) {
-            debugPrint('IAP processing error: $e\n$st');
-            if (!completer.isCompleted) {
-              completer.complete(
-                PaymentResult(
-                  status: PaymentResultStatus.error,
-                  message: _friendlyPurchaseProcessingError(e),
-                ),
-              );
+              }
             }
           }
-        }
+        });
       },
       onError: (e, st) {
         debugPrint('IAP stream error: $e\n$st');
@@ -1363,6 +1431,11 @@ class PaymentService {
         message: 'Не удалось запустить покупку: $e',
       );
     } finally {
+      try {
+        await processingChain;
+      } catch (e, st) {
+        debugPrint('IAP processingChain drain: $e\n$st');
+      }
       await sub.cancel();
     }
   }
@@ -1529,16 +1602,29 @@ class PaymentService {
     int? baseAmount,
     int? bonusAmount,
   }) async {
-    final next = await _client.rpc<int>(
-      'credit_qarmet',
-      params: <String, dynamic>{
-        'p_amount': amount,
-        'p_reason': reason,
-      },
-    );
-    debugPrint(
-      'Qarmet credited: +$amount (base=${baseAmount ?? amount}, bonus=${bonusAmount ?? 0}) reason=$reason balance=$next',
-    );
+    try {
+      final next = await _client.rpc<int>(
+        'credit_qarmet',
+        params: <String, dynamic>{
+          'p_amount': amount,
+          'p_reason': reason,
+        },
+      );
+      debugPrint(
+        'Qarmet credited: +$amount (base=${baseAmount ?? amount}, bonus=${bonusAmount ?? 0}) reason=$reason balance=$next',
+      );
+    } on PostgrestException catch (e) {
+      final msg = e.message.trim().toLowerCase();
+      if (msg.contains('forbidden: paid official') ||
+          msg.contains('managed by backend only')) {
+        throw Exception(
+          'Сервер отклонил начисление Qarmet (триггер защиты кошелька). '
+          'Примените миграцию repair_wallet_rpc на Supabase и повторите. '
+          'Код: ${e.code}',
+        );
+      }
+      rethrow;
+    }
   }
 
   Future<void> _activatePromotionAtomic({
@@ -1639,21 +1725,6 @@ class PaymentService {
         throw Exception('Сессия истекла. Войдите снова и повторите покупку.');
       }
 
-      // Тот же вызов, что использует Edge getUser(): если здесь ок — токен валиден для проекта.
-      late final UserResponse validated;
-      try {
-        validated = await _client.auth.getUser();
-      } on AuthException catch (e) {
-        throw Exception(
-          'Не удалось подтвердить сессию: ${e.message}. Выйдите и войдите снова.',
-        );
-      }
-      if (validated.user == null || validated.user!.id != auth.id) {
-        throw Exception(
-          'Аккаунт не подтверждён после обновления сессии. Выйдите и войдите снова.',
-        );
-      }
-
       try {
         final response = await _client.functions.invoke(
           'verifyPurchase',
@@ -1666,6 +1737,9 @@ class PaymentService {
             'verificationData': verificationPayload,
             'source': purchase.verificationData.source,
             'platform': defaultTargetPlatform.name,
+            // Дублируем JWT в теле: Edge читает body первым и при необходимости
+            // собирает Authorization (обход редких потерь заголовка / прокси).
+            'accessToken': token,
           },
         );
         final data = response.data;
@@ -1708,7 +1782,7 @@ class PaymentService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('$_premiumIapLocalPrefix$userId', unlocked);
-    } catch (_) {
+    } catch (e) {
       // Non-critical cache path.
     }
   }
@@ -1717,7 +1791,7 @@ class PaymentService {
     try {
       final prefs = await SharedPreferences.getInstance();
       return prefs.getBool('$_premiumIapLocalPrefix$userId') ?? false;
-    } catch (_) {
+    } catch (e) {
       return false;
     }
   }

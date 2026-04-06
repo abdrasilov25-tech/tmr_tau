@@ -33,7 +33,7 @@ class _PremiumPurchasePageState extends State<PremiumPurchasePage> {
         payment.initStore(),
         _refreshPremiumRow(payment),
       ]);
-    } catch (_) {
+    } catch (e) {
       // initStore / сеть — показываем экран с текстом ошибки из payment.storeInitError
     }
     if (!mounted) return;

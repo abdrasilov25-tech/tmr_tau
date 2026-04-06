@@ -66,7 +66,7 @@ class _LiveBattleHistoryPageState extends State<LiveBattleHistoryPage>
         _loading = false;
       });
       _fadeCtrl.forward();
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
     }

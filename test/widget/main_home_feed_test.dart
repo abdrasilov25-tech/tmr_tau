@@ -8,6 +8,7 @@ import 'package:tmr_tau/features/auth/domain/entities/app_user.dart';
 import 'package:tmr_tau/features/auth/domain/repositories/auth_repository.dart';
 import 'package:tmr_tau/features/auth/presentation/bloc/auth_bloc.dart';
 import 'package:tmr_tau/features/home/presentation/pages/main_home_page.dart';
+import 'package:tmr_tau/features/live_streaming/domain/repositories/live_streaming_repository.dart';
 import 'package:tmr_tau/features/notifications/domain/repositories/notifications_repository.dart';
 import 'package:tmr_tau/features/notifications/presentation/notification_activity_peek_bus.dart';
 import 'package:tmr_tau/features/post/domain/entities/post_entity.dart';
@@ -30,6 +31,8 @@ class MockAuthRepository extends Mock implements AuthRepository {}
 
 class MockMultiAccountStorage extends Mock implements MultiAccountStorage {}
 
+class MockLiveStreamingRepository extends Mock implements LiveStreamingRepository {}
+
 /// Виджет-тесты ленты: [MainHomePage] безопасно работает без [Supabase.initialize]
 /// (см. `_supabaseAuthUserIdOrNull` в `main_home_page.dart`).
 void main() {
@@ -39,6 +42,7 @@ void main() {
   late MockNotificationsRepository notificationsRepo;
   late MockAuthRepository authRepo;
   late MockMultiAccountStorage multiStorage;
+  late MockLiveStreamingRepository liveStreamingRepo;
   late NotificationActivityPeekBus peekBus;
 
   final samplePost = PostEntity(
@@ -63,9 +67,14 @@ void main() {
     notificationsRepo = MockNotificationsRepository();
     authRepo = MockAuthRepository();
     multiStorage = MockMultiAccountStorage();
+    liveStreamingRepo = MockLiveStreamingRepository();
     peekBus = NotificationActivityPeekBus();
 
     when(() => multiStorage.setLastActiveAccountId(any())).thenAnswer((_) async {});
+
+    when(() => liveStreamingRepo.watchActiveLiveRooms()).thenAnswer(
+      (_) => Stream.value(const []),
+    );
 
     when(() => profileRepo.getFollowingUsers(any()))
         .thenAnswer((_) async => []);
@@ -158,6 +167,9 @@ void main() {
             value: notificationsRepo,
           ),
           RepositoryProvider<NotificationActivityPeekBus>.value(value: peekBus),
+          RepositoryProvider<LiveStreamingRepository>.value(
+            value: liveStreamingRepo,
+          ),
         ],
         child: BlocProvider<AuthBloc>.value(
           value: authBloc,

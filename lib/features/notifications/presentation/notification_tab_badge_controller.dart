@@ -52,7 +52,7 @@ class NotificationTabBadgeController extends ChangeNotifier {
         _news = counts.news;
         notifyListeners();
       }
-    } catch (_) {
+    } catch (e) {
       // оставляем последнее значение
     } finally {
       _busy = false;

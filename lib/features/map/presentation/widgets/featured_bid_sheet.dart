@@ -60,7 +60,7 @@ class _FeaturedBidSheetState extends State<FeaturedBidSheet> {
           .maybeSingle();
       if (!mounted) return;
       setState(() => _balance = (row?['qarmet_balance'] as num?)?.toInt() ?? 0);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _placeBid() async {
@@ -92,7 +92,7 @@ class _FeaturedBidSheetState extends State<FeaturedBidSheet> {
         _loading = false;
         _error = e.userMessage;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;

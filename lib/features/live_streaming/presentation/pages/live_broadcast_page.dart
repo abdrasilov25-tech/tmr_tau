@@ -93,14 +93,14 @@ class _LiveBroadcastPageState extends State<LiveBroadcastPage>
       e.unregisterEventHandler(_handler);
       await e.leaveChannel();
       await e.release();
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _endRoomInDb(String? roomId) async {
     if (roomId == null || !mounted) return;
     try {
       await context.read<LiveStreamingRepository>().endLiveRoom(roomId);
-    } catch (_) {}
+    } catch (e) { debugPrint('$e'); }
   }
 
   Future<void> _shutdownFully() async {

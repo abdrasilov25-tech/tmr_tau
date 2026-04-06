@@ -19,7 +19,7 @@ xcrun simctl shutdown all 2>/dev/null || true
 sleep 2
 
 echo "3) Удаляю приложение с симулятора (если осталась «битая» установка)..."
-for BUNDLE_ID in com.example.tmrTau "com.bazar.tmr-tau"; do
+for BUNDLE_ID in com.tmrtau.app kz.tmrtau.app com.example.tmrTau "com.bazar.tmr-tau"; do
   xcrun simctl uninstall booted "$BUNDLE_ID" 2>/dev/null || true
 done
 

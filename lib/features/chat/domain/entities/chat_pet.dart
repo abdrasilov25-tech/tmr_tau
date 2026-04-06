@@ -125,7 +125,7 @@ const List<ChatPetDefinition> kChatPetCatalog = [
 ChatPetDefinition? petById(String id) {
   try {
     return kChatPetCatalog.firstWhere((p) => p.id == id);
-  } catch (_) {
+  } catch (e) {
     return null;
   }
 }

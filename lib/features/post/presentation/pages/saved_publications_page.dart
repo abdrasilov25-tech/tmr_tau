@@ -44,7 +44,7 @@ class _SavedPublicationsPageState extends State<SavedPublicationsPage> {
         _posts = list;
         _loading = false;
       });
-    } catch (_) {
+    } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
     }
