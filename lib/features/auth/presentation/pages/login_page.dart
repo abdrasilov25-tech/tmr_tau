@@ -16,6 +16,7 @@ import '../../../../core/theme/themed_content_surface.dart';
 import '../../../../core/theme/theme_decoration_helper.dart';
 import '../../../../core/theme/theme_index_notifier.dart';
 import '../../../../core/widgets/cached_avatar.dart';
+import '../../../../core/widgets/login_legal_footer.dart';
 import '../../../../core/widgets/theme_picker_sheet.dart';
 import '../bloc/auth_bloc.dart';
 import 'login_result.dart';
@@ -385,7 +386,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
+                const LoginLegalFooter(),
+                const SizedBox(height: 20),
               ],
             ),
           ),

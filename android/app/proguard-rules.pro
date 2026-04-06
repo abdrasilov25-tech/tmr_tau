@@ -15,6 +15,12 @@
 # Google Maps
 -keep class com.google.android.gms.maps.** { *; }
 
+# Firebase (стек-трейсы Crashlytics)
+-keepattributes SourceFile,LineNumberTable
+-keep public class * extends java.lang.Exception
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+
 # Keep model classes used by Gson/Serialization
 -keepattributes Signature
 -keepattributes *Annotation*

@@ -27,6 +27,9 @@ class FeedVideoPlayer extends StatefulWidget {
     this.showControls = true,
     this.looping = true,
     this.onTap,
+    /// Заполняет родителя с [BoxFit.cover] (рилсы / полноэкранный фид).
+    /// В ленте карточек оставьте false.
+    this.coverFullscreen = false,
   });
 
   final String videoUrl;
@@ -45,6 +48,8 @@ class FeedVideoPlayer extends StatefulWidget {
 
   /// Дополнительный обработчик тапа.
   final VoidCallback? onTap;
+
+  final bool coverFullscreen;
 
   @override
   State<FeedVideoPlayer> createState() => _FeedVideoPlayerState();
@@ -150,10 +155,25 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
 
   @override
   Widget build(BuildContext context) {
-    if (_error) return const _VideoErrorPlaceholder();
+    if (_error) {
+      return _VideoErrorPlaceholder(fillParent: widget.coverFullscreen);
+    }
 
     final c = _controller;
     if (!_initialized || c == null || !c.value.isInitialized) {
+      if (widget.coverFullscreen) {
+        return const SizedBox.expand(
+          child: ColoredBox(
+            color: Colors.black,
+            child: Center(
+              child: CircularProgressIndicator(
+                color: Colors.white54,
+                strokeWidth: 2,
+              ),
+            ),
+          ),
+        );
+      }
       return const AspectRatio(
         aspectRatio: 9 / 16,
         child: ColoredBox(
@@ -175,31 +195,142 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
         _togglePlay();
         widget.onTap?.call();
       },
-      child: AspectRatio(
-        aspectRatio: ratio,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            VideoPlayer(c),
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: VideoProgressIndicator(
-                c,
-                allowScrubbing: false,
-                colors: const VideoProgressColors(
-                  playedColor: Colors.white,
-                  bufferedColor: Colors.white30,
-                  backgroundColor: Colors.transparent,
-                ),
-                padding: EdgeInsets.zero,
+      child: widget.coverFullscreen
+          ? _CoverFullscreenVideo(
+              controller: c,
+              showControls: widget.showControls,
+              showPlayIcon: _showPlayIcon,
+              isPlaying: c.value.isPlaying,
+              isMuted: _audioState.isMuted.value,
+              onMuteTap: _toggleMute,
+            )
+          : AspectRatio(
+              aspectRatio: ratio,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  VideoPlayer(c),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: VideoProgressIndicator(
+                      c,
+                      allowScrubbing: false,
+                      colors: const VideoProgressColors(
+                        playedColor: Colors.white,
+                        bufferedColor: Colors.white30,
+                        backgroundColor: Colors.transparent,
+                      ),
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+                  if (widget.showControls && _showPlayIcon)
+                    AnimatedOpacity(
+                      opacity: _showPlayIcon ? 1 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: const BoxDecoration(
+                          color: Colors.black45,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          c.value.isPlaying
+                              ? Icons.pause_rounded
+                              : Icons.play_arrow_rounded,
+                          color: Colors.white,
+                          size: 36,
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    bottom: 12,
+                    right: 12,
+                    child: GestureDetector(
+                      onTap: _toggleMute,
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.black38,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Icon(
+                          _audioState.isMuted.value
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            if (widget.showControls && _showPlayIcon)
-              AnimatedOpacity(
-                opacity: _showPlayIcon ? 1 : 0,
-                duration: const Duration(milliseconds: 200),
+    );
+  }
+}
+
+class _CoverFullscreenVideo extends StatelessWidget {
+  const _CoverFullscreenVideo({
+    required this.controller,
+    required this.showControls,
+    required this.showPlayIcon,
+    required this.isPlaying,
+    required this.isMuted,
+    required this.onMuteTap,
+  });
+
+  final VideoPlayerController controller;
+  final bool showControls;
+  final bool showPlayIcon;
+  final bool isPlaying;
+  final bool isMuted;
+  final VoidCallback onMuteTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final sz = controller.value.size;
+    final w = sz.width;
+    final h = sz.height;
+
+    return SizedBox.expand(
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Positioned.fill(
+            child: ClipRect(
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: w > 0 ? w : 1,
+                  height: h > 0 ? h : 1,
+                  child: VideoPlayer(controller),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: VideoProgressIndicator(
+              controller,
+              allowScrubbing: false,
+              colors: const VideoProgressColors(
+                playedColor: Colors.white,
+                bufferedColor: Colors.white30,
+                backgroundColor: Colors.transparent,
+              ),
+              padding: EdgeInsets.zero,
+            ),
+          ),
+          if (showControls && showPlayIcon)
+            AnimatedOpacity(
+              opacity: showPlayIcon ? 1 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: Center(
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: const BoxDecoration(
@@ -207,62 +338,72 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
-                    c.value.isPlaying
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
+                    isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
                     color: Colors.white,
                     size: 36,
                   ),
                 ),
               ),
-            Positioned(
-              bottom: 12,
-              right: 12,
-              child: GestureDetector(
-                onTap: _toggleMute,
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.black38,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Icon(
-                    _audioState.isMuted.value
-                        ? Icons.volume_off_rounded
-                        : Icons.volume_up_rounded,
-                    color: Colors.white,
-                    size: 18,
-                  ),
+            ),
+          Positioned(
+            bottom: 12,
+            right: 12,
+            child: GestureDetector(
+              onTap: onMuteTap,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.black38,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Icon(
+                  isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                  color: Colors.white,
+                  size: 18,
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _VideoErrorPlaceholder extends StatelessWidget {
-  const _VideoErrorPlaceholder();
+  const _VideoErrorPlaceholder({this.fillParent = false});
+
+  final bool fillParent;
 
   @override
   Widget build(BuildContext context) {
+    const message = Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(Icons.videocam_off_rounded, color: Colors.white38, size: 40),
+        SizedBox(height: 8),
+        Text(
+          'Не удалось загрузить видео',
+          style: TextStyle(color: Colors.white38, fontSize: 12),
+        ),
+      ],
+    );
+
+    if (fillParent) {
+      return const SizedBox.expand(
+        child: ColoredBox(
+          color: Color(0xFF1A1A1A),
+          child: Center(child: message),
+        ),
+      );
+    }
+
     return const AspectRatio(
       aspectRatio: 9 / 16,
       child: ColoredBox(
         color: Color(0xFF1A1A1A),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.videocam_off_rounded, color: Colors.white38, size: 40),
-            SizedBox(height: 8),
-            Text(
-              'Не удалось загрузить видео',
-              style: TextStyle(color: Colors.white38, fontSize: 12),
-            ),
-          ],
-        ),
+        child: Center(child: message),
       ),
     );
   }

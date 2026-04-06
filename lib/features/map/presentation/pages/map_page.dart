@@ -1140,6 +1140,262 @@ class _MapPageState extends State<MapPage> {
     return 10;
   }
 
+  // ── 2GIS-style helpers ──────────────────────────────────────────────────
+
+  Widget _buildTopSearchChip(MapState state) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.location_on_rounded, size: 16, color: Color(0xFF2563EB)),
+          const SizedBox(width: 8),
+          const Text(
+            'Рядом со мной',
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+          const Spacer(),
+          if (state is MapLoading || state is MapLocating)
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (state is MapLoaded)
+            Text(
+              '${state.products.length} объявл.',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _build2GisSheet(
+    ScrollController scrollController,
+    MapState state,
+    List<MapProduct> products,
+  ) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        boxShadow: [
+          BoxShadow(
+            color: Color(0x1A000000),
+            blurRadius: 16,
+            offset: Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SingleChildScrollView(
+        controller: scrollController,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Drag handle
+            Center(
+              child: Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 4),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+
+            // Preview unlock banner
+            if (_temporaryPreviewUnlock)
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 4, 16, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.orange.shade200),
+                ),
+                child: const Text(
+                  'Временный режим предпросмотра: карта открыта без подписки.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF4F6F8),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.search_rounded, size: 18, color: Color(0xFF9CA3AF)),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Поиск мест и объявлений...',
+                      style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+                    ),
+                    const Spacer(),
+                    if (state is MapLoaded)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2563EB).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${state.products.length}',
+                          style: const TextStyle(
+                            color: Color(0xFF2563EB),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Radius selector
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Радиус: ${_radiusKm.toInt()} км',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF374151),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: _radii.map((r) {
+                      final selected = _radiusKm == r;
+                      final isLast = r == _radii.last;
+                      return Expanded(
+                        child: GestureDetector(
+                          onTap: () => _onRadiusChanged(r),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: EdgeInsets.only(right: isLast ? 0 : 8),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? const Color(0xFF1A1A1A)
+                                  : const Color(0xFFF4F6F8),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Text(
+                              '${r.toInt()} км',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: selected ? Colors.white : Colors.grey.shade700,
+                                fontWeight:
+                                    selected ? FontWeight.w600 : FontWeight.normal,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+
+            // Friends + Business actions
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _showFriendsControlsSheet,
+                      icon: const Icon(Icons.group_outlined),
+                      label: Text(
+                        _friendsLoading
+                            ? 'Загрузка...'
+                            : 'Друзья (${_friends.length})',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => _showBusinessControlsSheet(products),
+                      icon: const Icon(Icons.storefront_outlined),
+                      label: const Text('Бизнес'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Legend pills
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                children: [
+                  _smallPill('Друг', const Color(0xFF2563EB)),
+                  _smallPill('TOP', const Color(0xFFF97316)),
+                  _smallPill('АКЦИЯ', const Color(0xFFE11D48)),
+                  _smallPill('Boost 🚀', const Color(0xFF06B6D4)),
+                  _smallPill('Top Zone ⭐', const Color(0xFFEAB308)),
+                ],
+              ),
+            ),
+
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Divider(height: 1),
+            ),
+
+            // Featured Seller banner
+            if (!_featuredLoading)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: _featuredSeller != null
+                    ? FeaturedSellerBanner(
+                        featured: _featuredSeller!,
+                        currentUserId:
+                            Supabase.instance.client.auth.currentUser?.id,
+                        onBidTap: _openFeaturedBidSheet,
+                        onSellerTap: _openFeaturedSellerProfile,
+                      )
+                    : FeaturedSellerEmptyBanner(
+                        onBidTap: _openFeaturedBidSheet,
+                      ),
+              ),
+
+            SizedBox(height: MediaQuery.of(context).padding.bottom + 24),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_accessLoading) {
@@ -1218,10 +1474,11 @@ class _MapPageState extends State<MapPage> {
 
           return Stack(
             children: [
+              // ── Full-screen map ──
               GoogleMap(
                 onMapCreated: _onMapCreated,
                 initialCameraPosition: CameraPosition(
-                  target: position ?? const LatLng(51.1694, 71.4491), // Астана
+                  target: position ?? const LatLng(51.1694, 71.4491),
                   zoom: _zoomForRadius(_radiusKm),
                 ),
                 markers: {
@@ -1230,137 +1487,12 @@ class _MapPageState extends State<MapPage> {
                   if (_buildMysteryMarker() != null) _buildMysteryMarker()!,
                 },
                 circles: _buildZoneCircles(),
-                // Avoid plugin crashes when location permission/service isn't ready yet.
                 myLocationEnabled: hasValidPosition,
                 myLocationButtonEnabled: false,
                 zoomControlsEnabled: false,
               ),
 
-              // Top bar
-              SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 16, vertical: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.1),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 2),
-                                  ),
-                                ],
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(Icons.location_on,
-                                      size: 18, color: Color(0xFF2563EB)),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Рядом со мной',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleSmall
-                                        ?.copyWith(fontWeight: FontWeight.w600),
-                                  ),
-                                  const Spacer(),
-                                  if (state is MapLoaded)
-                                    Text(
-                                      '${state.products.length} объявлений',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(color: Colors.grey.shade500),
-                                    ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      if (_temporaryPreviewUnlock) ...[
-                        const SizedBox(height: 8),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: Colors.orange.shade50,
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.orange.shade200),
-                          ),
-                          child: const Text(
-                            'Временный режим предпросмотра: карта открыта без подписки.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: _showFriendsControlsSheet,
-                                icon: const Icon(Icons.group_outlined),
-                                label: Text(
-                                  _friendsLoading
-                                      ? 'Друзья...'
-                                      : 'Друзья (${_friends.length})',
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: () => _showBusinessControlsSheet(products),
-                                icon: const Icon(Icons.storefront_outlined),
-                                label: const Text('Бизнес'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.grey.shade200),
-                        ),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _smallPill('Друг', const Color(0xFF2563EB)),
-                            _smallPill('TOP', const Color(0xFFF97316)),
-                            _smallPill('АКЦИЯ', const Color(0xFFE11D48)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-              // Loading / error overlay
+              // ── Loading overlay ──
               if (state is MapLocating || state is MapLoading)
                 const Center(
                   child: Card(
@@ -1378,6 +1510,7 @@ class _MapPageState extends State<MapPage> {
                   ),
                 ),
 
+              // ── Error overlay ──
               if (state is MapError)
                 Center(
                   child: Card(
@@ -1390,8 +1523,7 @@ class _MapPageState extends State<MapPage> {
                           const Icon(Icons.location_off,
                               size: 48, color: Colors.grey),
                           const SizedBox(height: 12),
-                          Text(state.message,
-                              textAlign: TextAlign.center),
+                          Text(state.message, textAlign: TextAlign.center),
                           const SizedBox(height: 16),
                           FilledButton(
                             onPressed: () => context
@@ -1405,112 +1537,28 @@ class _MapPageState extends State<MapPage> {
                   ),
                 ),
 
-              // Zone banner (shown when inside an active zone)
-              if (_currentZone != null && !_zoneDismissed)
-                Positioned(
-                  left: 16,
-                  right: 16,
-                  bottom: 166,
-                  child: ZoneBanner(
-                    zone: _currentZone!,
-                    onTap: () => _openZoneDetail(_currentZone!),
-                    onDismiss: () => setState(() => _zoneDismissed = true),
-                  ),
-                ),
-
-              // Featured Seller banner (above radius selector)
-              if (!_featuredLoading)
-                Positioned(
-                  left: 16,
-                  right: 16,
-                  bottom: 110,
-                  child: _featuredSeller != null
-                      ? FeaturedSellerBanner(
-                          featured: _featuredSeller!,
-                          currentUserId:
-                              Supabase.instance.client.auth.currentUser?.id,
-                          onBidTap: _openFeaturedBidSheet,
-                          onSellerTap: _openFeaturedSellerProfile,
-                        )
-                      : FeaturedSellerEmptyBanner(
-                          onBidTap: _openFeaturedBidSheet,
-                        ),
-                ),
-
-              // Bottom radius selector
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: 0,
-                child: SafeArea(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.1),
-                            blurRadius: 12,
-                            offset: const Offset(0, -2),
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Радиус поиска: ${_radiusKm.toInt()} км',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: _radii.map((r) {
-                              final selected = _radiusKm == r;
-                              return GestureDetector(
-                                onTap: () => _onRadiusChanged(r),
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 200),
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 16, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: selected
-                                        ? const Color(0xFF1A1A1A)
-                                        : Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  child: Text(
-                                    '${r.toInt()} км',
-                                    style: TextStyle(
-                                      color: selected
-                                          ? Colors.white
-                                          : Colors.grey.shade700,
-                                      fontWeight: selected
-                                          ? FontWeight.w600
-                                          : FontWeight.normal,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+              // ── Top search chip (minimal, 2GIS-style) ──
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                  child: _buildTopSearchChip(state),
                 ),
               ),
 
-              // Quest FAB (left side)
+              // ── Zone notification banner (below search chip) ──
+              if (_currentZone != null && !_zoneDismissed)
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 68, 16, 0),
+                    child: ZoneBanner(
+                      zone: _currentZone!,
+                      onTap: () => _openZoneDetail(_currentZone!),
+                      onDismiss: () => setState(() => _zoneDismissed = true),
+                    ),
+                  ),
+                ),
+
+              // ── Quest FAB (left, above collapsed sheet) ──
               Positioned(
                 left: 16,
                 bottom: 130,
@@ -1520,7 +1568,7 @@ class _MapPageState extends State<MapPage> {
                 ),
               ),
 
-              // My location FAB
+              // ── My Location FAB (right, above collapsed sheet) ──
               Positioned(
                 right: 16,
                 bottom: 130,
@@ -1532,18 +1580,18 @@ class _MapPageState extends State<MapPage> {
                   child: const Icon(Icons.my_location),
                 ),
               ),
-              Positioned(
-                right: 16,
-                bottom: 184,
-                child: FloatingActionButton.small(
-                  heroTag: 'map_friends_refresh',
-                  backgroundColor: Colors.white,
-                  foregroundColor: const Color(0xFF2563EB),
-                  onPressed: () {
-                    if (!_ensureOfficialPageAccess()) return;
-                    _loadFriendsLocations();
-                  },
-                  child: const Icon(Icons.group_outlined),
+
+              // ── Draggable bottom sheet (2GIS-style) ──
+              DraggableScrollableSheet(
+                initialChildSize: 0.14,
+                minChildSize: 0.14,
+                maxChildSize: 0.85,
+                snap: true,
+                snapSizes: const [0.14, 0.38, 0.85],
+                builder: (_, scrollController) => _build2GisSheet(
+                  scrollController,
+                  state,
+                  products,
                 ),
               ),
             ],

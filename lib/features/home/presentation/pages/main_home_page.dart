@@ -29,6 +29,7 @@ import '../../../notifications/presentation/widgets/notification_activity_peek_b
 import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_author_follow_pill.dart';
+import 'reels_feed_page.dart';
 import '../../../post/presentation/widgets/post_feed_overflow_menu.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
@@ -62,6 +63,8 @@ class MainHomePage extends StatefulWidget {
 }
 
 enum _FeedTab {
+  /// Только видео — вертикальный бесконечный Reels-фид (Instagram-style).
+  reels,
   /// «Для вас» — не от себя и не от подписок; персональный скор (лайки/сохранения/просмотры/хэштеги).
   recommendations,
   /// Только авторы из подписок.
@@ -73,16 +76,18 @@ enum _FeedTab {
 extension _FeedTabIndex on _FeedTab {
   int get pageIndex {
     switch (this) {
-      case _FeedTab.recommendations: return 0;
-      case _FeedTab.subscriptions:   return 1;
-      case _FeedTab.live:            return 2;
+      case _FeedTab.reels:           return 0;
+      case _FeedTab.recommendations: return 1;
+      case _FeedTab.subscriptions:   return 2;
+      case _FeedTab.live:            return 3;
     }
   }
 
   static _FeedTab fromIndex(int i) {
     switch (i) {
-      case 0: return _FeedTab.recommendations;
-      case 1: return _FeedTab.subscriptions;
+      case 0: return _FeedTab.reels;
+      case 1: return _FeedTab.recommendations;
+      case 2: return _FeedTab.subscriptions;
       default: return _FeedTab.live;
     }
   }
@@ -104,9 +109,14 @@ class _MainHomePageState extends State<MainHomePage> {
   int _pageIndexRecommendations = 0;
   int _pageIndexSubscriptions = 0;
 
-  int get _activeFeedPageIndex => _feedTab == _FeedTab.recommendations
-      ? _pageIndexRecommendations
-      : _pageIndexSubscriptions;
+  int get _activeFeedPageIndex {
+    switch (_feedTab) {
+      case _FeedTab.reels: return 0;
+      case _FeedTab.recommendations: return _pageIndexRecommendations;
+      case _FeedTab.subscriptions: return _pageIndexSubscriptions;
+      case _FeedTab.live: return 0;
+    }
+  }
 
   /// Высота одной карточки ленты (viewport [PageView]).
   double? _feedItemHeight;
@@ -119,7 +129,7 @@ class _MainHomePageState extends State<MainHomePage> {
   bool _isFetchingSubscriptions = false;
   DateTime? _lastLoadMoreAt;
 
-  _FeedTab _feedTab = _FeedTab.recommendations;
+  _FeedTab _feedTab = _FeedTab.reels;
 
   final List<PostEntity> _postsRecommendations = [];
   final List<PostEntity> _postsSubscriptions = [];
@@ -131,13 +141,23 @@ class _MainHomePageState extends State<MainHomePage> {
   bool _hasMoreSubscriptions = true;
 
   /// Текущая видимая лента (по выбранной вкладке).
-  List<PostEntity> get _posts => _feedTab == _FeedTab.recommendations
-      ? _postsRecommendations
-      : _postsSubscriptions;
+  List<PostEntity> get _posts {
+    switch (_feedTab) {
+      case _FeedTab.reels: return _postsRecommendations;
+      case _FeedTab.recommendations: return _postsRecommendations;
+      case _FeedTab.subscriptions: return _postsSubscriptions;
+      case _FeedTab.live: return const [];
+    }
+  }
 
-  bool get _hasMore => _feedTab == _FeedTab.recommendations
-      ? _hasMoreRecommendations
-      : _hasMoreSubscriptions;
+  bool get _hasMore {
+    switch (_feedTab) {
+      case _FeedTab.reels: return _hasMoreRecommendations;
+      case _FeedTab.recommendations: return _hasMoreRecommendations;
+      case _FeedTab.subscriptions: return _hasMoreSubscriptions;
+      case _FeedTab.live: return false;
+    }
+  }
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
   Map<String, String> _storyNotesByUserId = const {};
@@ -664,7 +684,8 @@ class _MainHomePageState extends State<MainHomePage> {
         _ensureImpressionTimer();
       });
     }
-    if (tab == _FeedTab.live) return; // нет вертикальных лент для live-вкладки
+    // Reels и Live управляют своим контентом сами — не трогаем вертикальные ленты.
+    if (tab == _FeedTab.live || tab == _FeedTab.reels) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_feedTab != tab) return;
@@ -1304,6 +1325,8 @@ class _MainHomePageState extends State<MainHomePage> {
                                 }
                               },
                               children: [
+                                // Reels — первая вкладка
+                                const ReelsFeedPage(),
                                 _buildVerticalFeed(
                                   tab: _FeedTab.recommendations,
                                   posts: _postsRecommendations,
@@ -1411,6 +1434,15 @@ class _PublicationFeedTabStrip extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _PublicationFeedTabLabel(
+          label: 'Reels',
+          selected: selected == _FeedTab.reels,
+          subtleColor: subtle,
+          scheme: scheme,
+          isReels: true,
+          onTap: () => onChanged(_FeedTab.reels),
+        ),
+        Text('·', style: TextStyle(color: subtle, fontSize: 12)),
+        _PublicationFeedTabLabel(
           label: 'Рекомендации',
           selected: selected == _FeedTab.recommendations,
           subtleColor: subtle,
@@ -1447,6 +1479,7 @@ class _PublicationFeedTabLabel extends StatelessWidget {
     required this.scheme,
     required this.onTap,
     this.isLive = false,
+    this.isReels = false,
   });
 
   final String label;
@@ -1455,6 +1488,7 @@ class _PublicationFeedTabLabel extends StatelessWidget {
   final ColorScheme scheme;
   final VoidCallback onTap;
   final bool isLive;
+  final bool isReels;
 
   @override
   Widget build(BuildContext context) {
@@ -1481,13 +1515,27 @@ class _PublicationFeedTabLabel extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (isReels) ...[
+                  Icon(
+                    Icons.play_circle_outline_rounded,
+                    size: 13,
+                    color: selected
+                        ? const Color(0xFF7C3AED)
+                        : subtleColor,
+                  ),
+                  const SizedBox(width: 3),
+                ],
                 Text(
                   label,
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     color: selected
-                        ? (isLive ? const Color(0xFFEF4444) : scheme.onSurface)
+                        ? (isLive
+                            ? const Color(0xFFEF4444)
+                            : isReels
+                                ? const Color(0xFF7C3AED)
+                                : scheme.onSurface)
                         : subtleColor,
                     letterSpacing: -0.1,
                   ),
@@ -1504,7 +1552,9 @@ class _PublicationFeedTabLabel extends StatelessWidget {
                 color: selected
                     ? (isLive
                         ? const Color(0xFFEF4444)
-                        : scheme.primary.withValues(alpha: 0.85))
+                        : isReels
+                            ? const Color(0xFF7C3AED)
+                            : scheme.primary.withValues(alpha: 0.85))
                     : Colors.transparent,
               ),
             ),

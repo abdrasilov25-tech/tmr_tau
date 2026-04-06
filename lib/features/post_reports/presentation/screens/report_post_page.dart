@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tmr_tau/l10n/app_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -86,6 +87,14 @@ class _ReportPostPageState extends State<ReportPostPage> {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              Text(
+                AppLocalizations.of(context)!.moderationReportHint,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: ThemedContentSurface.profileTextSecondary,
+                      height: 1.4,
+                    ),
+              ),
+              const SizedBox(height: 14),
               DecoratedBox(
                 decoration: ThemedContentSurface.profileCardDecoration(radius: 18),
                 child: Padding(

@@ -8,7 +8,7 @@ import '../../../../core/theme/themed_content_surface.dart';
 class PrivacyPolicyPage extends StatelessWidget {
   const PrivacyPolicyPage({super.key});
 
-  static Uri get policyUri => Uri.parse(LegalUrls.site);
+  static Uri get policyUri => Uri.parse(LegalUrls.privacyPolicyUrl);
 
   Future<void> _openExternal(BuildContext context) async {
     final ok = await launchUrl(

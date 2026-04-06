@@ -1,0 +1,18 @@
+{
+  "@@locale": "en",
+  "appTitle": "Tmr Tau",
+  "tabPublications": "Home",
+  "tabSearch": "Search",
+  "tabNearby": "Nearby",
+  "tabChats": "Chats",
+  "tabNews": "News",
+  "tabProfile": "Profile",
+  "settingsTitle": "Settings",
+  "loginLegalPrefix": "By continuing you accept the ",
+  "loginLegalTerms": "terms",
+  "loginLegalMiddle": " and ",
+  "loginLegalPrivacy": "privacy policy",
+  "loginLegalSuffix": ".",
+  "couldNotOpenLink": "Could not open link",
+  "moderationReportHint": "Reports are reviewed by moderators. False reports may limit access to features."
+}

@@ -7,7 +7,7 @@ import '../../../../core/theme/themed_content_surface.dart';
 class TermsPage extends StatelessWidget {
   const TermsPage({super.key});
 
-  static Uri get termsUri => Uri.parse(LegalUrls.site);
+  static Uri get termsUri => Uri.parse(LegalUrls.termsUrl);
 
   Future<void> _openExternal(BuildContext context) async {
     final ok = await launchUrl(

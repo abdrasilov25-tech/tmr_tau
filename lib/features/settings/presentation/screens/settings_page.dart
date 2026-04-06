@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:tmr_tau/l10n/app_localizations.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -85,7 +86,7 @@ class SettingsPage extends StatelessWidget {
     return Scaffold(
       backgroundColor: ThemedContentSurface.scaffold,
       appBar: AppBar(
-        title: const Text('Настройки'),
+        title: Text(AppLocalizations.of(context)!.settingsTitle),
         centerTitle: true,
       ),
       body: ListView(

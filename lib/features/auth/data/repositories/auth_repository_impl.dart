@@ -15,9 +15,15 @@ import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/constants/supabase_constants.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
-  AuthRepositoryImpl(this._dataSource, this._client);
+  AuthRepositoryImpl(
+    this._dataSource,
+    this._client, {
+    Future<void> Function()? beforeRemoteSignOut,
+  }) : _beforeRemoteSignOut = beforeRemoteSignOut;
+
   final AuthRemoteDataSource _dataSource;
   final SupabaseClient _client;
+  final Future<void> Function()? _beforeRemoteSignOut;
 
   AppUser? _cachedUser;
 
@@ -292,6 +298,9 @@ class AuthRepositoryImpl implements AuthRepository {
 
   @override
   Future<void> signOut() async {
+    try {
+      await _beforeRemoteSignOut?.call();
+    } catch (_) {}
     _cachedUser = null;
     await _dataSource.signOut();
   }

@@ -1,0 +1,21 @@
+{
+  "@@locale": "ru",
+  "appTitle": "ТМР Тау",
+  "@appTitle": {
+    "description": "Название приложения"
+  },
+  "tabPublications": "Публикации",
+  "tabSearch": "Поиск",
+  "tabNearby": "Рядом",
+  "tabChats": "Чаты",
+  "tabNews": "Новости",
+  "tabProfile": "Профиль",
+  "settingsTitle": "Настройки",
+  "loginLegalPrefix": "Продолжая, вы принимаете ",
+  "loginLegalTerms": "условия",
+  "loginLegalMiddle": " и ",
+  "loginLegalPrivacy": "политику конфиденциальности",
+  "loginLegalSuffix": ".",
+  "couldNotOpenLink": "Не удалось открыть ссылку",
+  "moderationReportHint": "Жалобы рассматриваются модерацией. Ложные сообщения могут ограничить доступ к функциям."
+}

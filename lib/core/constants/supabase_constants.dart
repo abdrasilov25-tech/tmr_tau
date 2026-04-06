@@ -48,6 +48,8 @@ class SupabaseConstants {
   /// «Тап судьбы»: см. migrations/20260404220000_tap_game.sql.
   static const String tapGameSessionsTable = 'tap_game_sessions';
   static const String tapGameScoresTable = 'tap_game_scores';
+  /// FCM: см. migrations/20260406200000_user_push_tokens.sql.
+  static const String userPushTokensTable = 'user_push_tokens';
 
   static const String bucketProducts = 'products';
   static const String bucketStories = 'stories';

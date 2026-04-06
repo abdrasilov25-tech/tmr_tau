@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:tmr_tau/l10n/app_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
@@ -31,7 +32,9 @@ import '../../features/post_reports/presentation/screens/my_reports_page.dart';
 import '../../features/post_reports/presentation/screens/report_post_page.dart';
 import '../../features/product/presentation/pages/add_product_page.dart';
 import '../../features/product/presentation/pages/edit_product_page.dart';
+import '../../features/product/domain/repositories/product_repository.dart';
 import '../../features/product/presentation/pages/product_detail_page.dart';
+import '../../features/product/presentation/pages/product_detail_route_page.dart';
 import '../../features/product/presentation/pages/qarmet_wallet_page.dart';
 import '../../features/tap_game/tap_game_screen.dart';
 import '../../features/product/presentation/pages/premium_purchase_page.dart';
@@ -268,14 +271,21 @@ class AppRouter {
         path: '/product/:id',
         builder: (context, state) {
           final product = state.extra as ProductEntity?;
-          if (product == null) {
-            return const Scaffold(body: Center(child: Text('Товар не найден')));
-          }
+          final id = state.pathParameters['id']!;
           final mention = state.uri.queryParameters['mention'];
-          return ProductDetailPage(
-            product: product,
+          final repo = productRepository as ProductRepository;
+          if (product != null) {
+            return ProductDetailPage(
+              product: product,
+              commentsRepository: commentsRepository,
+              productRepository: repo,
+              mentionPrefix: mention,
+            );
+          }
+          return ProductDetailRoutePage(
+            productId: id,
+            productRepository: repo,
             commentsRepository: commentsRepository,
-            productRepository: productRepository,
             mentionPrefix: mention,
           );
         },
@@ -801,6 +811,7 @@ class _MainShellState extends State<_MainShell> {
         final chatsBadge = chatUnread.badgeShortLabel;
         final publicationsBadge = notificationTabs.publicationsBadgeLabel;
         final newsBadge = notificationTabs.newsBadgeLabel;
+        final l10n = AppLocalizations.of(context)!;
         return Scaffold(
           backgroundColor: Colors.transparent,
           body: Stack(
@@ -844,71 +855,119 @@ class _MainShellState extends State<_MainShell> {
               indicatorColor: Colors.transparent,
               destinations: [
                 NavigationDestination(
-                  icon: _shellNavCountBadge(
-                    label: publicationsBadge,
-                    icon: const Icon(Icons.home_outlined, size: 26),
+                  icon: Semantics(
+                    label: l10n.tabPublications,
+                    button: true,
+                    child: _shellNavCountBadge(
+                      label: publicationsBadge,
+                      icon: const Icon(Icons.home_outlined, size: 26),
+                    ),
                   ),
-                  selectedIcon: _shellNavCountBadge(
-                    label: publicationsBadge,
-                    icon: const Icon(Icons.home_rounded, size: 26),
+                  selectedIcon: Semantics(
+                    label: l10n.tabPublications,
+                    button: true,
+                    child: _shellNavCountBadge(
+                      label: publicationsBadge,
+                      icon: const Icon(Icons.home_rounded, size: 26),
+                    ),
                   ),
                   label: 'Публикации',
                 ),
-                const NavigationDestination(
-                  icon: Icon(Icons.search_outlined, size: 26),
-                  selectedIcon: Icon(Icons.search_rounded, size: 26),
+                NavigationDestination(
+                  icon: Semantics(
+                    label: l10n.tabSearch,
+                    button: true,
+                    child: const Icon(Icons.search_outlined, size: 26),
+                  ),
+                  selectedIcon: Semantics(
+                    label: l10n.tabSearch,
+                    button: true,
+                    child: const Icon(Icons.search_rounded, size: 26),
+                  ),
                   label: 'Поиск',
                 ),
-                const NavigationDestination(
-                  icon: Icon(Icons.map_outlined, size: 26),
-                  selectedIcon: Icon(Icons.map_rounded, size: 26),
+                NavigationDestination(
+                  icon: Semantics(
+                    label: l10n.tabNearby,
+                    button: true,
+                    child: const Icon(Icons.map_outlined, size: 26),
+                  ),
+                  selectedIcon: Semantics(
+                    label: l10n.tabNearby,
+                    button: true,
+                    child: const Icon(Icons.map_rounded, size: 26),
+                  ),
                   label: 'Рядом',
                 ),
                 NavigationDestination(
-                  icon: Badge(
-                    isLabelVisible: chatsBadge.isNotEmpty,
-                    backgroundColor: const Color(0xFF2563EB),
-                    textColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    label: Text(
-                      chatsBadge,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                  icon: Semantics(
+                    label: l10n.tabChats,
+                    button: true,
+                    child: Badge(
+                      isLabelVisible: chatsBadge.isNotEmpty,
+                      backgroundColor: const Color(0xFF2563EB),
+                      textColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      label: Text(
+                        chatsBadge,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
+                      child: const Icon(Icons.chat_bubble_outline_rounded, size: 26),
                     ),
-                    child: const Icon(Icons.chat_bubble_outline_rounded, size: 26),
                   ),
-                  selectedIcon: Badge(
-                    isLabelVisible: chatsBadge.isNotEmpty,
-                    backgroundColor: const Color(0xFF2563EB),
-                    textColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 6),
-                    label: Text(
-                      chatsBadge,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w700,
+                  selectedIcon: Semantics(
+                    label: l10n.tabChats,
+                    button: true,
+                    child: Badge(
+                      isLabelVisible: chatsBadge.isNotEmpty,
+                      backgroundColor: const Color(0xFF2563EB),
+                      textColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 6),
+                      label: Text(
+                        chatsBadge,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
+                      child: const Icon(Icons.chat_rounded, size: 26),
                     ),
-                    child: const Icon(Icons.chat_rounded, size: 26),
                   ),
                   label: 'Чаты',
                 ),
                 NavigationDestination(
-                  icon: _shellNavCountBadge(
-                    label: newsBadge,
-                    icon: const Icon(Icons.article_outlined, size: 26),
+                  icon: Semantics(
+                    label: l10n.tabNews,
+                    button: true,
+                    child: _shellNavCountBadge(
+                      label: newsBadge,
+                      icon: const Icon(Icons.article_outlined, size: 26),
+                    ),
                   ),
-                  selectedIcon: _shellNavCountBadge(
-                    label: newsBadge,
-                    icon: const Icon(Icons.article_rounded, size: 26),
+                  selectedIcon: Semantics(
+                    label: l10n.tabNews,
+                    button: true,
+                    child: _shellNavCountBadge(
+                      label: newsBadge,
+                      icon: const Icon(Icons.article_rounded, size: 26),
+                    ),
                   ),
                   label: 'Новости',
                 ),
-                const NavigationDestination(
-                  icon: Icon(Icons.person_outline_rounded, size: 26),
-                  selectedIcon: Icon(Icons.person_rounded, size: 26),
+                NavigationDestination(
+                  icon: Semantics(
+                    label: l10n.tabProfile,
+                    button: true,
+                    child: const Icon(Icons.person_outline_rounded, size: 26),
+                  ),
+                  selectedIcon: Semantics(
+                    label: l10n.tabProfile,
+                    button: true,
+                    child: const Icon(Icons.person_rounded, size: 26),
+                  ),
                   label: 'Профиль',
                 ),
               ],

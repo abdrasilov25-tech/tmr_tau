@@ -7,6 +7,7 @@ import '../../domain/entities/battle_history_entry.dart';
 import '../../domain/entities/donator_score.dart';
 import '../../domain/entities/gift.dart';
 import '../../domain/entities/live_battle.dart';
+import '../../domain/entities/live_battle_lobby_player.dart';
 import '../../domain/entities/wallet.dart';
 import '../../domain/repositories/live_battle_repository.dart';
 
@@ -14,6 +15,85 @@ class LiveBattleRepositoryImpl implements LiveBattleRepository {
   LiveBattleRepositoryImpl(this._client);
 
   final SupabaseClient _client;
+
+  static const Duration _onlineWindow = Duration(minutes: 5);
+
+  @override
+  Future<List<LiveBattleLobbyPlayer>> fetchLobbyPlayers({int limit = 120}) async {
+    final meId = _client.auth.currentUser?.id;
+    const columnSets = <String>[
+      'id,name,avatar,username,email,telegram_username,last_active_at,updated_at',
+      'id,name,avatar,telegram_username,last_active_at,updated_at',
+      'id,name,avatar,last_active_at,updated_at',
+      'id,name,avatar,updated_at',
+    ];
+
+    for (final cols in columnSets) {
+      try {
+        final rows = await _client
+            .from(SupabaseConstants.usersTable)
+            .select(cols)
+            .order('updated_at', ascending: false)
+            .limit(limit);
+        return _mapLobbyPlayers(rows as List<dynamic>, meId);
+      } on PostgrestException {
+        continue;
+      }
+    }
+    return const [];
+  }
+
+  List<LiveBattleLobbyPlayer> _mapLobbyPlayers(
+    List<dynamic> rows,
+    String? meId,
+  ) {
+    final now = DateTime.now().toUtc();
+    final out = <LiveBattleLobbyPlayer>[];
+    for (final raw in rows) {
+      final row = Map<String, dynamic>.from(raw as Map);
+      final id = (row['id'] ?? '').toString();
+      if (id.isEmpty || id == meId) continue;
+
+      final name = (row['name'] ?? '').toString().trim();
+      final username = (row['username'] ?? '').toString().trim();
+      final email = (row['email'] ?? '').toString().trim();
+      final tg = (row['telegram_username'] ?? '').toString().trim();
+
+      final String label;
+      if (username.isNotEmpty) {
+        label = username.startsWith('@') ? username : '@$username';
+      } else if (name.isNotEmpty) {
+        label = name;
+      } else if (email.isNotEmpty) {
+        label = email;
+      } else if (tg.isNotEmpty) {
+        label = tg.startsWith('@') ? tg : '@$tg';
+      } else {
+        label = 'Игрок';
+      }
+
+      final avatarRaw = (row['avatar'] ?? '').toString();
+      final lastActive = _parseLobbyTs(row['last_active_at']) ??
+          _parseLobbyTs(row['updated_at']);
+      final isOnline = lastActive != null &&
+          now.difference(lastActive) <= _onlineWindow;
+
+      out.add(
+        LiveBattleLobbyPlayer(
+          id: id,
+          label: label,
+          avatarUrl: avatarRaw.isEmpty ? null : avatarRaw,
+          isOnline: isOnline,
+        ),
+      );
+    }
+    return out;
+  }
+
+  DateTime? _parseLobbyTs(dynamic v) {
+    if (v == null) return null;
+    return DateTime.tryParse(v.toString())?.toUtc();
+  }
 
   @override
   Future<LiveBattle?> fetchBattle(String battleId) async {

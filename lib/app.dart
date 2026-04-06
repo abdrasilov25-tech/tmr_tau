@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:tmr_tau/l10n/app_localizations.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
@@ -72,6 +73,9 @@ import 'features/tap_game/data/tap_game_repository_impl.dart';
 import 'features/tap_game/domain/repositories/tap_game_local_hall_repository.dart';
 import 'features/tap_game/domain/repositories/tap_game_repository.dart';
 import 'core/feedback/feedback_preferences_storage.dart';
+import 'core/constants/legal_urls.dart';
+import 'core/deep_link/deep_link_coordinator.dart';
+import 'core/push/fcm_supabase_coordinator.dart';
 
 /// Чаты: до ~500 сообщений + группы; уведомления: отдельный запрос. Не конкурируют с первой
 /// отрисовкой ленты на «Публикациях».
@@ -146,6 +150,8 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   ChatUnreadBadgeController? _chatUnreadBadgeController;
   NotificationTabBadgeController? _notificationTabBadgeController;
   NotificationActivityPeekBus? _notificationActivityPeekBus;
+  DeepLinkCoordinator? _deepLinkCoordinator;
+  FcmSupabaseCoordinator? _fcmSupabaseCoordinator;
 
   @override
   void initState() {
@@ -160,8 +166,14 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         ChatUnreadBadgeController(chatListStorage: widget.chatListStorage);
     _notificationActivityPeekBus = NotificationActivityPeekBus();
     _client = supa.Supabase.instance.client;
+    _fcmSupabaseCoordinator = FcmSupabaseCoordinator(_client);
     final authDataSource = AuthRemoteDataSourceImpl(_client);
-    _authRepository = AuthRepositoryImpl(authDataSource, _client);
+    _authRepository = AuthRepositoryImpl(
+      authDataSource,
+      _client,
+      beforeRemoteSignOut:
+          _fcmSupabaseCoordinator!.clearCurrentDeviceTokenBeforeSignOut,
+    );
     _productRepository = ProductRepositoryImpl(_client);
     _productMonetizationRepository = ProductMonetizationRepositoryImpl(_client);
     _paymentService = PaymentService(_client);
@@ -205,6 +217,14 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
       mapRepository: _mapRepository,
       searchTabActivation: _searchTabActivation,
     );
+    _deepLinkCoordinator = DeepLinkCoordinator(
+      router: _appRouter.router,
+      httpsHosts: LegalUrls.deepLinkHosts,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_deepLinkCoordinator?.init());
+      _fcmSupabaseCoordinator?.start();
+    });
   }
 
   /// Предыдущее состояние жизненного цикла (для OAuth: iOS часто не шлёт [paused]
@@ -225,6 +245,8 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _deepLinkCoordinator?.dispose();
+    _fcmSupabaseCoordinator?.dispose();
     _chatUnreadBadgeController?.dispose();
     _notificationTabBadgeController?.dispose();
     _notificationActivityPeekBus?.dispose();
@@ -235,7 +257,22 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     if (!widget.supabaseInitialized) {
       return MaterialApp(
-        title: 'tmr_tau',
+        onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        localeListResolutionCallback: (locales, supported) {
+          if (locales == null || locales.isEmpty) {
+            return const Locale('ru');
+          }
+          for (final locale in locales) {
+            for (final s in supported) {
+              if (s.languageCode == locale.languageCode) {
+                return s;
+              }
+            }
+          }
+          return const Locale('ru');
+        },
         theme: ThemeData.light(),
         home: Scaffold(
           body: Center(
@@ -428,7 +465,24 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                         _appRouter.router.go('/login');
                       },
                       child: MaterialApp.router(
-                        title: 'tmr_tau',
+                        onGenerateTitle: (context) =>
+                            AppLocalizations.of(context)!.appTitle,
+                        localizationsDelegates:
+                            AppLocalizations.localizationsDelegates,
+                        supportedLocales: AppLocalizations.supportedLocales,
+                        localeListResolutionCallback: (locales, supported) {
+                          if (locales == null || locales.isEmpty) {
+                            return const Locale('ru');
+                          }
+                          for (final locale in locales) {
+                            for (final s in supported) {
+                              if (s.languageCode == locale.languageCode) {
+                                return s;
+                              }
+                            }
+                          }
+                          return const Locale('ru');
+                        },
                         debugShowCheckedModeBanner: false,
                         theme: AppTheme.light,
                         routerConfig: _appRouter.router,

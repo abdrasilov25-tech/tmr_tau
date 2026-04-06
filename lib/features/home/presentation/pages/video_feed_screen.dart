@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:tmr_tau/core/formatting/compact_count_format.dart';
 
@@ -8,6 +7,7 @@ import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../widgets/feed_video_player.dart';
 import '../widgets/user_avatar_tap.dart';
+import '../widgets/vertical_snap_page_scroll_physics.dart';
 
 /// TikTok / Instagram Reels стиль вертикального видео-фида.
 ///
@@ -147,6 +147,47 @@ class _VideoFeedScreenState extends State<VideoFeedScreen> {
     } catch (e) { debugPrint('$e'); }
   }
 
+  Future<void> _toggleRepost(PostEntity post) async {
+    if (widget.currentUserId == null) return;
+    try {
+      await widget.postRepository.toggleRepost(post.id, widget.currentUserId!);
+      final idx = _posts.indexWhere((p) => p.id == post.id);
+      if (idx < 0 || !mounted) return;
+      setState(() {
+        _posts[idx] = post.copyWith(
+          isRepostedByMe: !post.isRepostedByMe,
+          repostsCount: post.isRepostedByMe
+              ? (post.repostsCount - 1).clamp(0, 9999999)
+              : post.repostsCount + 1,
+        );
+      });
+    } catch (e) { debugPrint('$e'); }
+  }
+
+  void _showMoreMenu(PostEntity post) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _VideoMoreMenu(
+        isSaved: post.isSavedByMe,
+        onSave: () {
+          Navigator.pop(context);
+          _toggleSave(post);
+        },
+        onReport: () {
+          Navigator.pop(context);
+          context.push('/report-post/${post.id}');
+        },
+        onUseSound: () {
+          Navigator.pop(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Скоро: снять видео под этот звук')),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -158,7 +199,7 @@ class _VideoFeedScreenState extends State<VideoFeedScreen> {
             controller: _pageController,
             scrollDirection: Axis.vertical,
             onPageChanged: _onPageChanged,
-            physics: const _SnapPageScrollPhysics(),
+            physics: const VerticalSnapPageScrollPhysics(),
             itemCount: _posts.length + (_loadingMore ? 1 : 0),
             itemBuilder: (context, index) {
               // Последний элемент — индикатор загрузки
@@ -175,7 +216,8 @@ class _VideoFeedScreenState extends State<VideoFeedScreen> {
                 isActive: _currentPage == index,
                 currentUserId: widget.currentUserId,
                 onLike: () => _toggleLike(post),
-                onSave: () => _toggleSave(post),
+                onRepost: () => _toggleRepost(post),
+                onMoreTap: () => _showMoreMenu(post),
               );
             },
           ),
@@ -201,44 +243,29 @@ class _VideoPage extends StatelessWidget {
     required this.isActive,
     required this.currentUserId,
     required this.onLike,
-    required this.onSave,
+    required this.onRepost,
+    required this.onMoreTap,
   });
 
   final PostEntity post;
   final bool isActive;
   final String? currentUserId;
   final VoidCallback onLike;
-  final VoidCallback onSave;
+  final VoidCallback onRepost;
+  final VoidCallback onMoreTap;
 
   @override
   Widget build(BuildContext context) {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // Фоновый постер (пока видео грузится)
-        if (post.imageUrl.isNotEmpty)
-          CachedNetworkImage(
-            imageUrl: post.imageUrl,
-            fit: BoxFit.cover,
-            fadeInDuration: Duration.zero,
-            fadeOutDuration: Duration.zero,
-            memCacheWidth: (MediaQuery.sizeOf(context).shortestSide *
-                    MediaQuery.devicePixelRatioOf(context))
-                .round()
-                .clamp(256, 2048),
-            placeholder: (context, url) => const ColoredBox(color: Colors.black),
-            errorWidget: (context, url, error) =>
-                const ColoredBox(color: Colors.black),
-          ),
-
-        // Видеоплеер на весь экран
-        Center(
+        Positioned.fill(
           child: FeedVideoPlayer(
             videoUrl: post.videoUrl!,
             isActive: isActive,
-            aspectRatio: 9 / 16,
             looping: true,
             showControls: true,
+            coverFullscreen: true,
           ),
         ),
 
@@ -254,12 +281,13 @@ class _VideoPage extends StatelessWidget {
         // Правая панель действий
         Positioned(
           right: 12,
-          bottom: 100,
+          bottom: 96,
           child: _RightActions(
             post: post,
             currentUserId: currentUserId,
             onLike: onLike,
-            onSave: onSave,
+            onRepost: onRepost,
+            onMoreTap: onMoreTap,
           ),
         ),
 
@@ -380,13 +408,15 @@ class _RightActions extends StatelessWidget {
     required this.post,
     required this.currentUserId,
     required this.onLike,
-    required this.onSave,
+    required this.onRepost,
+    required this.onMoreTap,
   });
 
   final PostEntity post;
   final String? currentUserId;
   final VoidCallback onLike;
-  final VoidCallback onSave;
+  final VoidCallback onRepost;
+  final VoidCallback onMoreTap;
 
   @override
   Widget build(BuildContext context) {
@@ -399,7 +429,7 @@ class _RightActions extends StatelessWidget {
               ? Icons.favorite_rounded
               : Icons.favorite_border_rounded,
           color: post.isLikedByMe ? Colors.red : Colors.white,
-          label: _formatCount(post.likesCount),
+          label: _fmt(post.likesCount),
           onTap: currentUserId != null ? onLike : null,
         ),
         const SizedBox(height: 20),
@@ -408,19 +438,19 @@ class _RightActions extends StatelessWidget {
         _ActionBtn(
           icon: Icons.chat_bubble_outline_rounded,
           color: Colors.white,
-          label: _formatCount(post.commentsCount),
+          label: _fmt(post.commentsCount),
           onTap: () => context.push('/post/${post.id}', extra: post),
         ),
         const SizedBox(height: 20),
 
-        // Сохранить
+        // Репост
         _ActionBtn(
-          icon: post.isSavedByMe
-              ? Icons.bookmark_rounded
-              : Icons.bookmark_border_rounded,
-          color: post.isSavedByMe ? Colors.amber : Colors.white,
-          label: '',
-          onTap: currentUserId != null ? onSave : null,
+          icon: post.isRepostedByMe
+              ? Icons.repeat_rounded
+              : Icons.repeat_outlined,
+          color: post.isRepostedByMe ? const Color(0xFF22D3EE) : Colors.white,
+          label: _fmt(post.repostsCount),
+          onTap: currentUserId != null ? onRepost : null,
         ),
         const SizedBox(height: 20),
 
@@ -429,17 +459,124 @@ class _RightActions extends StatelessWidget {
           icon: Icons.send_rounded,
           color: Colors.white,
           label: '',
-          onTap: () {},
+          onTap: () => context.push('/discover-publications'),
+        ),
+        const SizedBox(height: 20),
+
+        // Три точки
+        _ActionBtn(
+          icon: Icons.more_vert_rounded,
+          color: Colors.white,
+          label: '',
+          onTap: onMoreTap,
         ),
       ],
     );
   }
 
-  String _formatCount(int n) {
-    if (n == 0) return '';
+  String _fmt(int n) {
+    if (n <= 0) return '';
     if (n >= 1000000) return '${(n / 1000000).toStringAsFixed(1)}M';
     if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}K';
     return '$n';
+  }
+}
+
+// ── Меню трёх точек ──────────────────────────────────────────────
+
+class _VideoMoreMenu extends StatelessWidget {
+  const _VideoMoreMenu({
+    required this.isSaved,
+    required this.onSave,
+    required this.onReport,
+    required this.onUseSound,
+  });
+
+  final bool isSaved;
+  final VoidCallback onSave;
+  final VoidCallback onReport;
+  final VoidCallback onUseSound;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).padding.bottom + 8,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 10, bottom: 8),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey.shade300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          _VideoMoreItem(
+            icon: isSaved
+                ? Icons.bookmark_rounded
+                : Icons.bookmark_border_rounded,
+            iconColor: isSaved ? Colors.amber.shade700 : Colors.black87,
+            label: isSaved ? 'Сохранено' : 'Сохранить',
+            onTap: onSave,
+          ),
+          _VideoMoreItem(
+            icon: Icons.music_note_rounded,
+            iconColor: const Color(0xFF2563EB),
+            label: 'Снять под этот звук',
+            onTap: onUseSound,
+          ),
+          _VideoMoreItem(
+            icon: Icons.flag_outlined,
+            iconColor: Colors.red,
+            label: 'Пожаловаться',
+            onTap: onReport,
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+}
+
+class _VideoMoreItem extends StatelessWidget {
+  const _VideoMoreItem({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: iconColor, size: 24),
+            const SizedBox(width: 16),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -522,15 +659,3 @@ class _CloseButton extends StatelessWidget {
   }
 }
 
-/// Custom scroll physics для резкого snap между страницами.
-class _SnapPageScrollPhysics extends ScrollPhysics {
-  const _SnapPageScrollPhysics({super.parent});
-
-  @override
-  _SnapPageScrollPhysics applyTo(ScrollPhysics? ancestor) =>
-      _SnapPageScrollPhysics(parent: buildParent(ancestor));
-
-  @override
-  SpringDescription get spring =>
-      const SpringDescription(mass: 80, stiffness: 100, damping: 1);
-}

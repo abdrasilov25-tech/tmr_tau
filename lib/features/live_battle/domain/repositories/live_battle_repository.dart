@@ -2,9 +2,13 @@ import '../entities/battle_history_entry.dart';
 import '../entities/donator_score.dart';
 import '../entities/gift.dart';
 import '../entities/live_battle.dart';
+import '../entities/live_battle_lobby_player.dart';
 import '../entities/wallet.dart';
 
 abstract class LiveBattleRepository {
+  /// Кандидаты для вызова на баттл (профиль + признак активности за последние ~5 мин).
+  Future<List<LiveBattleLobbyPlayer>> fetchLobbyPlayers({int limit = 120});
+
   Future<LiveBattle> startBattle(String userA, String userB);
 
   /// Одноразовая загрузка строки баттла (не ждём первый пуш Realtime).

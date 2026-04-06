@@ -14,6 +14,7 @@ import 'features/chat/data/chat_pets_storage.dart';
 import 'features/chat/data/chat_sticker_favorites_storage.dart';
 import 'core/config/oauth_env_config.dart';
 import 'core/feedback/feedback_manager.dart';
+import 'core/firebase/app_firebase.dart';
 import 'core/feedback/feedback_preferences_storage.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -83,13 +84,14 @@ Future<void> main() async {
     return true;
   }());
 
-  /// Параллельно: Supabase и SharedPreferences — быстрее первый кадр после `runApp`.
+  /// Параллельно: Firebase, Supabase и SharedPreferences.
   final startup = await Future.wait<Object?>([
+    initAppFirebase(),
     _initializeSupabase(supabaseUrl, supabaseAnonKey),
     SharedPreferences.getInstance(),
   ]);
-  final supabaseOk = startup[0] == true;
-  final prefs = startup[1]! as SharedPreferences;
+  final supabaseOk = startup[1] == true;
+  final prefs = startup[2]! as SharedPreferences;
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
   final chatStoryListStorage = ChatStoryListStorage(prefs);
