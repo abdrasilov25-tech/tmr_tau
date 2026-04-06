@@ -176,7 +176,9 @@ class _StoryMusicPickerScaffoldState extends State<_StoryMusicPickerScaffold> {
                     ),
                   ),
                   _TapCell(
-                    onTap: _selected == null ? null : () => widget.navigator.pop(_selected),
+                    onTap: _selected == null
+                        ? null
+                        : () => unawaited(_confirmTrack(_selected!)),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
                       child: Text(
@@ -352,7 +354,10 @@ class _StoryMusicPickerScaffoldState extends State<_StoryMusicPickerScaffold> {
                             children: [
                               Expanded(
                                 child: _TapCell(
-                                  onTap: () => unawaited(_togglePreview(t)),
+                                  onTap: () {
+                                    setState(() => _selected = t);
+                                    unawaited(_togglePreview(t));
+                                  },
                                   child: Padding(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 10,

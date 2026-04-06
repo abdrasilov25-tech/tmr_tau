@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:shimmer/shimmer.dart';
@@ -16,6 +17,9 @@ import '../../../../core/utils/notification_badge_format.dart';
 import '../../../../core/widgets/cached_avatar.dart';
 import '../../../../core/widgets/double_tap_like_burst.dart';
 import '../../../../core/constants/supabase_constants.dart';
+import '../../../../core/storage/live_ended_dismiss_storage.dart';
+import '../../../live_battle/domain/entities/battle_history_entry.dart';
+import '../../../live_battle/domain/repositories/live_battle_repository.dart';
 import '../../../chat/presentation/widgets/chat_stories_friends_strip.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
 import '../../../profile/domain/repositories/profile_repository.dart';
@@ -1157,100 +1161,8 @@ class _MainHomePageState extends State<MainHomePage> {
     );
   }
 
-  /// Вкладка «Live» — список активных эфиров + кнопка баттла.
-  Widget _buildLiveTab() {
-    return StreamBuilder<List<LiveRoomEntity>>(
-      stream: context.read<LiveStreamingRepository>().watchActiveLiveRooms(),
-      builder: (context, snapshot) {
-        final rooms = snapshot.data ?? const [];
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: FilledButton.icon(
-                        onPressed: () => context.push('/live/host'),
-                        icon: const Icon(Icons.videocam_rounded),
-                        label: const Text('Начать эфир'),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () => context.push('/live-battle-lobby'),
-                        icon: const Icon(Icons.sports_kabaddi_rounded),
-                        label: const Text('Баттл'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (snapshot.connectionState == ConnectionState.waiting &&
-                rooms.isEmpty)
-              const SliverFillRemaining(
-                hasScrollBody: false,
-                child: _LiveRoomsLoadingSkeleton(),
-              )
-            else if (rooms.isEmpty)
-              SliverFillRemaining(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.live_tv_outlined,
-                          size: 64,
-                          color: Theme.of(context)
-                              .colorScheme
-                              .onSurface
-                              .withValues(alpha: 0.25)),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Нет активных эфиров',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.45),
-                            ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Начните первый или ждите других',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurface
-                                  .withValues(alpha: 0.3),
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                sliver: SliverList.separated(
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemCount: rooms.length,
-                  itemBuilder: (context, i) {
-                    final room = rooms[i];
-                    return _LiveRoomCard(
-                      room: room,
-                      onTap: () => context.push('/live/watch/${room.id}'),
-                    );
-                  },
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
+  /// Вкладка «Live» — активные эфиры, архив баттлов и завершённые эфиры ведущего.
+  Widget _buildLiveTab() => const _MainHomeLiveTab();
 
   Widget _buildInitialLoadingFeedArea(double itemHeight) {
     switch (_feedTab) {
@@ -1617,6 +1529,447 @@ class _PublicationFeedTabLabel extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ─── Live tab (active + archives) ───────────────────────────────────────────────
+
+class _MainHomeLiveTab extends StatefulWidget {
+  const _MainHomeLiveTab();
+
+  @override
+  State<_MainHomeLiveTab> createState() => _MainHomeLiveTabState();
+}
+
+class _MainHomeLiveTabState extends State<_MainHomeLiveTab> {
+  LiveEndedDismissStorage? _dismissStorage;
+  List<LiveRoomEntity> _endedMine = const [];
+  List<BattleHistoryEntry> _battleArchive = const [];
+  bool _archiveLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_initStorageAndArchive());
+  }
+
+  Future<void> _initStorageAndArchive() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _dismissStorage = LiveEndedDismissStorage(prefs));
+    await _loadArchive();
+  }
+
+  Future<void> _loadArchive() async {
+    final auth = context.read<AuthBloc>().state;
+    final uid = auth is AuthAuthenticated ? auth.user.id : null;
+    if (uid == null) {
+      if (mounted) {
+        setState(() {
+          _endedMine = const [];
+          _battleArchive = const [];
+          _archiveLoading = false;
+        });
+      }
+      return;
+    }
+    if (mounted) setState(() => _archiveLoading = true);
+    try {
+      final live = context.read<LiveStreamingRepository>();
+      final battle = context.read<LiveBattleRepository>();
+      final ended = await live.getMyEndedLiveRooms(limit: 25);
+      final hist = await battle.getBattleHistory(uid);
+      if (!mounted) return;
+      setState(() {
+        _endedMine = ended;
+        _battleArchive = hist;
+        _archiveLoading = false;
+      });
+    } catch (e) {
+      debugPrint('[LiveTab] archive: $e');
+      if (mounted) setState(() => _archiveLoading = false);
+    }
+  }
+
+  Set<String> get _dismissed {
+    final auth = context.read<AuthBloc>().state;
+    final uid = auth is AuthAuthenticated ? auth.user.id : null;
+    final st = _dismissStorage;
+    if (uid == null || st == null) return const {};
+    return st.dismissedRoomIds(uid);
+  }
+
+  Future<void> _dismissEndedRoom(LiveRoomEntity room) async {
+    final auth = context.read<AuthBloc>().state;
+    final uid = auth is AuthAuthenticated ? auth.user.id : null;
+    final st = _dismissStorage;
+    if (uid == null || st == null) return;
+    await st.dismissRoom(uid, room.id);
+    if (mounted) setState(() {});
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '«${room.title.isEmpty ? 'Эфир' : room.title}» убран из списка',
+        ),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocListener<AuthBloc, AuthState>(
+      listenWhen: (prev, curr) {
+        String? id(AuthState s) =>
+            s is AuthAuthenticated ? s.user.id : null;
+        return id(prev) != id(curr);
+      },
+      listener: (context, state) {
+        unawaited(_initStorageAndArchive());
+      },
+      child: StreamBuilder<List<LiveRoomEntity>>(
+        stream: context.read<LiveStreamingRepository>().watchActiveLiveRooms(),
+        builder: (context, snapshot) {
+          final rooms = snapshot.data ?? const [];
+          return RefreshIndicator(
+            onRefresh: _loadArchive,
+            child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => context.push('/live/host'),
+                          icon: const Icon(Icons.videocam_rounded),
+                          label: const Text('Начать эфир'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () =>
+                              context.push('/live-battle-lobby'),
+                          icon: const Icon(Icons.sports_kabaddi_rounded),
+                          label: const Text('Баттл'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_archiveLoading)
+                const SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+                ),
+              SliverToBoxAdapter(child: _buildPastLivesSection(context)),
+              SliverToBoxAdapter(child: _buildBattlesSection(context)),
+              if (snapshot.connectionState == ConnectionState.waiting &&
+                  rooms.isEmpty)
+                const SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: _LiveRoomsLoadingSkeleton(),
+                )
+              else if (rooms.isEmpty)
+                SliverFillRemaining(
+                  hasScrollBody: false,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.live_tv_outlined,
+                          size: 64,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.25),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Нет активных эфиров',
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.45),
+                              ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Начните первый или ждите других',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withValues(alpha: 0.3),
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              else ...[
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                    child: Text(
+                      'Сейчас в эфире',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                  ),
+                ),
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                  sliver: SliverList.separated(
+                    itemCount: rooms.length,
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      final room = rooms[i];
+                      return _LiveRoomCard(
+                        room: room,
+                        onTap: () => context.push('/live/watch/${room.id}'),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+        },
+      ),
+    );
+  }
+
+  Widget _buildPastLivesSection(BuildContext context) {
+    final auth = context.read<AuthBloc>().state;
+    if (auth is! AuthAuthenticated) return const SizedBox.shrink();
+    if (_archiveLoading) return const SizedBox.shrink();
+
+    final hidden = _dismissed;
+    final visible = _endedMine.where((r) => !hidden.contains(r.id)).toList();
+    if (visible.isEmpty && _endedMine.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Text(
+          'Завершённые эфиры появятся здесь после выхода из прямого эфира.',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withValues(alpha: 0.45),
+              ),
+        ),
+      );
+    }
+    if (visible.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Мои эфиры',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Нажмите на строку, чтобы убрать её из списка (эфир в базе сохраняется).',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.45),
+                ),
+          ),
+          const SizedBox(height: 10),
+          ...visible.map((room) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Material(
+                color: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(14),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(14),
+                  onTap: () => unawaited(_dismissEndedRoom(room)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.history_rounded,
+                          color: Theme.of(context).colorScheme.primary,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                room.title.isEmpty ? 'Эфир' : room.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (room.endedAt != null)
+                                Text(
+                                  _formatEnded(room.endedAt!),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .labelSmall
+                                      ?.copyWith(
+                                        color: Theme.of(context)
+                                            .colorScheme
+                                            .onSurface
+                                            .withValues(alpha: 0.5),
+                                      ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          Icons.close_rounded,
+                          size: 20,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.35),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBattlesSection(BuildContext context) {
+    final auth = context.read<AuthBloc>().state;
+    if (auth is! AuthAuthenticated ||
+        _battleArchive.isEmpty ||
+        _archiveLoading) {
+      return const SizedBox.shrink();
+    }
+    final preview = _battleArchive.take(5).toList();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.sports_kabaddi_rounded,
+                size: 20,
+                color: Theme.of(context).colorScheme.tertiary,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Баттлы',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => context.push('/live-battle-history'),
+                child: const Text('Все'),
+              ),
+            ],
+          ),
+          Text(
+            'Завершённые баттлы хранятся здесь и в полной истории.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withValues(alpha: 0.45),
+                ),
+          ),
+          const SizedBox(height: 10),
+          ...preview.map((e) {
+            final me = auth.user.id;
+            final won = e.winnerId == me;
+            final draw = e.winnerId == null;
+            final label = won ? 'Победа' : (draw ? 'Ничья' : 'Поражение');
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+                tileColor: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest
+                    .withValues(alpha: 0.35),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                leading: Icon(
+                  won
+                      ? Icons.emoji_events_outlined
+                      : draw
+                          ? Icons.handshake_outlined
+                          : Icons.sports_kabaddi_rounded,
+                  color: won
+                      ? const Color(0xFF22C55E)
+                      : draw
+                          ? const Color(0xFFF59E0B)
+                          : const Color(0xFFEF4444),
+                ),
+                title: Text(
+                  '${e.scoreA} : ${e.scoreB}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                subtitle: Text('$label · ${_formatEnded(e.createdAt)}'),
+                onTap: () => context.push('/live-battle-history'),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  String _formatEnded(DateTime dt) {
+    final local = dt.toLocal();
+    final d = local.day.toString().padLeft(2, '0');
+    final mo = local.month.toString().padLeft(2, '0');
+    final h = local.hour.toString().padLeft(2, '0');
+    final mi = local.minute.toString().padLeft(2, '0');
+    return '$d.$mo $h:$mi';
   }
 }
 

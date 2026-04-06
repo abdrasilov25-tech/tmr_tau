@@ -269,7 +269,9 @@ class _AddStoryPageState extends State<AddStoryPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Сторис',
+                _activeMode == _CreateMode.publication
+                    ? 'Публикация'
+                    : 'Сторис',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: Colors.white,
                     ),
@@ -294,6 +296,29 @@ class _AddStoryPageState extends State<AddStoryPage> {
     );
     if (source == null || !mounted) return;
     await _pickImageFromSource(source);
+  }
+
+  /// Быстрая смена фото в сторис — сразу галерея; полное меню через [_pickSource].
+  Future<void> _pickReplacementMedia() async {
+    if (_isLiveMode || _loading) return;
+    if (_isVideoMode || _activeMode == _CreateMode.publication) {
+      await _pickSource();
+      return;
+    }
+    final ok = await _ensureGalleryAccess(forVideo: false);
+    if (!ok || !mounted) return;
+    final x = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (x != null && mounted) {
+      setState(() {
+        _image = File(x.path);
+        _video = null;
+        _videoDurationSeconds = 0;
+        _selectedMusic = null;
+        _musicStickerDrag = Offset.zero;
+        _musicTitlesHidden = false;
+        _overlays.clear();
+      });
+    }
   }
 
   Future<void> _pickImageFromSource(ImageSource source) async {
@@ -1060,28 +1085,58 @@ class _AddStoryPageState extends State<AddStoryPage> {
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
             child: Row(
               children: [
-                Material(
-                  color: _selectedMusic != null
-                      ? const Color(0xFF0095F6).withValues(alpha: 0.35)
-                      : Colors.white24,
-                  borderRadius: BorderRadius.circular(12),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: _loading ? null : _openMusicPicker,
-                    child: Padding(
-                      padding: const EdgeInsets.all(10),
-                      child: Icon(
-                        Icons.library_music_rounded,
-                        color: Colors.white.withValues(
-                          alpha: _selectedMusic != null ? 1 : 0.9,
+                Expanded(
+                  child: Material(
+                    color: _selectedMusic != null
+                        ? const Color(0xFF0095F6).withValues(alpha: 0.28)
+                        : Colors.white.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: _loading ? null : _openMusicPicker,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
                         ),
-                        size: 26,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.music_note_rounded,
+                              color: Colors.white.withValues(
+                                alpha: _selectedMusic != null ? 1 : 0.85,
+                              ),
+                              size: 22,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                _selectedMusic == null
+                                    ? 'Музыка'
+                                    : '${_selectedMusic!.title} · ${_selectedMusic!.artist}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: Colors.white.withValues(
+                                    alpha: _selectedMusic != null ? 1 : 0.8,
+                                  ),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: Colors.white.withValues(alpha: 0.5),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
                 if (_selectedMusic != null) ...[
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 8),
                   TextButton(
                     onPressed: _loading
                         ? null
@@ -1091,7 +1146,7 @@ class _AddStoryPageState extends State<AddStoryPage> {
                               _musicTitlesHidden = false;
                             }),
                     child: const Text(
-                      'Убрать музыку',
+                      'Убрать',
                       style: TextStyle(color: Colors.white70),
                     ),
                   ),
@@ -1132,11 +1187,19 @@ class _AddStoryPageState extends State<AddStoryPage> {
           child: Row(
             children: [
               OutlinedButton.icon(
-                onPressed: _loading ? null : _pickSource,
-                icon: const Icon(Icons.refresh, color: Colors.white),
+                onPressed: _loading ? null : _pickReplacementMedia,
+                icon: Icon(
+                  _isVideoMode ? Icons.videocam_outlined : Icons.photo_library_outlined,
+                  color: Colors.white,
+                ),
                 label: Text(
                   _isVideoMode ? 'Другое видео' : 'Другое фото',
                   style: const TextStyle(color: Colors.white),
+                ),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white54, width: 1.2),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 ),
               ),
               const SizedBox(width: 16),
@@ -1234,68 +1297,147 @@ class _CreationModeBar extends StatelessWidget {
   final _CreateMode activeMode;
   final ValueChanged<_CreateMode> onModeChanged;
 
+  static const List<(_CreateMode mode, String label, IconData icon, List<Color> grad)>
+      _modes = [
+    (
+      _CreateMode.publication,
+      'Публикация',
+      Icons.collections_rounded,
+      [Color(0xFFFF6B9D), Color(0xFFFE2C55)],
+    ),
+    (
+      _CreateMode.story,
+      'История',
+      Icons.auto_awesome_rounded,
+      [Color(0xFF7C4DFF), Color(0xFF12C2E9)],
+    ),
+    (
+      _CreateMode.video,
+      'Видео',
+      Icons.play_circle_fill_rounded,
+      [Color(0xFFFFD93D), Color(0xFFFF6B35)],
+    ),
+    (
+      _CreateMode.live,
+      'Эфир',
+      Icons.sensors_rounded,
+      [Color(0xFFFF1744), Color(0xFFFF8A80)],
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) {
-    Widget modeChip({
-      required String label,
-      required bool active,
-      required VoidCallback onTap,
-    }) {
-      return GestureDetector(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: active ? Colors.white : Colors.white70,
-              fontSize: 14,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ),
-      );
-    }
-
     return SafeArea(
       top: false,
       child: Container(
-        color: Colors.black,
-        padding: const EdgeInsets.fromLTRB(0, 6, 0, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0D0D0D),
+          border: Border(
+            top: BorderSide(
+              color: Colors.white.withValues(alpha: 0.12),
+            ),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              blurRadius: 16,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.fromLTRB(4, 10, 4, 12),
         child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              physics: const BouncingScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(minWidth: constraints.maxWidth - 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    modeChip(
-                      label: 'Публикация',
-                      active: activeMode == _CreateMode.publication,
-                      onTap: () => onModeChanged(_CreateMode.publication),
+          builder: (context, c) {
+            final n = _modes.length;
+            final w = c.maxWidth / n;
+            final idx = _modes.indexWhere((e) => e.$1 == activeMode);
+            final safeIdx = idx < 0 ? 0 : idx;
+            final pillW = w * 0.88;
+            final pillLeft = safeIdx * w + (w - pillW) / 2;
+            final grad = _modes[safeIdx].$4;
+            return SizedBox(
+              height: 64,
+              child: Stack(
+                clipBehavior: Clip.none,
+                alignment: Alignment.center,
+                children: [
+                  AnimatedPositioned(
+                    duration: const Duration(milliseconds: 400),
+                    curve: Curves.easeOutCubic,
+                    left: pillLeft,
+                    top: 2,
+                    width: pillW,
+                    height: 52,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(18),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: grad,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: grad.first.withValues(alpha: 0.55),
+                            blurRadius: 14,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
                     ),
-                    modeChip(
-                      label: 'История',
-                      active: activeMode == _CreateMode.story,
-                      onTap: () => onModeChanged(_CreateMode.story),
-                    ),
-                    modeChip(
-                      label: 'Видео',
-                      active: activeMode == _CreateMode.video,
-                      onTap: () => onModeChanged(_CreateMode.video),
-                    ),
-                    modeChip(
-                      label: 'Прямой эфир',
-                      active: activeMode == _CreateMode.live,
-                      onTap: () => onModeChanged(_CreateMode.live),
-                    ),
-                  ],
-                ),
+                  ),
+                  Row(
+                    children: List.generate(n, (i) {
+                      final item = _modes[i];
+                      final sel = activeMode == item.$1;
+                      return Expanded(
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => onModeChanged(item.$1),
+                            customBorder: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(18),
+                            ),
+                            splashColor: item.$4.first.withValues(alpha: 0.25),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                AnimatedScale(
+                                  scale: sel ? 1.08 : 1,
+                                  duration: const Duration(milliseconds: 320),
+                                  curve: Curves.easeOutCubic,
+                                  child: Icon(
+                                    item.$3,
+                                    size: 26,
+                                    color: sel
+                                        ? Colors.white
+                                        : item.$4.first
+                                            .withValues(alpha: 0.72),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  item.$2,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: sel
+                                        ? Colors.white
+                                        : Colors.white.withValues(alpha: 0.45),
+                                    fontSize: 11,
+                                    fontWeight:
+                                        sel ? FontWeight.w800 : FontWeight.w600,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ],
               ),
             );
           },

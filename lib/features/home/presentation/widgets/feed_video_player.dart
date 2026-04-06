@@ -397,42 +397,39 @@ class _CoverFullscreenVideo extends StatelessWidget {
                 ),
               ),
             ),
-          // Ниже по экрану (как в TikTok), чтобы не пересекаться с системной
-          // полосой и не «прилипать» к верху рилса.
-          Align(
-            alignment: const Alignment(0.88, 0.54),
-            child: Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: ValueListenableBuilder<bool>(
-                valueListenable: GlobalVideoAudioState.instance.isMuted,
-                builder: (context, muted, _) {
-                  return Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: onMuteTap,
-                      customBorder: const CircleBorder(),
-                      child: Ink(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.35),
-                          ),
-                        ),
-                        child: Icon(
-                          muted
-                              ? Icons.volume_off_rounded
-                              : Icons.volume_up_rounded,
-                          color: Colors.white,
-                          size: 24,
+          // Внизу справа: под колонкой лайков/репостов, ближе к нижнему краю рилса.
+          Positioned(
+            right: 8,
+            bottom: 10 + MediaQuery.paddingOf(context).bottom,
+            child: ValueListenableBuilder<bool>(
+              valueListenable: GlobalVideoAudioState.instance.isMuted,
+              builder: (context, muted, _) {
+                return Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onMuteTap,
+                    customBorder: const CircleBorder(),
+                    child: Ink(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.45),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.35),
                         ),
                       ),
+                      child: Icon(
+                        muted
+                            ? Icons.volume_off_rounded
+                            : Icons.volume_up_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
                     ),
-                  );
-                },
-              ),
+                  ),
+                );
+              },
             ),
           ),
         ],

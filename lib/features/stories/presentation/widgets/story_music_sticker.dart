@@ -97,12 +97,12 @@ class StoryMusicSticker extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w800,
-                        fontSize: 15,
+                        fontSize: 14,
                         height: 1.15,
                         letterSpacing: -0.2,
                       ),
@@ -111,7 +111,7 @@ class StoryMusicSticker extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         artist,
-                        maxLines: 1,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Colors.white.withValues(alpha: 0.88),

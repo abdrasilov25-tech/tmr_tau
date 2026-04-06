@@ -69,6 +69,22 @@ class LiveStreamingRepositoryImpl implements LiveStreamingRepository {
         });
   }
 
+  @override
+  Future<List<LiveRoomEntity>> getMyEndedLiveRooms({int limit = 20}) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return const [];
+    final rows = await _client
+        .from(SupabaseConstants.liveRoomsTable)
+        .select()
+        .eq('host_id', uid)
+        .eq('is_live', false)
+        .order('ended_at', ascending: false)
+        .limit(limit);
+    return (rows as List<dynamic>)
+        .map((e) => _map(Map<String, dynamic>.from(e as Map)))
+        .toList(growable: false);
+  }
+
   LiveRoomEntity _map(Map<String, dynamic> row) {
     return LiveRoomEntity(
       id: (row['id'] ?? '').toString(),

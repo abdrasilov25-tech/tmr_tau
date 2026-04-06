@@ -87,6 +87,7 @@ import '../../features/map/domain/usecases/get_nearby_products.dart';
 import '../../features/map/presentation/bloc/map_bloc.dart';
 import '../../features/map/presentation/pages/map_page.dart';
 import '../navigation/search_tab_activation_controller.dart';
+import '../widgets/animated_shell_bottom_nav.dart';
 
 /// Deep link `tmrtau://auth/callback?...` в Dart — это [host]=auth и [path]=/callback,
 /// а не путь `/auth/callback`. Приводим к маршруту GoRouter.
@@ -106,24 +107,6 @@ String? _normalizeTmrtauOAuthLocation(GoRouterState state) {
   }
 
   return null;
-}
-
-Widget _shellNavCountBadge({required String label, required Widget icon}) {
-  final show = label.isNotEmpty;
-  return Badge(
-    isLabelVisible: show,
-    backgroundColor: const Color(0xFF2563EB),
-    textColor: Colors.white,
-    padding: const EdgeInsets.symmetric(horizontal: 6),
-    label: Text(
-      label,
-      style: const TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
-      ),
-    ),
-    child: icon,
-  );
 }
 
 /// Ветви нижней навигации не строим до первого захода на вкладку — иначе при старте
@@ -822,156 +805,68 @@ class _MainShellState extends State<_MainShell> {
               widget.navigationShell,
             ],
           ),
-          bottomNavigationBar: Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: Colors.grey.shade200)),
-            ),
-            child: NavigationBar(
-              selectedIndex: widget.navigationShell.currentIndex,
-              labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
-              height: 56,
-              onDestinationSelected: (index) {
-                widget.navigationShell.goBranch(index);
-                if (index == 1) {
-                  widget.searchTabActivation.markSearchTabSelected();
-                }
-                if (index == 0) {
-                  context
-                      .read<NotificationActivityPeekBus>()
-                      .pulsePublicationsTab();
-                }
-                if (index == 3) {
-                  context.read<ChatUnreadBadgeController>().refresh();
-                }
-                if (index == 0 || index == 4) {
-                  unawaited(
-                    context.read<NotificationTabBadgeController>().refresh(),
-                  );
-                }
-              },
-              backgroundColor: Colors.transparent,
-              elevation: 0,
-              indicatorColor: Colors.transparent,
-              destinations: [
-                NavigationDestination(
-                  icon: Semantics(
-                    label: l10n.tabPublications,
-                    button: true,
-                    child: _shellNavCountBadge(
-                      label: publicationsBadge,
-                      icon: const Icon(Icons.home_outlined, size: 26),
-                    ),
-                  ),
-                  selectedIcon: Semantics(
-                    label: l10n.tabPublications,
-                    button: true,
-                    child: _shellNavCountBadge(
-                      label: publicationsBadge,
-                      icon: const Icon(Icons.home_rounded, size: 26),
-                    ),
-                  ),
-                  label: 'Публикации',
-                ),
-                NavigationDestination(
-                  icon: Semantics(
-                    label: l10n.tabSearch,
-                    button: true,
-                    child: const Icon(Icons.search_outlined, size: 26),
-                  ),
-                  selectedIcon: Semantics(
-                    label: l10n.tabSearch,
-                    button: true,
-                    child: const Icon(Icons.search_rounded, size: 26),
-                  ),
-                  label: 'Поиск',
-                ),
-                NavigationDestination(
-                  icon: Semantics(
-                    label: l10n.tabNearby,
-                    button: true,
-                    child: const Icon(Icons.map_outlined, size: 26),
-                  ),
-                  selectedIcon: Semantics(
-                    label: l10n.tabNearby,
-                    button: true,
-                    child: const Icon(Icons.map_rounded, size: 26),
-                  ),
-                  label: 'Рядом',
-                ),
-                NavigationDestination(
-                  icon: Semantics(
-                    label: l10n.tabChats,
-                    button: true,
-                    child: Badge(
-                      isLabelVisible: chatsBadge.isNotEmpty,
-                      backgroundColor: const Color(0xFF2563EB),
-                      textColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      label: Text(
-                        chatsBadge,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      child: const Icon(Icons.chat_bubble_outline_rounded, size: 26),
-                    ),
-                  ),
-                  selectedIcon: Semantics(
-                    label: l10n.tabChats,
-                    button: true,
-                    child: Badge(
-                      isLabelVisible: chatsBadge.isNotEmpty,
-                      backgroundColor: const Color(0xFF2563EB),
-                      textColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 6),
-                      label: Text(
-                        chatsBadge,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      child: const Icon(Icons.chat_rounded, size: 26),
-                    ),
-                  ),
-                  label: 'Чаты',
-                ),
-                NavigationDestination(
-                  icon: Semantics(
-                    label: l10n.tabNews,
-                    button: true,
-                    child: _shellNavCountBadge(
-                      label: newsBadge,
-                      icon: const Icon(Icons.article_outlined, size: 26),
-                    ),
-                  ),
-                  selectedIcon: Semantics(
-                    label: l10n.tabNews,
-                    button: true,
-                    child: _shellNavCountBadge(
-                      label: newsBadge,
-                      icon: const Icon(Icons.article_rounded, size: 26),
-                    ),
-                  ),
-                  label: 'Новости',
-                ),
-                NavigationDestination(
-                  icon: Semantics(
-                    label: l10n.tabProfile,
-                    button: true,
-                    child: const Icon(Icons.person_outline_rounded, size: 26),
-                  ),
-                  selectedIcon: Semantics(
-                    label: l10n.tabProfile,
-                    button: true,
-                    child: const Icon(Icons.person_rounded, size: 26),
-                  ),
-                  label: 'Профиль',
-                ),
-              ],
-            ),
+          bottomNavigationBar: AnimatedShellBottomNav(
+            selectedIndex: widget.navigationShell.currentIndex,
+            onDestinationSelected: (index) {
+              widget.navigationShell.goBranch(index);
+              if (index == 1) {
+                widget.searchTabActivation.markSearchTabSelected();
+              }
+              if (index == 0) {
+                context
+                    .read<NotificationActivityPeekBus>()
+                    .pulsePublicationsTab();
+              }
+              if (index == 3) {
+                context.read<ChatUnreadBadgeController>().refresh();
+              }
+              if (index == 0 || index == 4) {
+                unawaited(
+                  context.read<NotificationTabBadgeController>().refresh(),
+                );
+              }
+            },
+            items: [
+              ShellNavTabSpec(
+                semanticsLabel: l10n.tabPublications,
+                iconOutlined: Icons.home_outlined,
+                iconFilled: Icons.home_rounded,
+                gradient: const [Color(0xFFFF6B9D), Color(0xFFFE2C55)],
+                badgeLabel: publicationsBadge,
+              ),
+              ShellNavTabSpec(
+                semanticsLabel: l10n.tabSearch,
+                iconOutlined: Icons.search_rounded,
+                iconFilled: Icons.search_rounded,
+                gradient: const [Color(0xFF12C2E9), Color(0xFF667EEA)],
+              ),
+              ShellNavTabSpec(
+                semanticsLabel: l10n.tabNearby,
+                iconOutlined: Icons.map_outlined,
+                iconFilled: Icons.map_rounded,
+                gradient: const [Color(0xFF56AB2F), Color(0xFFA8E063)],
+              ),
+              ShellNavTabSpec(
+                semanticsLabel: l10n.tabChats,
+                iconOutlined: Icons.chat_bubble_outline_rounded,
+                iconFilled: Icons.chat_rounded,
+                gradient: const [Color(0xFF7C4DFF), Color(0xFFE040FB)],
+                badgeLabel: chatsBadge,
+              ),
+              ShellNavTabSpec(
+                semanticsLabel: l10n.tabNews,
+                iconOutlined: Icons.article_outlined,
+                iconFilled: Icons.article_rounded,
+                gradient: const [Color(0xFFFF7777), Color(0xFFFFD660)],
+                badgeLabel: newsBadge,
+              ),
+              ShellNavTabSpec(
+                semanticsLabel: l10n.tabProfile,
+                iconOutlined: Icons.person_outline_rounded,
+                iconFilled: Icons.person_rounded,
+                gradient: const [Color(0xFFFC466B), Color(0xFF3F5EFB)],
+              ),
+            ],
           ),
         );
       },

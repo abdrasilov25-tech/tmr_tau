@@ -84,14 +84,15 @@ Future<void> main() async {
     return true;
   }());
 
-  /// Параллельно: Firebase, Supabase и SharedPreferences.
+  /// Сначала Firebase (Pigeon channel-error при гонке с другими плагинами),
+  /// затем параллельно Supabase и SharedPreferences.
+  await initAppFirebase();
   final startup = await Future.wait<Object?>([
-    initAppFirebase(),
     _initializeSupabase(supabaseUrl, supabaseAnonKey),
     SharedPreferences.getInstance(),
   ]);
-  final supabaseOk = startup[1] == true;
-  final prefs = startup[2]! as SharedPreferences;
+  final supabaseOk = startup[0] == true;
+  final prefs = startup[1]! as SharedPreferences;
   final localReactions = LocalReactionsStorage(prefs);
   final chatListStorage = ChatListStorage(prefs);
   final chatStoryListStorage = ChatStoryListStorage(prefs);

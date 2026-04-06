@@ -18,6 +18,8 @@ class StoryCameraResult {
   final bool isVideo;
 }
 
+enum _GalleryPickKind { photo, video }
+
 /// Камера в стиле Instagram для создания сторис.
 ///
 /// - Нажатие → фото
@@ -217,18 +219,41 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     if (_cameras.length < 2 || _isRecording) return;
     setState(() => _initializing = true);
     _cameraIndex = (_cameraIndex + 1) % _cameras.length;
-    await _initCamera(_cameras[_cameraIndex]);
+    final nextDesc = _cameras[_cameraIndex];
+    // У фронтальной камеры нет «вспышки кадра» — только подсветка (torch).
+    if (nextDesc.lensDirection == CameraLensDirection.front &&
+        _flashMode == FlashMode.always) {
+      _flashMode = FlashMode.off;
+    }
+    await _initCamera(nextDesc);
   }
 
   Future<void> _toggleFlash() async {
     final ctrl = _cameraCtrl;
     if (ctrl == null || !ctrl.value.isInitialized || _isRecording) return;
-    final next =
-        _flashMode == FlashMode.off ? FlashMode.torch : FlashMode.off;
+    final front = ctrl.description.lensDirection == CameraLensDirection.front;
+    final turningOn =
+        _flashMode == FlashMode.off || _flashMode == FlashMode.auto;
+    final FlashMode target;
+    if (turningOn) {
+      target = front ? FlashMode.torch : FlashMode.always;
+    } else {
+      target = FlashMode.off;
+    }
     try {
-      await ctrl.setFlashMode(next);
-      if (mounted) setState(() => _flashMode = next);
-    } catch (e) { debugPrint('$e'); }
+      await ctrl.setFlashMode(target);
+      if (mounted) setState(() => _flashMode = target);
+    } catch (e) {
+      debugPrint('flash(always): $e');
+      if (!front && turningOn) {
+        try {
+          await ctrl.setFlashMode(FlashMode.torch);
+          if (mounted) setState(() => _flashMode = FlashMode.torch);
+        } catch (e2) {
+          debugPrint('flash(torch): $e2');
+        }
+      }
+    }
   }
 
   Future<void> _takePicture() async {
@@ -240,6 +265,12 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     }
     try {
       final xFile = await ctrl.takePicture();
+      if (_flashMode == FlashMode.torch) {
+        try {
+          await ctrl.setFlashMode(FlashMode.off);
+          if (mounted) setState(() => _flashMode = FlashMode.off);
+        } catch (_) {}
+      }
       if (!mounted) return;
       context.go(
         '/add-story',
@@ -274,6 +305,12 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     if (!mounted) return;
     try {
       final xFile = await ctrl.takePicture();
+      if (_flashMode == FlashMode.torch) {
+        try {
+          await ctrl.setFlashMode(FlashMode.off);
+          if (mounted) setState(() => _flashMode = FlashMode.off);
+        } catch (_) {}
+      }
       if (!mounted) return;
       context.go(
         '/add-story',
@@ -375,50 +412,38 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                   ),
                 ),
                 const SizedBox(height: 20),
-                // Flash mode row
+                // Вспышка: как в Instagram — одним переключателем (зад: вспышка при съёмке, фронт: подсветка).
                 _SettingsSection(
                   label: 'Вспышка',
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      for (final mode in [
-                        FlashMode.off,
-                        FlashMode.auto,
-                        FlashMode.always,
-                        FlashMode.torch,
-                      ])
-                        Padding(
-                          padding: const EdgeInsets.only(left: 8),
-                          child: GestureDetector(
-                            onTap: () async {
-                              final ctrl = _cameraCtrl;
-                              if (ctrl == null) return;
-                              try {
-                                await ctrl.setFlashMode(mode);
-                                setState(() => _flashMode = mode);
-                                setModal(() {});
-                              } catch (e) { debugPrint('$e'); }
-                            },
-                            child: Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                color: _flashMode == mode
-                                    ? Colors.white
-                                    : Colors.white12,
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                _flashModeIcon(mode),
-                                size: 20,
-                                color: _flashMode == mode
-                                    ? Colors.black
-                                    : Colors.white70,
-                              ),
-                            ),
-                          ),
-                        ),
-                    ],
+                  child: Switch.adaptive(
+                    value: _flashMode == FlashMode.always ||
+                        _flashMode == FlashMode.torch,
+                    activeThumbColor: Colors.white,
+                    activeTrackColor: const Color(0xFF0A84FF),
+                    onChanged: (on) async {
+                      final ctrl = _cameraCtrl;
+                      if (ctrl == null) return;
+                      final front = ctrl.description.lensDirection ==
+                          CameraLensDirection.front;
+                      final mode =
+                          on ? (front ? FlashMode.torch : FlashMode.always) : FlashMode.off;
+                      try {
+                        await ctrl.setFlashMode(mode);
+                        setState(() => _flashMode = mode);
+                        setModal(() {});
+                      } catch (e) {
+                        debugPrint('flash toggle: $e');
+                        if (!front && on) {
+                          try {
+                            await ctrl.setFlashMode(FlashMode.torch);
+                            setState(() => _flashMode = FlashMode.torch);
+                            setModal(() {});
+                          } catch (e2) {
+                            debugPrint('$e2');
+                          }
+                        }
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -505,19 +530,6 @@ class _StoryCameraPageState extends State<StoryCameraPage>
     );
   }
 
-  IconData _flashModeIcon(FlashMode mode) {
-    switch (mode) {
-      case FlashMode.off:
-        return Icons.flash_off_rounded;
-      case FlashMode.auto:
-        return Icons.flash_auto_rounded;
-      case FlashMode.always:
-        return Icons.flash_on_rounded;
-      case FlashMode.torch:
-        return Icons.highlight_rounded;
-    }
-  }
-
   void _toggleHandsFree() {
     setState(() => _handsFree = !_handsFree);
     if (!mounted) return;
@@ -590,8 +602,9 @@ class _StoryCameraPageState extends State<StoryCameraPage>
 
   Future<void> _pickFromGallery() async {
     if (_isRecording) return;
-    final access =
-        await StoryMediaPermissions.galleryAccess(forVideo: false);
+    final access = await StoryMediaPermissions.galleryAccess(
+      forVideo: widget.isVideoMode,
+    );
     switch (access) {
       case StoryGalleryAccess.ok:
         break;
@@ -614,7 +627,54 @@ class _StoryCameraPageState extends State<StoryCameraPage>
         );
         return;
     }
+    if (!mounted) return;
     final picker = ImagePicker();
+    if (widget.isVideoMode) {
+      final kind = await showModalBottomSheet<_GalleryPickKind>(
+        context: context,
+        backgroundColor: const Color(0xFF2C2C2E),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_rounded, color: Colors.white),
+                  title: const Text('Фото', style: TextStyle(color: Colors.white)),
+                  onTap: () => Navigator.pop(ctx, _GalleryPickKind.photo),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.videocam_rounded, color: Colors.white),
+                  title: const Text('Видео', style: TextStyle(color: Colors.white)),
+                  onTap: () => Navigator.pop(ctx, _GalleryPickKind.video),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (kind == null || !mounted) return;
+      if (kind == _GalleryPickKind.photo) {
+        final xFile = await picker.pickImage(source: ImageSource.gallery);
+        if (xFile == null || !mounted) return;
+        context.go(
+          '/add-story',
+          extra: StoryCameraResult(file: File(xFile.path), isVideo: false),
+        );
+      } else {
+        final xFile = await picker.pickVideo(source: ImageSource.gallery);
+        if (xFile == null || !mounted) return;
+        context.go(
+          '/add-story?video=1',
+          extra: StoryCameraResult(file: File(xFile.path), isVideo: true),
+        );
+      }
+      return;
+    }
     final xFile = await picker.pickImage(source: ImageSource.gallery);
     if (xFile == null || !mounted) return;
     context.go(
@@ -719,7 +779,8 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                   const Spacer(),
                   if (!_initializing && _permissionGranted) ...[
                     _IconBtn(
-                      icon: _flashMode == FlashMode.torch
+                      icon: _flashMode == FlashMode.always ||
+                              _flashMode == FlashMode.torch
                           ? Icons.flash_on_rounded
                           : Icons.flash_off_rounded,
                       onTap: _toggleFlash,
@@ -859,9 +920,10 @@ class _StoryCameraPageState extends State<StoryCameraPage>
                       if (!_isRecording)
                         Padding(
                           padding: const EdgeInsets.only(right: 10),
-                          child: _FilterLensButton(
+                          child: _GalleryOrFilterButton(
                             filterIndex: _filterIndex,
-                            onTap: _cycleFilter,
+                            onOpenGallery: _pickFromGallery,
+                            onCycleFilter: _cycleFilter,
                           ),
                         )
                       else
@@ -1062,64 +1124,68 @@ class _GalleryThumb extends StatelessWidget {
   }
 }
 
-class _FilterLensButton extends StatelessWidget {
-  const _FilterLensButton({
+/// Слева от затвора — как в Instagram: открыть галерею; долгое нажатие — переключить фильтр.
+class _GalleryOrFilterButton extends StatelessWidget {
+  const _GalleryOrFilterButton({
     required this.filterIndex,
-    required this.onTap,
+    required this.onOpenGallery,
+    required this.onCycleFilter,
   });
 
   final int filterIndex;
-  final VoidCallback onTap;
+  final VoidCallback onOpenGallery;
+  final VoidCallback onCycleFilter;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFFFF6B9D),
-              Color(0xFFC471F7),
-              Color(0xFF12C2E9),
-            ],
-          ),
-          border: Border.all(color: Colors.white38, width: 1.5),
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Icon(
-              Icons.auto_fix_high_rounded,
-              color: Colors.white.withValues(alpha: 0.95),
-              size: 22,
+      onTap: onOpenGallery,
+      onLongPress: onCycleFilter,
+      child: Tooltip(
+        message: 'Галерея · удерживайте для фильтра',
+        child: Container(
+          width: 46,
+          height: 46,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFFFF6B9D),
+                Color(0xFFC471F7),
+                Color(0xFF12C2E9),
+              ],
             ),
-            if (filterIndex > 0)
-              Positioned(
-                right: 4,
-                bottom: 4,
-                child: Container(
-                  padding: const EdgeInsets.all(2),
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Text(
-                    '$filterIndex',
-                    style: const TextStyle(
+            border: Border.all(color: Colors.white38, width: 1.5),
+          ),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(
+                Icons.photo_library_rounded,
+                color: Colors.white.withValues(alpha: 0.95),
+                size: 22,
+              ),
+              if (filterIndex > 0)
+                Positioned(
+                  right: 3,
+                  bottom: 3,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: const BoxDecoration(
+                      color: Colors.black54,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.auto_fix_high_rounded,
                       color: Colors.white,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w800,
+                      size: 10,
                     ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );

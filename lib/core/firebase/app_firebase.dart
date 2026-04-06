@@ -3,12 +3,43 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../../firebase_options.dart';
 
+/// Pigeon возвращает `channel-error`, если нативный обработчик канала ещё не готов
+/// (часто при параллельном старте плагинов). Короткий ретрай уменьшает сбой.
+Future<T> _withFirebaseChannelRetry<T>(
+  Future<T> Function() action, {
+  int maxAttempts = 4,
+}) async {
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await action();
+    } on PlatformException catch (e, st) {
+      final transient = e.code == 'channel-error' ||
+          (e.message?.contains('Unable to establish connection on channel') ??
+              false);
+      if (!transient || attempt == maxAttempts) {
+        Error.throwWithStackTrace(e, st);
+      }
+      await Future<void>.delayed(Duration(milliseconds: 40 * attempt));
+    }
+  }
+  throw StateError('_withFirebaseChannelRetry: unreachable');
+}
+
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  try {
+    await _withFirebaseChannelRetry(
+      () => Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ),
+    );
+  } catch (e, st) {
+    debugPrint('[FCM background] Firebase.initializeApp: $e\n$st');
+  }
 }
 
 /// Инициализация Firebase (Crashlytics, Analytics, FCM). Безопасно no-op при заглушке.
@@ -25,33 +56,65 @@ Future<void> initAppFirebase() async {
     return;
   }
 
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  try {
+    await _withFirebaseChannelRetry(
+      () => Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      ),
+    );
 
-  await FirebaseCrashlytics.instance.setCrashlyticsCollectionEnabled(!kDebugMode);
+    await _withFirebaseChannelRetry(
+      () => FirebaseCrashlytics.instance
+          .setCrashlyticsCollectionEnabled(!kDebugMode),
+    );
 
-  FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
-  };
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+    };
 
-  PlatformDispatcher.instance.onError = (error, stack) {
-    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
-    return true;
-  };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+      return true;
+    };
 
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+    try {
+      FirebaseMessaging.onBackgroundMessage(
+          firebaseMessagingBackgroundHandler);
+    } catch (e, st) {
+      debugPrint('[FCM] onBackgroundMessage registration: $e\n$st');
+    }
 
-  await FirebaseMessaging.instance.setAutoInitEnabled(true);
-  final settings = await FirebaseMessaging.instance.requestPermission(
-    alert: true,
-    badge: true,
-    sound: true,
-    provisional: false,
-  );
-  assert(() {
-    debugPrint('FCM permission: ${settings.authorizationStatus}');
-    return true;
-  }());
+    await _withFirebaseChannelRetry(
+      () => FirebaseMessaging.instance.setAutoInitEnabled(true),
+    );
+    try {
+      final settings = await _withFirebaseChannelRetry(
+        () => FirebaseMessaging.instance.requestPermission(
+          alert: true,
+          badge: true,
+          sound: true,
+          provisional: false,
+        ),
+      );
+      assert(() {
+        debugPrint('FCM permission: ${settings.authorizationStatus}');
+        return true;
+      }());
+    } on PlatformException catch (e, st) {
+      debugPrint('[FCM] requestPermission PlatformException: $e\n$st');
+    }
 
-  FirebaseAnalytics.instance.logAppOpen();
+    try {
+      await _withFirebaseChannelRetry(
+        () => FirebaseAnalytics.instance.logAppOpen(),
+      );
+    } catch (e, st) {
+      debugPrint('[Analytics] logAppOpen: $e\n$st');
+    }
+  } on PlatformException catch (e, st) {
+    debugPrint('[Firebase] init PlatformException: $e\n$st');
+  } catch (e, st) {
+    debugPrint('[Firebase] init: $e\n$st');
+  }
 }
