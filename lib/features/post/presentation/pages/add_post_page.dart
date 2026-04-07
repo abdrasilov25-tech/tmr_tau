@@ -716,7 +716,7 @@ class _AddPostPageState extends State<AddPostPage> {
               onTap: _loading ? null : _showPickMediaSheet,
               child: SizedBox(
                 height: _isPublication ? 340 : 240,
-                child: _MediaPickerCard(
+                child: PostMediaPickerCard(
                   cardHeight: _isPublication ? 340 : 240,
                   loading: _loading,
                   images: List<File>.unmodifiable(_images),
@@ -788,7 +788,7 @@ class _AddPostPageState extends State<AddPostPage> {
             ],
             if (!_isPublication) ...[
               const SizedBox(height: 20),
-              _NewsThreadsOptions(
+              NewsThreadsOptions(
                 anonymous: _newsAnonymous,
                 onAnonymousChanged: (v) => setState(() => _newsAnonymous = v),
                 attachLocation: _newsAttachLocation,
@@ -819,8 +819,9 @@ class _AddPostPageState extends State<AddPostPage> {
 }
 
 /// Панель опций новости в духе Threads: анонимно, место, опрос.
-class _NewsThreadsOptions extends StatelessWidget {
-  const _NewsThreadsOptions({
+class NewsThreadsOptions extends StatelessWidget {
+  const NewsThreadsOptions({
+    super.key,
     required this.anonymous,
     required this.onAnonymousChanged,
     required this.attachLocation,
@@ -961,8 +962,9 @@ class _NewsThreadsOptions extends StatelessWidget {
 }
 
 /// Карточка выбора медиа — светлый стиль для новостей и публикаций.
-class _MediaPickerCard extends StatefulWidget {
-  const _MediaPickerCard({
+class PostMediaPickerCard extends StatefulWidget {
+  const PostMediaPickerCard({
+    super.key,
     required this.cardHeight,
     required this.loading,
     required this.images,
@@ -987,10 +989,10 @@ class _MediaPickerCard extends StatefulWidget {
   final String emptyPrimaryText;
 
   @override
-  State<_MediaPickerCard> createState() => _MediaPickerCardState();
+  State<PostMediaPickerCard> createState() => _PostMediaPickerCardState();
 }
 
-class _MediaPickerCardState extends State<_MediaPickerCard> {
+class _PostMediaPickerCardState extends State<PostMediaPickerCard> {
   PageController? _pageController;
 
   void _recreateController() {
@@ -1013,7 +1015,7 @@ class _MediaPickerCardState extends State<_MediaPickerCard> {
   }
 
   @override
-  void didUpdateWidget(covariant _MediaPickerCard oldWidget) {
+  void didUpdateWidget(covariant PostMediaPickerCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.images.isEmpty) {
       _pageController?.dispose();

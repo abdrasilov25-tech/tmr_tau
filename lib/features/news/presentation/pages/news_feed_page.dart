@@ -20,6 +20,7 @@ import '../../../post/domain/entities/post_entity.dart';
 import '../../../post/domain/repositories/post_repository.dart';
 import '../../../post/presentation/widgets/post_author_follow_pill.dart';
 import '../../../post/presentation/widgets/post_photo_gallery.dart';
+import '../../../post/presentation/widgets/add_news_sheet.dart';
 import '../../../post/presentation/widgets/post_share_sheet.dart';
 import '../bloc/news_bloc.dart';
 import '../widgets/news_city_picker.dart';
@@ -107,11 +108,17 @@ class _NewsFeedPageState extends State<NewsFeedPage> {
       );
       return;
     }
-    await context.push<PostEntity?>('/add-news');
+    final result = await showAddNewsSheet(
+      context,
+      userId: userId,
+      cityFilter: _selectedCity,
+    );
     if (!context.mounted) return;
-    context.read<NewsBloc>().add(
-          NewsRefresh(currentUserId: userId, cityFilter: _selectedCity),
-        );
+    if (result != null) {
+      context.read<NewsBloc>().add(
+            NewsRefresh(currentUserId: userId, cityFilter: _selectedCity),
+          );
+    }
   }
 
   @override
