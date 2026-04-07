@@ -218,6 +218,23 @@ class _MainHomePageState extends State<MainHomePage> {
   /// Сначала лента, потом сторис — иначе [_storeWarmCache] из параллельного [_loadStories]
   /// может сохранить кэш со списками ещё от прошлого пользователя.
   Future<void> _runInitialHomeLoad({required bool showLoading}) async {
+    // При первом экране Reels не блокируем UI тяжёлой загрузкой других лент.
+    if (_feedTab == _FeedTab.reels) {
+      await _loadStories();
+      if (!mounted) return;
+      if (_initialLoading) {
+        setState(() => _initialLoading = false);
+      }
+      Future<void>.delayed(const Duration(milliseconds: 900), () {
+        if (!mounted) return;
+        if (_postsRecommendations.isNotEmpty || _postsSubscriptions.isNotEmpty) {
+          return;
+        }
+        unawaited(_silentRefreshFeeds());
+      });
+      return;
+    }
+
     if (showLoading) {
       await _loadInitial(showLoading: true);
       if (!mounted) return;
@@ -1164,18 +1181,6 @@ class _MainHomePageState extends State<MainHomePage> {
   /// Вкладка «Live» — активные эфиры, архив баттлов и завершённые эфиры ведущего.
   Widget _buildLiveTab() => const _MainHomeLiveTab();
 
-  Widget _buildInitialLoadingFeedArea(double itemHeight) {
-    switch (_feedTab) {
-      case _FeedTab.reels:
-        return const _MainHomeReelsLoadingPlaceholder();
-      case _FeedTab.recommendations:
-      case _FeedTab.subscriptions:
-        return _VerticalFeedTabSkeleton(height: itemHeight);
-      case _FeedTab.live:
-        return const _LiveTabLoadingShell();
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final h = MediaQuery.of(context).size.height;
@@ -1280,9 +1285,6 @@ class _MainHomePageState extends State<MainHomePage> {
                               ? constraints.maxHeight
                               : h;
                       _feedItemHeight = itemHeight;
-                      if (_initialLoading) {
-                        return _buildInitialLoadingFeedArea(itemHeight);
-                      }
                       return PageView(
                         controller: _tabPageController,
                         scrollDirection: Axis.horizontal,
@@ -1295,19 +1297,25 @@ class _MainHomePageState extends State<MainHomePage> {
                         },
                         children: [
                           const ReelsFeedPage(),
-                          _buildVerticalFeed(
-                            tab: _FeedTab.recommendations,
-                            posts: _postsRecommendations,
-                            controller: _pageRecommendationsController,
-                            itemHeight: itemHeight,
-                          ),
-                          _buildVerticalFeed(
-                            tab: _FeedTab.subscriptions,
-                            posts: _postsSubscriptions,
-                            controller: _pageSubscriptionsController,
-                            itemHeight: itemHeight,
-                          ),
-                          _buildLiveTab(),
+                          _initialLoading
+                              ? _VerticalFeedTabSkeleton(height: itemHeight)
+                              : _buildVerticalFeed(
+                                  tab: _FeedTab.recommendations,
+                                  posts: _postsRecommendations,
+                                  controller: _pageRecommendationsController,
+                                  itemHeight: itemHeight,
+                                ),
+                          _initialLoading
+                              ? _VerticalFeedTabSkeleton(height: itemHeight)
+                              : _buildVerticalFeed(
+                                  tab: _FeedTab.subscriptions,
+                                  posts: _postsSubscriptions,
+                                  controller: _pageSubscriptionsController,
+                                  itemHeight: itemHeight,
+                                ),
+                          _initialLoading
+                              ? const _LiveTabLoadingShell()
+                              : _buildLiveTab(),
                         ],
                       );
                     },
@@ -2083,49 +2091,6 @@ class _StoriesStripSkeleton extends StatelessWidget {
               shape: BoxShape.circle,
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MainHomeReelsLoadingPlaceholder extends StatelessWidget {
-  const _MainHomeReelsLoadingPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: Colors.black,
-      child: Shimmer.fromColors(
-        baseColor: Colors.grey.shade900,
-        highlightColor: Colors.grey.shade700,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(
-                    4,
-                    (_) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: const BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

@@ -101,7 +101,9 @@ class _DoubleTapLikeBurstState extends State<DoubleTapLikeBurst>
       children: [
         GestureDetector(
           onDoubleTap: _handleDoubleTap,
-          behavior: HitTestBehavior.translucent,
+          // Важно: не перехватываем single-tap у дочерних элементов
+          // (например, mute-кнопка в Reels-плеере).
+          behavior: HitTestBehavior.deferToChild,
           child: widget.child,
         ),
         Positioned.fill(

@@ -3,10 +3,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:tmr_tau/core/following/following_change_bus.dart';
 import 'package:tmr_tau/core/formatting/compact_count_format.dart';
+import 'package:tmr_tau/core/widgets/double_tap_like_burst.dart';
 import 'package:tmr_tau/core/widgets/cached_avatar.dart';
 
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -44,6 +46,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
 
   String? _currentUserId;
   Timer? _viewDwellTimer;
+  bool _prefetchingFirstVideo = false;
 
   @override
   bool get wantKeepAlive => true;
@@ -73,15 +76,13 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
       }
     }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (canUseCache) {
-        _scheduleViewDwellFor(0);
-        unawaited(_silentRefreshReelsFromNetwork());
-      } else {
-        unawaited(_loadInitial());
-      }
-    });
+    if (canUseCache) {
+      _scheduleViewDwellFor(0);
+      unawaited(_prefetchFirstVideo());
+      unawaited(_silentRefreshReelsFromNetwork());
+    } else {
+      unawaited(_loadInitial());
+    }
   }
 
   @override
@@ -109,6 +110,21 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
       apiOffset: _apiOffset,
       hasMore: _hasMore,
     );
+  }
+
+  Future<void> _prefetchFirstVideo() async {
+    if (_prefetchingFirstVideo) return;
+    if (_posts.isEmpty) return;
+    final firstUrl = _posts.first.videoUrl?.trim() ?? '';
+    if (firstUrl.isEmpty) return;
+    _prefetchingFirstVideo = true;
+    try {
+      await DefaultCacheManager().getSingleFile(firstUrl);
+    } catch (_) {
+      // Best effort warm-up; ignore network/cache failures.
+    } finally {
+      _prefetchingFirstVideo = false;
+    }
   }
 
   Future<void> _silentRefreshReelsFromNetwork() async {
@@ -139,6 +155,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
         _pageController.jumpToPage(idx);
       }
       _storeReelsWarmCache();
+      unawaited(_prefetchFirstVideo());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (_posts.isEmpty) return;
@@ -176,6 +193,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
         _currentPage = 0;
       });
       _storeReelsWarmCache();
+      unawaited(_prefetchFirstVideo());
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scheduleViewDwellFor(0);
       });
@@ -257,6 +275,12 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
     } catch (e) {
       debugPrint('$e');
     }
+  }
+
+  Future<void> _likeFromDoubleTap(int index) async {
+    if (index < 0 || index >= _posts.length) return;
+    if (_posts[index].isLikedByMe) return;
+    await _toggleLike(index);
   }
 
   Future<void> _toggleRepost(int index) async {
@@ -427,6 +451,7 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
             isActive: _currentPage == index,
             currentUserId: _currentUserId,
             onLike: () => _toggleLike(index),
+            onDoubleTapLike: () => _likeFromDoubleTap(index),
             onRepost: () => _toggleRepost(index),
             onCommentsTap: () => _openCommentsSheet(context, index),
             onMoreTap: () => _showMoreMenu(index),
@@ -506,6 +531,7 @@ class _ReelItem extends StatelessWidget {
     required this.isActive,
     required this.currentUserId,
     required this.onLike,
+    required this.onDoubleTapLike,
     required this.onRepost,
     required this.onCommentsTap,
     required this.onMoreTap,
@@ -516,6 +542,7 @@ class _ReelItem extends StatelessWidget {
   final bool isActive;
   final String? currentUserId;
   final VoidCallback onLike;
+  final VoidCallback onDoubleTapLike;
   final VoidCallback onRepost;
   final VoidCallback onCommentsTap;
   final VoidCallback onMoreTap;
@@ -527,13 +554,19 @@ class _ReelItem extends StatelessWidget {
       fit: StackFit.expand,
       children: [
         Positioned.fill(
-          child: FeedVideoPlayer(
-            videoUrl: post.videoUrl!,
-            musicPreviewUrl: post.musicPreviewUrl,
-            isActive: isActive,
-            looping: true,
-            showControls: true,
-            coverFullscreen: true,
+          child: DoubleTapLikeBurst(
+            onDoubleTapLike: onDoubleTapLike,
+            shouldTriggerLike: () => !post.isLikedByMe,
+            showPersistentLikeIndicator: true,
+            isLiked: post.isLikedByMe,
+            child: FeedVideoPlayer(
+              videoUrl: post.videoUrl!,
+              musicPreviewUrl: post.musicPreviewUrl,
+              isActive: isActive,
+              looping: true,
+              showControls: true,
+              coverFullscreen: true,
+            ),
           ),
         ),
         const Positioned(

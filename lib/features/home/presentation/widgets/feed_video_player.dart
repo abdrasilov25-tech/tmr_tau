@@ -28,6 +28,7 @@ class FeedVideoPlayer extends StatefulWidget {
     this.showControls = true,
     this.looping = true,
     this.onTap,
+    this.onDoubleTap,
     /// Заполняет родителя с [BoxFit.cover] (рилсы / полноэкранный фид).
     /// В ленте карточек оставьте false.
     this.coverFullscreen = false,
@@ -54,6 +55,7 @@ class FeedVideoPlayer extends StatefulWidget {
 
   /// Дополнительный обработчик тапа.
   final VoidCallback? onTap;
+  final VoidCallback? onDoubleTap;
 
   final bool coverFullscreen;
 
@@ -245,25 +247,35 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
 
     final ratio = widget.aspectRatio ?? c.value.aspectRatio;
 
-    return GestureDetector(
-      onTap: () {
-        _togglePlay();
-        widget.onTap?.call();
-      },
-      child: widget.coverFullscreen
-          ? _CoverFullscreenVideo(
-              controller: c,
-              showControls: widget.showControls,
-              showPlayIcon: _showPlayIcon,
-              isPlaying: c.value.isPlaying,
-              onMuteTap: _toggleMute,
-            )
-          : AspectRatio(
-              aspectRatio: ratio,
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  VideoPlayer(c),
+    return widget.coverFullscreen
+        ? _CoverFullscreenVideo(
+            controller: c,
+            showControls: widget.showControls,
+            showPlayIcon: _showPlayIcon,
+            isPlaying: c.value.isPlaying,
+            onMuteTap: _toggleMute,
+            onVideoTap: () {
+              _togglePlay();
+              widget.onTap?.call();
+            },
+            onVideoDoubleTap: widget.onDoubleTap,
+          )
+        : AspectRatio(
+            aspectRatio: ratio,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      _togglePlay();
+                      widget.onTap?.call();
+                    },
+                    onDoubleTap: widget.onDoubleTap,
+                    child: VideoPlayer(c),
+                  ),
+                ),
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -319,10 +331,9 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                       ),
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
-    );
+          );
   }
 }
 
@@ -333,6 +344,8 @@ class _CoverFullscreenVideo extends StatelessWidget {
     required this.showPlayIcon,
     required this.isPlaying,
     required this.onMuteTap,
+    required this.onVideoTap,
+    required this.onVideoDoubleTap,
   });
 
   final VideoPlayerController controller;
@@ -340,6 +353,8 @@ class _CoverFullscreenVideo extends StatelessWidget {
   final bool showPlayIcon;
   final bool isPlaying;
   final VoidCallback onMuteTap;
+  final VoidCallback onVideoTap;
+  final VoidCallback? onVideoDoubleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -352,13 +367,18 @@ class _CoverFullscreenVideo extends StatelessWidget {
         fit: StackFit.expand,
         children: [
           Positioned.fill(
-            child: ClipRect(
-              child: FittedBox(
-                fit: BoxFit.cover,
-                child: SizedBox(
-                  width: w > 0 ? w : 1,
-                  height: h > 0 ? h : 1,
-                  child: VideoPlayer(controller),
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onVideoTap,
+              onDoubleTap: onVideoDoubleTap,
+              child: ClipRect(
+                child: FittedBox(
+                  fit: BoxFit.cover,
+                  child: SizedBox(
+                    width: w > 0 ? w : 1,
+                    height: h > 0 ? h : 1,
+                    child: VideoPlayer(controller),
+                  ),
                 ),
               ),
             ),
