@@ -74,12 +74,14 @@ import 'features/tap_game/domain/repositories/tap_game_local_hall_repository.dar
 import 'features/tap_game/domain/repositories/tap_game_repository.dart';
 import 'core/feedback/feedback_preferences_storage.dart';
 import 'core/constants/legal_urls.dart';
+import 'core/config/dev_runtime_flags.dart';
 import 'core/deep_link/deep_link_coordinator.dart';
 import 'core/push/fcm_supabase_coordinator.dart';
 
 /// Чаты: до ~500 сообщений + группы; уведомления: отдельный запрос. Не конкурируют с первой
 /// отрисовкой ленты на «Публикациях».
 void _scheduleDeferredTabBadgeRefresh(BuildContext context) {
+  if (DevRuntimeFlags.lightMode) return;
   Future<void>.delayed(const Duration(milliseconds: 500), () {
     if (!context.mounted) return;
     unawaited(context.read<ChatUnreadBadgeController>().refresh());
@@ -223,7 +225,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_deepLinkCoordinator?.init());
-      _fcmSupabaseCoordinator?.start();
+      if (!DevRuntimeFlags.lightMode) {
+        _fcmSupabaseCoordinator?.start();
+      }
     });
   }
 
@@ -412,7 +416,9 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
                 await context.read<AccountManager>().addOrUpdateAccount(account);
                 if (context.mounted) {
                   _scheduleDeferredTabBadgeRefresh(context);
-                  unawaited(paymentCubit.initStore());
+                  if (!DevRuntimeFlags.lightMode) {
+                    unawaited(paymentCubit.initStore());
+                  }
                 }
               }
             },

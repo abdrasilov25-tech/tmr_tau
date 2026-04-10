@@ -88,6 +88,8 @@ class _GroupChatPageState extends State<GroupChatPage> {
   bool _groupRoundVideoOpening = false;
   bool _showEmojiPanel = false;
 
+  String get _groupHiddenPeerKey => 'group:${widget.groupId}';
+
   @override
   void initState() {
     super.initState();
@@ -415,6 +417,115 @@ class _GroupChatPageState extends State<GroupChatPage> {
     );
     if (!mounted) return;
     await context.read<ChatUnreadBadgeController>().refresh();
+  }
+
+  Future<void> _confirmDeleteOrHideGroupMessage(
+    String messageId, {
+    required bool isMine,
+  }) async {
+    if (messageId.isEmpty) return;
+    final chatStorage = context.read<ChatListStorage>();
+
+    if (isMine) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Удалить у всех?'),
+          content: Text(
+            'Сообщение будет удалено у всех участников группы.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Удалить'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+      try {
+        await _client
+            .from(SupabaseConstants.chatGroupMessagesTable)
+            .delete()
+            .eq('id', messageId)
+            .eq('group_id', widget.groupId);
+        if (!mounted) return;
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Сообщение удалено')),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Не удалось удалить: $e')),
+        );
+      }
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Удалить у себя?'),
+        content: const Text(
+          'Сообщение будет скрыто только у вас в этой группе.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Удалить'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await chatStorage.addHiddenMessageIds(_groupHiddenPeerKey, [messageId]);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Сообщение удалено у вас')),
+    );
+  }
+
+  void _showGroupMessageActions(Map<String, dynamic> m, String messageId) {
+    final isMine = (m['sender_id'] as String?) == _currentUserId;
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                Icons.delete_outline_rounded,
+                color: isMine ? Colors.red : Colors.black87,
+              ),
+              title: Text(isMine ? 'Удалить у всех' : 'Удалить у себя'),
+              onTap: () {
+                Navigator.pop(ctx);
+                unawaited(
+                  _confirmDeleteOrHideGroupMessage(
+                    messageId,
+                    isMine: isMine,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _loadGroupMeta() async {
@@ -975,6 +1086,14 @@ class _GroupChatPageState extends State<GroupChatPage> {
                               clearCutoff,
                             ))
                         .toList(growable: false);
+                final hiddenIds = context
+                    .read<ChatListStorage>()
+                    .getHiddenMessageIds(_groupHiddenPeerKey);
+                if (hiddenIds.isNotEmpty) {
+                  messages.removeWhere(
+                    (m) => hiddenIds.contains((m['id'] ?? '').toString()),
+                  );
+                }
                 if (_officialCity && messages.isNotEmpty) {
                   unawaited(_markSelectedThreadRead(messages));
                 }
@@ -1018,32 +1137,38 @@ class _GroupChatPageState extends State<GroupChatPage> {
                     }
                     if (msgType == 'audio' && audioUrl != null) {
                       final isMe = m['sender_id'] == _currentUserId;
-                      return _GroupAudioBubble(
-                        key: ValueKey('group_audio_$messageId'),
-                        isMe: isMe,
-                        audioUrl: audioUrl,
-                        durationSeconds: durationSeconds,
-                        isPlaying: _playingAudioMessageId == messageId,
-                        onPlayPause: () async {
-                          try {
-                            if (_playingAudioMessageId == messageId) {
+                      return GestureDetector(
+                        onLongPress: () => _showGroupMessageActions(m, messageId),
+                        child: _GroupAudioBubble(
+                          key: ValueKey('group_audio_$messageId'),
+                          isMe: isMe,
+                          audioUrl: audioUrl,
+                          durationSeconds: durationSeconds,
+                          isPlaying: _playingAudioMessageId == messageId,
+                          onPlayPause: () async {
+                            try {
+                              if (_playingAudioMessageId == messageId) {
+                                await _audioPlayer.stop();
+                                if (!mounted) return;
+                                setState(() => _playingAudioMessageId = null);
+                                return;
+                              }
                               await _audioPlayer.stop();
+                              await _audioPlayer.play(UrlSource(audioUrl));
                               if (!mounted) return;
-                              setState(() => _playingAudioMessageId = null);
-                              return;
-                            }
-                            await _audioPlayer.stop();
-                            await _audioPlayer.play(UrlSource(audioUrl));
-                            if (!mounted) return;
-                            setState(() => _playingAudioMessageId = messageId);
-                          } catch (e) { debugPrint('$e'); }
-                        },
+                              setState(() => _playingAudioMessageId = messageId);
+                            } catch (e) { debugPrint('$e'); }
+                          },
+                        ),
                       );
                     }
                     if (msgType == 'video_circle' && videoUrl != null) {
-                      return _GroupVideoCircleBubble(
-                        key: ValueKey('group_video_$messageId'),
-                        videoUrl: videoUrl,
+                      return GestureDetector(
+                        onLongPress: () => _showGroupMessageActions(m, messageId),
+                        child: _GroupVideoCircleBubble(
+                          key: ValueKey('group_video_$messageId'),
+                          videoUrl: videoUrl,
+                        ),
                       );
                     }
                     if (kind != 'text') {
@@ -1074,26 +1199,29 @@ class _GroupChatPageState extends State<GroupChatPage> {
                       );
                     }
                     final isMe = m['sender_id'] == _currentUserId;
-                    return Align(
-                      alignment: isMe
-                          ? Alignment.centerRight
-                          : Alignment.centerLeft,
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isMe
-                              ? Theme.of(context).colorScheme.primary
-                              : Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Text(
-                          text,
-                          style: TextStyle(
-                            color: isMe ? Colors.white : Colors.black87,
+                    return GestureDetector(
+                      onLongPress: () => _showGroupMessageActions(m, messageId),
+                      child: Align(
+                        alignment: isMe
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isMe
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.grey.shade200,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            text,
+                            style: TextStyle(
+                              color: isMe ? Colors.white : Colors.black87,
+                            ),
                           ),
                         ),
                       ),

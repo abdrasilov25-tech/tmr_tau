@@ -58,8 +58,8 @@ Future<void> main() async {
   imageCache.maximumSize = 100;
   imageCache.maximumSizeBytes = 72 * 1024 * 1024;
 
-  // .env не бандлим в assets: локально — файл в корне + optional load;
-  // CI/релиз — --dart-define=... или --dart-define-from-file=.env
+  // .env должен быть в pubspec assets, иначе flutter_dotenv не прочитает его на iOS/Android.
+  // Поверх можно передавать значения через --dart-define / --dart-define-from-file.
   const defUrl = String.fromEnvironment('SUPABASE_URL', defaultValue: '');
   const defAnon = String.fromEnvironment('SUPABASE_ANON_KEY', defaultValue: '');
   await dotenv.load(

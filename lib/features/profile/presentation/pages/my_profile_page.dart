@@ -1346,9 +1346,10 @@ class _MyProfilePageState extends State<MyProfilePage> {
   void _showProfileMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: const Color(0xFFF8F9FC),
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       builder: (context) => SafeArea(
         child: ConstrainedBox(
@@ -1359,174 +1360,346 @@ class _MyProfilePageState extends State<MyProfilePage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-            // ── Кошелёк Qarmet — первый и особенный ──────────────────────
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-              child: GestureDetector(
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push('/qarmet-wallet');
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 16,
-                  ),
+                const SizedBox(height: 10),
+                Container(
+                  width: 44,
+                  height: 5,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xFF0F2027),
-                        Color(0xFF203A43),
-                        Color(0xFF2C5364),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF203A43).withValues(alpha: 0.45),
-                        blurRadius: 18,
-                        offset: const Offset(0, 7),
-                      ),
-                    ],
+                    color: const Color(0xFFD6D8E0),
+                    borderRadius: BorderRadius.circular(100),
                   ),
+                ),
+                const SizedBox(height: 14),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 10),
                   child: Row(
                     children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
+                      Text(
+                        'Меню профиля',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -0.4,
+                          color: Color(0xFF141824),
                         ),
-                        child: const Icon(
-                          Icons.account_balance_wallet_rounded,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Кошелёк Qarmet',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: -0.3,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              'Баланс · пополнение · продвижение',
-                              style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.65),
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        color: Colors.white.withValues(alpha: 0.7),
-                        size: 22,
                       ),
                     ],
                   ),
                 ),
-              ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 10),
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(context);
+                      context.push('/qarmet-wallet');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 16,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Color(0xFF1A2236),
+                            Color(0xFF223B63),
+                            Color(0xFF2C5364),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF223B63).withValues(alpha: 0.35),
+                            blurRadius: 18,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.18),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.account_balance_wallet_rounded,
+                              color: Colors.white,
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Кошелёк Qarmet',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: -0.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Баланс · пополнение · продвижение',
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.72),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right_rounded,
+                            color: Colors.white.withValues(alpha: 0.8),
+                            size: 22,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                _ProfileMenuSection(
+                  children: [
+                    _ProfileMenuTile(
+                      icon: Icons.touch_app_rounded,
+                      iconBg: const Color(0xFFE9EEFF),
+                      iconColor: const Color(0xFF3B5BDB),
+                      title: 'Тап судьбы',
+                      subtitle: 'Игра и ежедневные награды',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/tap-game');
+                      },
+                    ),
+                    _ProfileMenuTile(
+                      icon: Icons.palette_rounded,
+                      iconBg: const Color(0xFFF2EAFF),
+                      iconColor: const Color(0xFF7C3AED),
+                      title: 'Темки',
+                      subtitle: 'Оформление профиля и ленты',
+                      onTap: () {
+                        final themeNotifier = context.read<ThemeIndexNotifier>();
+                        final navigator = Navigator.of(context);
+                        navigator.pop();
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          final overlayContext = navigator.context;
+                          if (overlayContext.mounted) {
+                            _showThemePickerWithNotifier(overlayContext, themeNotifier);
+                          }
+                        });
+                      },
+                    ),
+                    _ProfileMenuTile(
+                      icon: Icons.favorite_rounded,
+                      iconBg: const Color(0xFFFFEEF2),
+                      iconColor: const Color(0xFFE11D48),
+                      title: 'Избранное',
+                      subtitle: 'Понравившиеся товары и посты',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/favorites');
+                      },
+                    ),
+                    _ProfileMenuTile(
+                      icon: Icons.bookmark_rounded,
+                      iconBg: const Color(0xFFEAF7F3),
+                      iconColor: const Color(0xFF0F766E),
+                      title: 'Сохранённые публикации',
+                      subtitle: 'Ваши закладки',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/saved-publications');
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _ProfileMenuSection(
+                  children: [
+                    _ProfileMenuTile(
+                      icon: Icons.edit_rounded,
+                      iconBg: const Color(0xFFFFF4E6),
+                      iconColor: const Color(0xFFD97706),
+                      title: 'Редактировать профиль',
+                      subtitle: 'Имя, фото, био и ссылки',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/edit-profile');
+                      },
+                    ),
+                    _ProfileMenuTile(
+                      icon: Icons.settings_rounded,
+                      iconBg: const Color(0xFFEFF1F8),
+                      iconColor: const Color(0xFF344054),
+                      title: 'Настройки',
+                      subtitle: 'Безопасность, уведомления и приватность',
+                      onTap: () {
+                        Navigator.pop(context);
+                        context.push('/profile/settings');
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: _ProfileMenuTile(
+                    icon: Icons.logout_rounded,
+                    iconBg: const Color(0xFFFFECEC),
+                    iconColor: const Color(0xFFDC2626),
+                    title: 'Выйти',
+                    subtitle: 'Сменить аккаунт',
+                    danger: true,
+                    onTap: () {
+                      final navigator = Navigator.of(context);
+                      final rootContext = navigator.context;
+                      final authState = rootContext.read<AuthBloc>().state;
+                      if (authState is AuthAuthenticated) {
+                        final userId = authState.user.id;
+                        try {
+                          rootContext.read<AccountManager>().removeAccount(userId);
+                        } catch (e) {
+                          debugPrint('$e');
+                        }
+                        try {
+                          rootContext.read<MultiAccountStorage>().removeAccount(
+                            userId,
+                          );
+                        } catch (e) {
+                          debugPrint('$e');
+                        }
+                      }
+                      navigator.pop();
+                      rootContext.read<AuthBloc>().add(const AuthSignOutRequested());
+                    },
+                  ),
+                ),
+                const SizedBox(height: 14),
+              ],
             ),
-            const Divider(height: 1, indent: 16, endIndent: 16),
-            // ── Остальные пункты ─────────────────────────────────────────
-            ListTile(
-              leading: const Icon(Icons.touch_app_rounded),
-              title: const Text('Тап судьбы 🔥'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/tap-game');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.palette_outlined),
-              title: const Text('Темки'),
-              onTap: () {
-                final themeNotifier = context.read<ThemeIndexNotifier>();
-                final navigator = Navigator.of(context);
-                navigator.pop();
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  final overlayContext = navigator.context;
-                  if (overlayContext.mounted) {
-                    _showThemePickerWithNotifier(overlayContext, themeNotifier);
-                  }
-                });
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.favorite_border),
-              title: const Text('Избранное'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/favorites');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.bookmark_border_rounded),
-              title: const Text('Сохранённые публикации'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/saved-publications');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.edit_outlined),
-              title: const Text('Редактировать профиль'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/edit-profile');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('Настройки'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/profile/settings');
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text(
-                'Выйти',
-                style: TextStyle(color: Colors.red),
-              ),
-              onTap: () {
-                final navigator = Navigator.of(context);
-                final rootContext = navigator.context;
-                final authState = rootContext.read<AuthBloc>().state;
-                if (authState is AuthAuthenticated) {
-                  final userId = authState.user.id;
-                  try {
-                    rootContext.read<AccountManager>().removeAccount(userId);
-                  } catch (e) { debugPrint('$e'); }
-                  try {
-                    rootContext.read<MultiAccountStorage>().removeAccount(
-                      userId,
-                    );
-                  } catch (e) { debugPrint('$e'); }
-                }
-                navigator.pop();
-                rootContext.read<AuthBloc>().add(const AuthSignOutRequested());
-              },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileMenuSection extends StatelessWidget {
+  const _ProfileMenuSection({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
             ),
           ],
         ),
+        child: Column(
+          children: [
+            for (int i = 0; i < children.length; i++) ...[
+              if (i > 0) const Divider(height: 1, indent: 66, endIndent: 16),
+              children[i],
+            ],
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _ProfileMenuTile extends StatelessWidget {
+  const _ProfileMenuTile({
+    required this.icon,
+    required this.iconBg,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.danger = false,
+  });
+
+  final IconData icon;
+  final Color iconBg;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool danger;
+
+  @override
+  Widget build(BuildContext context) {
+    final titleColor = danger ? const Color(0xFFB91C1C) : const Color(0xFF141824);
+    final subtitleColor = danger ? const Color(0xFFD97777) : const Color(0xFF6B7280);
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: iconBg,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: iconColor, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: titleColor,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: subtitleColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: danger ? const Color(0xFFEF4444) : const Color(0xFF9CA3AF),
+              size: 20,
+            ),
+          ],
         ),
       ),
     );

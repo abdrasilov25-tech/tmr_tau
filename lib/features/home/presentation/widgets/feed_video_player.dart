@@ -75,9 +75,14 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
   @override
   void initState() {
     super.initState();
-    unawaited(_audioState.ensureLoaded());
     _audioState.isMuted.addListener(_syncVolumeWithGlobalState);
-    unawaited(_initController());
+    unawaited(_bootstrapPlayer());
+  }
+
+  Future<void> _bootstrapPlayer() async {
+    await _audioState.ensureLoaded();
+    if (!mounted) return;
+    await _initController();
   }
 
   Future<void> _initController() async {
@@ -120,7 +125,6 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
     await player.setReleaseMode(ReleaseMode.loop);
     await player.setVolume(_audioState.isMuted.value ? 0 : 1);
     await player.setSource(UrlSource(url));
-    await video.setVolume(0);
     _musicPlayer = player;
     _musicActive = true;
   }
@@ -176,7 +180,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
     if (c == null || !_initialized) return;
     final muted = _audioState.isMuted.value;
     if (_musicActive) {
-      c.setVolume(0);
+      c.setVolume(muted ? 0 : 1);
       _musicPlayer?.setVolume(muted ? 0 : 1);
     } else {
       c.setVolume(muted ? 0 : 1);
@@ -208,6 +212,18 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
         if (mounted) setState(() => _showPlayIcon = false);
       });
     }
+  }
+
+  void _handlePrimaryTap() {
+    // В полноэкранном Reels первый тап при mute включает звук.
+    // Следующие тапы работают как play/pause.
+    if (widget.coverFullscreen && _audioState.isMuted.value) {
+      _toggleMute();
+      widget.onTap?.call();
+      return;
+    }
+    _togglePlay();
+    widget.onTap?.call();
   }
 
   @override
@@ -254,10 +270,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
             showPlayIcon: _showPlayIcon,
             isPlaying: c.value.isPlaying,
             onMuteTap: _toggleMute,
-            onVideoTap: () {
-              _togglePlay();
-              widget.onTap?.call();
-            },
+            onVideoTap: _handlePrimaryTap,
             onVideoDoubleTap: widget.onDoubleTap,
           )
         : AspectRatio(
@@ -268,10 +281,7 @@ class _FeedVideoPlayerState extends State<FeedVideoPlayer> {
                 Positioned.fill(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onTap: () {
-                      _togglePlay();
-                      widget.onTap?.call();
-                    },
+                    onTap: _handlePrimaryTap,
                     onDoubleTap: widget.onDoubleTap,
                     child: VideoPlayer(c),
                   ),
@@ -417,35 +427,33 @@ class _CoverFullscreenVideo extends StatelessWidget {
                 ),
               ),
             ),
-          // Внизу справа: под колонкой лайков/репостов, ближе к нижнему краю рилса.
+          // Кнопка звука сверху справа — чтобы не конфликтовала с правой колонкой
+          // действий в Reels (лайк/коммент/репост/меню).
           Positioned(
-            right: 8,
-            bottom: 10 + MediaQuery.paddingOf(context).bottom,
+            right: 12,
+            top: 10 + MediaQuery.paddingOf(context).top,
             child: ValueListenableBuilder<bool>(
               valueListenable: GlobalVideoAudioState.instance.isMuted,
               builder: (context, muted, _) {
-                return Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onMuteTap,
-                    customBorder: const CircleBorder(),
-                    child: Ink(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.45),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.35),
-                        ),
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onMuteTap,
+                  child: Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.5),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.38),
                       ),
-                      child: Icon(
-                        muted
-                            ? Icons.volume_off_rounded
-                            : Icons.volume_up_rounded,
-                        color: Colors.white,
-                        size: 24,
-                      ),
+                    ),
+                    child: Icon(
+                      muted
+                          ? Icons.volume_off_rounded
+                          : Icons.volume_up_rounded,
+                      color: Colors.white,
+                      size: 25,
                     ),
                   ),
                 );

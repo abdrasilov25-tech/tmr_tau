@@ -2,7 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:video_thumbnail/video_thumbnail.dart';
+import 'package:get_thumbnail_video/index.dart';
+import 'package:get_thumbnail_video/video_thumbnail.dart';
 
 /// Кадр-превью сетки для видео по URL (Reels / профиль).
 class PostVideoGridThumbnail extends StatefulWidget {
