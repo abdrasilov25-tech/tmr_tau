@@ -40,6 +40,7 @@ alter table public.users add column if not exists last_active_at timestamptz;
 alter table public.users add column if not exists seller_plan text not null default 'free';
 alter table public.users add column if not exists seller_verified_store boolean not null default false;
 alter table public.users add column if not exists seller_extended_stats boolean not null default false;
+alter table public.users add column if not exists resident_number text;
 
 do $$
 begin

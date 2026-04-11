@@ -10,6 +10,7 @@ abstract class AuthRemoteDataSource {
     String password,
     String name, {
     String? emailRedirectTo,
+    String? residentNumber,
   });
   Future<void> signOut();
   Future<AppUser?> fetchUserProfile(String uid);
@@ -30,13 +31,18 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     String password,
     String name, {
     String? emailRedirectTo,
+    String? residentNumber,
   }) async {
     Future<AuthResponse> call(String? redirect) {
+      final meta = <String, dynamic>{'name': name};
+      if (residentNumber != null && residentNumber.trim().isNotEmpty) {
+        meta['resident_number'] = residentNumber.trim();
+      }
       return _client.auth.signUp(
         password: password,
         email: email,
         emailRedirectTo: redirect,
-        data: {'name': name},
+        data: meta,
       );
     }
 
@@ -84,7 +90,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     final res = await _client
         .from(SupabaseConstants.usersTable)
         .select(
-          'id,name,username,avatar,bio,followers_count',
+          'id,name,username,avatar,bio,resident_number,followers_count,following_count',
         )
         .eq('id', uid)
         .maybeSingle();

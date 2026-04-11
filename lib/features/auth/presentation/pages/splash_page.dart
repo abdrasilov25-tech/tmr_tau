@@ -50,6 +50,12 @@ class _SplashPageState extends State<SplashPage>
       return;
     }
 
+    // Гость: сразу в ленту (как на логин без задержки брендинга).
+    if (state is AuthBrowsingAsGuest) {
+      _navigateFromSplash();
+      return;
+    }
+
     if (state is! AuthAuthenticated) return;
 
     final elapsed = DateTime.now().difference(_splashStartedAt);
@@ -68,7 +74,9 @@ class _SplashPageState extends State<SplashPage>
     _navigating = true;
 
     final state = context.read<AuthBloc>().state;
-    final route = state is AuthAuthenticated ? '/home/feed' : '/login';
+    final route = (state is AuthAuthenticated || state is AuthBrowsingAsGuest)
+        ? '/home/feed'
+        : '/login';
     _goAfterFadeOut(route);
   }
 
@@ -95,6 +103,7 @@ class _SplashPageState extends State<SplashPage>
     return BlocListener<AuthBloc, AuthState>(
       listenWhen: (prev, state) =>
           state is AuthAuthenticated ||
+          state is AuthBrowsingAsGuest ||
           state is AuthUnauthenticated ||
           state is AuthError,
       listener: (context, state) {

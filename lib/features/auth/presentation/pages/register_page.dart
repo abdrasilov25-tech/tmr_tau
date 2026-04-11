@@ -51,11 +51,13 @@ class _RegisterPageState extends State<RegisterPage>
   int _step = 0;
 
   final _nameController    = TextEditingController();
+  final _residentNumberController = TextEditingController();
   final _emailController   = TextEditingController();
   final _passwordController   = TextEditingController();
   final _confirmController    = TextEditingController();
 
   final _nameFocus    = FocusNode();
+  final _residentFocus = FocusNode();
   final _emailFocus   = FocusNode();
   final _passwordFocus   = FocusNode();
   final _confirmFocus    = FocusNode();
@@ -140,7 +142,13 @@ class _RegisterPageState extends State<RegisterPage>
     _themeGlow = Tween<double>(begin: 0.4, end: 0.8).animate(
       CurvedAnimation(parent: _themeGlowCtrl, curve: Curves.easeInOut));
 
-    for (final fn in [_nameFocus, _emailFocus, _passwordFocus, _confirmFocus]) {
+    for (final fn in [
+      _nameFocus,
+      _residentFocus,
+      _emailFocus,
+      _passwordFocus,
+      _confirmFocus,
+    ]) {
       fn.addListener(() => setState(() {}));
     }
 
@@ -150,10 +158,12 @@ class _RegisterPageState extends State<RegisterPage>
   @override
   void dispose() {
     _nameController.dispose();
+    _residentNumberController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
     _nameFocus.dispose();
+    _residentFocus.dispose();
     _emailFocus.dispose();
     _passwordFocus.dispose();
     _confirmFocus.dispose();
@@ -235,10 +245,12 @@ class _RegisterPageState extends State<RegisterPage>
     if (!_validateStep1()) return;
     final auth = context.read<AuthBloc>().state;
     if (auth is AuthLoading) return;
+    final rn = _residentNumberController.text.trim();
     context.read<AuthBloc>().add(AuthSignUpRequested(
       email: _emailController.text.trim(),
       password: _passwordController.text,
       name: _nameController.text.trim(),
+      residentNumber: rn.isEmpty ? null : rn,
     ));
   }
 
@@ -486,7 +498,24 @@ class _RegisterPageState extends State<RegisterPage>
           error: _nameError,
           textCapitalization: TextCapitalization.words,
           onChanged: (_) { if (_nameError != null) setState(() => _nameError = null); },
+          onSubmitted: (_) => _residentFocus.requestFocus(),
+        ),
+        const SizedBox(height: 16),
+        _NeonTextField(
+          controller: _residentNumberController,
+          focusNode: _residentFocus,
+          label: 'Номер жителя',
+          hint: 'Необязательно, например: 12345',
+          prefixIcon: Icons.badge_outlined,
+          accentColor: _C.cyan,
+          error: null,
+          textCapitalization: TextCapitalization.none,
           onSubmitted: (_) => _nextStep(),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Если у вас есть городской номер жителя — укажите его; он будет в профиле.',
+          style: GoogleFonts.inter(fontSize: 12, color: _C.w40),
         ),
         const SizedBox(height: 24),
         _ActionButton(

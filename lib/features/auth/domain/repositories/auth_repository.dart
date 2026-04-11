@@ -16,8 +16,9 @@ abstract class AuthRepository {
   Future<EmailSignUpResult> signUpWithEmail(
     String email,
     String password,
-    String name,
-  );
+    String name, {
+    String? residentNumber,
+  });
   Future<void> signInWithGoogle();
   Future<void> signInWithApple();
   Future<void> signInWithSmsOtp(String phone);

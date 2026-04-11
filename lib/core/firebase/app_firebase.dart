@@ -6,33 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../firebase_options.dart';
-
-/// Pigeon возвращает `channel-error`, если нативный обработчик канала ещё не готов
-/// (часто при параллельном старте плагинов). Короткий ретрай уменьшает сбой.
-Future<T> _withFirebaseChannelRetry<T>(
-  Future<T> Function() action, {
-  int maxAttempts = 4,
-}) async {
-  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await action();
-    } on PlatformException catch (e, st) {
-      final transient = e.code == 'channel-error' ||
-          (e.message?.contains('Unable to establish connection on channel') ??
-              false);
-      if (!transient || attempt == maxAttempts) {
-        Error.throwWithStackTrace(e, st);
-      }
-      await Future<void>.delayed(Duration(milliseconds: 40 * attempt));
-    }
-  }
-  throw StateError('_withFirebaseChannelRetry: unreachable');
-}
+import 'firebase_pigeon_retry.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   try {
-    await _withFirebaseChannelRetry(
+    await firebasePigeonRetry(
       () => Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       ),
@@ -56,14 +35,17 @@ Future<void> initAppFirebase() async {
     return;
   }
 
+  // Короткая пауза: нативные плагины иногда регистрируют Pigeon чуть позже первого кадра.
+  await Future<void>.delayed(const Duration(milliseconds: 32));
+
   try {
-    await _withFirebaseChannelRetry(
+    await firebasePigeonRetry(
       () => Firebase.initializeApp(
         options: DefaultFirebaseOptions.currentPlatform,
       ),
     );
 
-    await _withFirebaseChannelRetry(
+    await firebasePigeonRetry(
       () => FirebaseCrashlytics.instance
           .setCrashlyticsCollectionEnabled(!kDebugMode),
     );
@@ -85,11 +67,11 @@ Future<void> initAppFirebase() async {
       debugPrint('[FCM] onBackgroundMessage registration: $e\n$st');
     }
 
-    await _withFirebaseChannelRetry(
+    await firebasePigeonRetry(
       () => FirebaseMessaging.instance.setAutoInitEnabled(true),
     );
     try {
-      final settings = await _withFirebaseChannelRetry(
+      final settings = await firebasePigeonRetry(
         () => FirebaseMessaging.instance.requestPermission(
           alert: true,
           badge: true,
@@ -106,7 +88,7 @@ Future<void> initAppFirebase() async {
     }
 
     try {
-      await _withFirebaseChannelRetry(
+      await firebasePigeonRetry(
         () => FirebaseAnalytics.instance.logAppOpen(),
       );
     } catch (e, st) {

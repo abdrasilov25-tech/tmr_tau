@@ -8,7 +8,9 @@ class UserModel extends AppUser {
     super.username,
     super.avatarUrl,
     super.bio,
+    super.residentNumber,
     super.followersCount,
+    super.followingCount,
   });
 
   factory UserModel.fromJson(Map<String, dynamic> json) {
@@ -19,7 +21,9 @@ class UserModel extends AppUser {
       username: json['username'] as String?,
       avatarUrl: json['avatar'] as String?,
       bio: json['bio'] as String?,
+      residentNumber: json['resident_number'] as String?,
       followersCount: json['followers_count'] as int? ?? 0,
+      followingCount: json['following_count'] as int? ?? 0,
     );
   }
 
@@ -30,6 +34,8 @@ class UserModel extends AppUser {
         'username': username,
         'avatar': avatarUrl,
         'bio': bio,
+        'resident_number': residentNumber,
         'followers_count': followersCount,
+        'following_count': followingCount,
       };
 }

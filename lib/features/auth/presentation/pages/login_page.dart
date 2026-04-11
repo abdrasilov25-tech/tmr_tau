@@ -609,6 +609,27 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                   onPressed: loading || oauthLoading ? null : _submit,
                   loading: loading,
                 ),
+                if (!widget.addAccountMode) ...[
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: loading || oauthLoading
+                        ? null
+                        : () {
+                            context
+                                .read<AuthBloc>()
+                                .add(const AuthContinueAsGuestRequested());
+                            context.go('/home/feed');
+                          },
+                    child: Text(
+                      'Продолжить как гость',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: subtitleColor,
+                      ),
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 22),
                 // ── Register link (Wrap: no horizontal overflow on narrow screens) ──
                 Wrap(

@@ -3,6 +3,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tmr_tau/core/auth/guest_session_storage.dart';
 import 'package:tmr_tau/core/storage/multi_account_storage.dart';
 import 'package:tmr_tau/features/auth/domain/entities/app_user.dart';
 import 'package:tmr_tau/features/auth/domain/repositories/auth_repository.dart';
@@ -44,6 +46,7 @@ void main() {
   late MockMultiAccountStorage multiStorage;
   late MockLiveStreamingRepository liveStreamingRepo;
   late NotificationActivityPeekBus peekBus;
+  late GuestSessionStorage guestSessionStorage;
 
   final samplePost = PostEntity(
     id: 'post-feed-1',
@@ -60,7 +63,10 @@ void main() {
     );
   });
 
-  setUp(() {
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    guestSessionStorage = GuestSessionStorage(prefs);
     postRepo = MockPostRepository();
     profileRepo = MockProfileRepository();
     storiesRepo = MockStoriesRepository();
@@ -198,7 +204,7 @@ void main() {
         ),
       );
 
-      final authBloc = AuthBloc(authRepo, multiStorage);
+      final authBloc = AuthBloc(authRepo, multiStorage, guestSessionStorage);
       await pumpFeed(tester, authBloc: authBloc);
 
       await tester.pump();
@@ -226,7 +232,7 @@ void main() {
         (_) async => const PublicationFeedPageResult(posts: [], nextOffset: 0),
       );
 
-      final authBloc = AuthBloc(authRepo, multiStorage);
+      final authBloc = AuthBloc(authRepo, multiStorage, guestSessionStorage);
       await pumpFeed(tester, authBloc: authBloc);
 
       await tester.pump();
@@ -258,7 +264,7 @@ void main() {
         ),
       );
 
-      final authBloc = AuthBloc(authRepo, multiStorage);
+      final authBloc = AuthBloc(authRepo, multiStorage, guestSessionStorage);
       await pumpFeed(tester, authBloc: authBloc);
 
       await tester.pump();
@@ -307,7 +313,7 @@ void main() {
       when(() => notificationsRepo.getUnreadCount('user-widget'))
           .thenAnswer((_) async => 0);
 
-      final authBloc = AuthBloc(authRepo, multiStorage);
+      final authBloc = AuthBloc(authRepo, multiStorage, guestSessionStorage);
       await pumpFeed(tester, authBloc: authBloc);
       authBloc.add(const AuthCheckRequested());
       await tester.pump();
@@ -363,7 +369,7 @@ void main() {
         (_) async => post.copyWith(isLikedByMe: true, likesCount: 4),
       );
 
-      final authBloc = AuthBloc(authRepo, multiStorage);
+      final authBloc = AuthBloc(authRepo, multiStorage, guestSessionStorage);
       await pumpFeed(tester, authBloc: authBloc);
       authBloc.add(const AuthCheckRequested());
       await tester.pump();

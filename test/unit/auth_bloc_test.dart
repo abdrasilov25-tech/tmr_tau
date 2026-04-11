@@ -1,6 +1,8 @@
 import 'package:bloc_test/bloc_test.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:tmr_tau/core/auth/guest_session_storage.dart';
 import 'package:tmr_tau/core/storage/multi_account_storage.dart';
 import 'package:tmr_tau/features/auth/domain/entities/app_user.dart';
 import 'package:tmr_tau/features/auth/domain/repositories/auth_repository.dart';
@@ -13,6 +15,7 @@ class MockMultiAccountStorage extends Mock implements MultiAccountStorage {}
 void main() {
   late MockAuthRepository mockAuthRepository;
   late MockMultiAccountStorage mockMultiAccountStorage;
+  late GuestSessionStorage guestSessionStorage;
 
   const stubUser = AppUser(
     id: 'user-1',
@@ -33,7 +36,10 @@ void main() {
     );
   });
 
-  setUp(() {
+  setUp(() async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    guestSessionStorage = GuestSessionStorage(prefs);
     mockAuthRepository = MockAuthRepository();
     mockMultiAccountStorage = MockMultiAccountStorage();
     when(() => mockMultiAccountStorage.setLastActiveAccountId(any()))
@@ -49,7 +55,8 @@ void main() {
   group('AuthBloc', () {
     test('initial state is AuthInitial', () {
       expect(
-        AuthBloc(mockAuthRepository, mockMultiAccountStorage).state,
+        AuthBloc(mockAuthRepository, mockMultiAccountStorage, guestSessionStorage)
+            .state,
         isA<AuthInitial>(),
       );
     });
@@ -59,10 +66,47 @@ void main() {
       build: () {
         when(() => mockAuthRepository.userFromCurrentSession())
             .thenReturn(null);
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [isA<AuthUnauthenticated>()],
+    );
+
+    test('AuthCheckRequested: нет сессии, гость -> AuthBrowsingAsGuest',
+        () async {
+      SharedPreferences.setMockInitialValues(
+        {'tmr_tau_guest_browsing_v1': true},
+      );
+      final prefs = await SharedPreferences.getInstance();
+      when(() => mockAuthRepository.userFromCurrentSession())
+          .thenReturn(null);
+      final bloc = AuthBloc(
+        mockAuthRepository,
+        mockMultiAccountStorage,
+        GuestSessionStorage(prefs),
+      );
+      final expectDone = expectLater(
+        bloc.stream,
+        emitsInOrder(<Matcher>[isA<AuthBrowsingAsGuest>()]),
+      );
+      bloc.add(const AuthCheckRequested());
+      await expectDone;
+      await bloc.close();
+    });
+
+    blocTest<AuthBloc, AuthState>(
+      'AuthContinueAsGuestRequested -> AuthBrowsingAsGuest',
+      build: () => AuthBloc(
+        mockAuthRepository,
+        mockMultiAccountStorage,
+        guestSessionStorage,
+      ),
+      act: (bloc) => bloc.add(const AuthContinueAsGuestRequested()),
+      expect: () => [isA<AuthBrowsingAsGuest>()],
     );
 
     blocTest<AuthBloc, AuthState>(
@@ -72,7 +116,11 @@ void main() {
             .thenReturn(stubUser);
         when(() => mockAuthRepository.fetchUserProfileFromRemote('user-1'))
             .thenAnswer((_) async => null);
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
@@ -87,7 +135,11 @@ void main() {
             .thenReturn(stubUser);
         when(() => mockAuthRepository.fetchUserProfileFromRemote('user-1'))
             .thenAnswer((_) async => fullUser);
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
@@ -107,7 +159,11 @@ void main() {
         });
         when(() => mockAuthRepository.fetchUserProfileFromRemote('user-1'))
             .thenAnswer((_) async => fullUser);
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthCheckRequested()),
       expect: () => [
@@ -121,7 +177,11 @@ void main() {
         when(() => mockAuthRepository.signInWithEmail(any(), any()))
             .thenAnswer((_) async => {});
         when(() => mockAuthRepository.currentUser).thenReturn(stubUser);
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthSignInRequested(
         email: 'a@b.com',
@@ -138,7 +198,11 @@ void main() {
       build: () {
         when(() => mockAuthRepository.signInWithEmail(any(), any()))
             .thenThrow(Exception('Invalid login credentials'));
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthSignInRequested(
         email: 'a@b.com',
@@ -154,7 +218,11 @@ void main() {
       'AuthSignOutRequested -> AuthUnauthenticated',
       build: () {
         when(() => mockAuthRepository.signOut()).thenAnswer((_) async => {});
-        return AuthBloc(mockAuthRepository, mockMultiAccountStorage);
+        return AuthBloc(
+          mockAuthRepository,
+          mockMultiAccountStorage,
+          guestSessionStorage,
+        );
       },
       act: (bloc) => bloc.add(const AuthSignOutRequested()),
       expect: () => [isA<AuthUnauthenticated>()],

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/auth/show_login_prompt.dart';
 import '../../../../core/following/following_change_bus.dart';
 import '../../../../core/widgets/app_error_view.dart';
 import '../../../auth/presentation/bloc/auth_bloc.dart';
@@ -259,8 +260,9 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
   Future<void> _toggleLike(PostEntity post) async {
     final uid = _currentUserId;
     if (uid == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы ставить лайки')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы ставить лайки.',
       );
       return;
     }
@@ -282,7 +284,13 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
 
   Future<void> _toggleSave(PostEntity post) async {
     final uid = _currentUserId;
-    if (uid == null) return;
+    if (uid == null) {
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы сохранять публикации.',
+      );
+      return;
+    }
     _updatePost(post.copyWith(isSavedByMe: !post.isSavedByMe));
     try {
       await _postRepo.toggleSave(post.id, uid);
@@ -293,7 +301,13 @@ class _PublicationFeedPageState extends State<PublicationFeedPage>
 
   Future<void> _toggleRepost(PostEntity post) async {
     final uid = _currentUserId;
-    if (uid == null) return;
+    if (uid == null) {
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы сделать репост.',
+      );
+      return;
+    }
     _updatePost(post.copyWith(
       isRepostedByMe: !post.isRepostedByMe,
       repostsCount: post.isRepostedByMe

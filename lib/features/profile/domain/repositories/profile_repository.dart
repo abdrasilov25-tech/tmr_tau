@@ -29,5 +29,6 @@ abstract class ProfileRepository {
     String? instagramUrl,
     String? telegramUsername,
     String? websiteUrl,
+    String? residentNumber,
   });
 }

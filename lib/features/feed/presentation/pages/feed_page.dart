@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../core/auth/show_login_prompt.dart';
 import '../../../../core/feedback/feedback_manager.dart';
 import '../../../../core/storage/hidden_posts_storage.dart';
 import '../../../../core/widgets/app_error_view.dart';
@@ -175,12 +178,11 @@ class _FeedPageState extends State<FeedPage> {
                                     ),
                                   );
                             } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Войдите, чтобы ставить лайки'),
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
+                              unawaited(showLoginRequiredDialog(
+                                context,
+                                message:
+                                    'Войдите в аккаунт, чтобы ставить лайки.',
+                              ));
                             }
                           },
                           onFollow: currentUserId != null &&

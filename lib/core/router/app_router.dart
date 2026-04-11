@@ -713,7 +713,7 @@ class _AuthCallbackPageState extends State<_AuthCallbackPage> {
   Widget build(BuildContext context) {
     return BlocListener<AuthBloc, AuthState>(
       listener: (context, state) {
-        if (state is AuthAuthenticated) {
+        if (state is AuthAuthenticated || state is AuthBrowsingAsGuest) {
           context.go('/home/feed');
         }
         if (state is AuthUnauthenticated || state is AuthError) {

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../constants/supabase_constants.dart';
+import '../firebase/firebase_pigeon_retry.dart';
 import '../../firebase_options.dart';
 import 'push_platform.dart';
 
@@ -60,7 +61,9 @@ final class FcmSupabaseCoordinator {
     final uid = _client.auth.currentUser?.id;
     if (uid == null) return;
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await firebasePigeonRetry(
+        () => FirebaseMessaging.instance.getToken(),
+      );
       if (token == null || token.isEmpty) return;
       await _client
           .from(SupabaseConstants.userPushTokensTable)
@@ -85,7 +88,9 @@ final class FcmSupabaseCoordinator {
 
     _syncBusy = true;
     try {
-      final token = await FirebaseMessaging.instance.getToken();
+      final token = await firebasePigeonRetry(
+        () => FirebaseMessaging.instance.getToken(),
+      );
       if (token == null || token.isEmpty) return;
 
       final key = '$uid|$token';

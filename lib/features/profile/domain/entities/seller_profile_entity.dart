@@ -17,6 +17,8 @@ class SellerProfileEntity extends Equatable {
     this.instagramUrl,
     this.telegramUsername,
     this.websiteUrl,
+    /// Номер жителя города (из `public.users.resident_number`).
+    this.residentNumber,
     /// Подписка Official Page (IAP): витрина, график «Профессиональная» и т.п.
     this.officialPageActive = false,
     /// Лучший результат в «Тап судьбы» — показывается всем на профиле.
@@ -36,6 +38,7 @@ class SellerProfileEntity extends Equatable {
   final String? instagramUrl;
   final String? telegramUsername;
   final String? websiteUrl;
+  final String? residentNumber;
   final bool officialPageActive;
   final int bestTapScore;
 
@@ -53,6 +56,7 @@ class SellerProfileEntity extends Equatable {
     String? instagramUrl,
     String? telegramUsername,
     String? websiteUrl,
+    String? residentNumber,
     bool? officialPageActive,
     int? bestTapScore,
   }) {
@@ -71,6 +75,7 @@ class SellerProfileEntity extends Equatable {
       instagramUrl: instagramUrl ?? this.instagramUrl,
       telegramUsername: telegramUsername ?? this.telegramUsername,
       websiteUrl: websiteUrl ?? this.websiteUrl,
+      residentNumber: residentNumber ?? this.residentNumber,
       officialPageActive: officialPageActive ?? this.officialPageActive,
       bestTapScore: bestTapScore ?? this.bestTapScore,
     );
@@ -91,6 +96,7 @@ class SellerProfileEntity extends Equatable {
         instagramUrl,
         telegramUsername,
         websiteUrl,
+        residentNumber,
         officialPageActive,
         bestTapScore,
       ];

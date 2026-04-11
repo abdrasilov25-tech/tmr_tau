@@ -23,6 +23,9 @@ final class AuthAuthenticated extends AuthState {
 
 final class AuthUnauthenticated extends AuthState {}
 
+/// Просмотр ленты без аккаунта; действия (лайк, подписка) ведут на экран входа.
+final class AuthBrowsingAsGuest extends AuthState {}
+
 /// Разовое событие после отмены OAuth: у [AuthUnauthenticated] повторный emit не
 /// уведомляет слушателей (Equatable), а локальные спиннеры на логине нужно сбросить.
 final class AuthOAuthDismissed extends AuthState {

@@ -8,6 +8,8 @@ class AppUser extends Equatable {
     this.username,
     this.avatarUrl,
     this.bio,
+    /// Номер жителя города (Темиртау и т.д.), из `public.users.resident_number`.
+    this.residentNumber,
     this.followersCount = 0,
     this.followingCount = 0,
   });
@@ -18,10 +20,20 @@ class AppUser extends Equatable {
   final String? username;
   final String? avatarUrl;
   final String? bio;
+  final String? residentNumber;
   final int followersCount;
   final int followingCount;
 
   @override
-  List<Object?> get props =>
-      [id, email, name, username, avatarUrl, bio, followersCount, followingCount];
+  List<Object?> get props => [
+        id,
+        email,
+        name,
+        username,
+        avatarUrl,
+        bio,
+        residentNumber,
+        followersCount,
+        followingCount,
+      ];
 }

@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/auth/guest_session_storage.dart';
 import '../../../../core/config/oauth_env_config.dart';
 import '../../../../core/storage/multi_account_storage.dart';
 import '../../domain/entities/app_user.dart';
@@ -12,8 +13,13 @@ part 'auth_event.dart';
 part 'auth_state.dart';
 
 class AuthBloc extends Bloc<AuthEvent, AuthState> {
-  AuthBloc(this._authRepository, this._multiAccountStorage) : super(AuthInitial()) {
+  AuthBloc(
+    this._authRepository,
+    this._multiAccountStorage,
+    this._guestSession,
+  ) : super(AuthInitial()) {
     on<AuthCheckRequested>(_onCheckRequested);
+    on<AuthContinueAsGuestRequested>(_onContinueAsGuestRequested);
     on<AuthSignInRequested>(_onSignInRequested);
     on<AuthSignInWithGoogleRequested>(_onSignInWithGoogleRequested);
     on<AuthSignInWithAppleRequested>(_onSignInWithAppleRequested);
@@ -26,17 +32,33 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<AuthResetPasswordRequested>(_onResetPasswordRequested);
   }
 
+  Future<void> _onContinueAsGuestRequested(
+    AuthContinueAsGuestRequested event,
+    Emitter<AuthState> emit,
+  ) async {
+    await _guestSession.setGuestBrowsing(true);
+    if (!isClosed) emit(AuthBrowsingAsGuest());
+  }
+
   final AuthRepository _authRepository;
   final MultiAccountStorage _multiAccountStorage;
+  final GuestSessionStorage _guestSession;
 
   static int _oauthDismissNonce = 0;
+
+  Future<void> _clearGuestFlag() => _guestSession.setGuestBrowsing(false);
 
   void _onCheckRequested(AuthCheckRequested event, Emitter<AuthState> emit) async {
     final stub = _authRepository.userFromCurrentSession();
     if (stub == null) {
-      if (!isClosed) emit(AuthUnauthenticated());
+      if (_guestSession.isGuestBrowsing) {
+        if (!isClosed) emit(AuthBrowsingAsGuest());
+      } else {
+        if (!isClosed) emit(AuthUnauthenticated());
+      }
       return;
     }
+    await _clearGuestFlag();
     try {
       await _multiAccountStorage.setLastActiveAccountId(stub.id);
     } catch (e) { debugPrint('$e'); }
@@ -60,6 +82,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       await _authRepository.signInWithEmail(event.email, event.password);
       final user = _authRepository.currentUser;
       if (user != null) {
+        await _clearGuestFlag();
         await _multiAccountStorage.setLastActiveAccountId(user.id);
         await _multiAccountStorage.addAccount(
           SavedAccount(
@@ -82,6 +105,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       await _authRepository.signInWithGoogle();
       final user = _authRepository.currentUser;
       if (user != null) {
+        await _clearGuestFlag();
         await _multiAccountStorage.setLastActiveAccountId(user.id);
         await _multiAccountStorage.addAccount(
           SavedAccount(
@@ -124,6 +148,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       await _authRepository.signInWithApple();
       final user = _authRepository.currentUser;
       if (user != null) {
+        await _clearGuestFlag();
         await _multiAccountStorage.setLastActiveAccountId(user.id);
         await _multiAccountStorage.addAccount(
           SavedAccount(
@@ -163,6 +188,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     if (user != null) {
       return AuthAuthenticated(user, fromSessionOnly: true);
     }
+    if (_guestSession.isGuestBrowsing) {
+      return AuthBrowsingAsGuest();
+    }
     return AuthUnauthenticated();
   }
 
@@ -188,6 +216,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       await _authRepository.verifySmsOtp(event.phone, event.token);
       final user = _authRepository.currentUser;
       if (user != null) {
+        await _clearGuestFlag();
         await _multiAccountStorage.setLastActiveAccountId(user.id);
         await _multiAccountStorage.addAccount(
           SavedAccount(
@@ -211,6 +240,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         event.email,
         event.password,
         event.name,
+        residentNumber: event.residentNumber,
       );
       if (result.pendingEmailConfirmation) {
         if (!isClosed) {
@@ -221,6 +251,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         return;
       }
       final user = result.user!;
+      await _clearGuestFlag();
       await _multiAccountStorage.setLastActiveAccountId(user.id);
       await _multiAccountStorage.addAccount(
         SavedAccount(
@@ -239,13 +270,22 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   static String _authErrorMessage(Object e) {
     final raw = e.toString();
     final s = raw.toLowerCase();
-    if (s.contains('unacceptable audience') && s.contains('id_token')) {
-      return 'Вход отклонён: audience в токене не совпадает с Supabase. '
-          'Если это Apple: в Dashboard → Authentication → Providers → Apple '
-          'в поле Client ID добавьте Bundle ID приложения: com.tmrtau.app '
-          '(при необходимости через запятую вместе с Services ID). '
-          'Если это Google: в том же разделе для Google в Client ID укажите '
-          'Web и iOS client ID из Google Cloud через запятую.';
+
+    // Apple Sign In — нет ответа / таймаут
+    if (s.contains('apple sign in') && s.contains('нет ответа')) return raw;
+
+    // Apple Sign In — Bad ID token (неверная подпись, expired, или audience не настроен)
+    if (s.contains('bad id token') || s.contains('bad_id_token')) {
+      return 'Apple Sign In: токен отклонён сервером. '
+          'В Supabase Dashboard → Authentication → Providers → Apple '
+          'убедитесь что в поле "Client ID(s)" указан Bundle ID: com.tmrtau.app. '
+          'Если он там уже есть — попробуйте войти ещё раз (токен мог устареть).';
+    }
+    // Apple / Google — audience не совпадает (unexpected_audience / unacceptable audience)
+    if (s.contains('audience') || s.contains('unexpected_audience')) {
+      return 'Apple Sign In: Bundle ID приложения не добавлен в Supabase. '
+          'Откройте Supabase Dashboard → Authentication → Providers → Apple '
+          'и в поле "Client ID(s)" добавьте: com.tmrtau.app';
     }
     if (s.contains('redirect_uri_mismatch')) {
       final callback = OAuthEnvConfig.supabaseAuthV1CallbackUrl;
@@ -338,6 +378,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       await _multiAccountStorage.setLastActiveAccountId(null);
     }
     await _authRepository.signOut();
+    await _clearGuestFlag();
     if (!isClosed) emit(AuthUnauthenticated());
   }
 
@@ -351,6 +392,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           .timeout(const Duration(seconds: 12));
       final user = _authRepository.currentUser;
       if (user != null) {
+        await _clearGuestFlag();
         await _multiAccountStorage.setLastActiveAccountId(user.id);
         await _multiAccountStorage.addAccount(
           SavedAccount(

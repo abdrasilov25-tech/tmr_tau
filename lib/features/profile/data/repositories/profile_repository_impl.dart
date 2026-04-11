@@ -38,7 +38,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       final userRes = await _client
           .from(SupabaseConstants.usersTable)
           .select(
-            'id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, total_received_post_likes, instagram_url, telegram_username, website_url',
+            'id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, total_received_post_likes, instagram_url, telegram_username, website_url, resident_number',
           )
           .eq('id', sellerId)
           .maybeSingle();
@@ -55,7 +55,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       try {
         final userRes = await _client
             .from(SupabaseConstants.usersTable)
-            .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, instagram_url, telegram_username, website_url')
+            .select('id, name, avatar, bio, followers_count, is_verified, official_page_active, seller_verified_store, instagram_url, telegram_username, website_url, resident_number')
             .eq('id', sellerId)
             .maybeSingle();
         if (userRes == null) return null;
@@ -66,7 +66,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
         // Совместимость со старой схемой БД без части полей монетизации.
         final userRes = await _client
             .from(SupabaseConstants.usersTable)
-            .select('id, name, avatar, bio, followers_count, is_verified, instagram_url, telegram_username, website_url')
+            .select('id, name, avatar, bio, followers_count, is_verified, instagram_url, telegram_username, website_url, resident_number')
             .eq('id', sellerId)
             .maybeSingle();
         if (userRes == null) return null;
@@ -166,6 +166,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
       instagramUrl: userMap['instagram_url'] as String?,
       telegramUsername: userMap['telegram_username'] as String?,
       websiteUrl: userMap['website_url'] as String?,
+      residentNumber: userMap['resident_number'] as String?,
       officialPageActive: userMap['official_page_active'] as bool? ?? false,
       bestTapScore: bestTapScore,
     );
@@ -433,6 +434,7 @@ class ProfileRepositoryImpl implements ProfileRepository {
     String? instagramUrl,
     String? telegramUsername,
     String? websiteUrl,
+    String? residentNumber,
   }) async {
     final updates = <String, dynamic>{};
     if (name != null) updates['name'] = name;
@@ -443,6 +445,11 @@ class ProfileRepositoryImpl implements ProfileRepository {
     if (instagramUrl != null) updates['instagram_url'] = instagramUrl;
     if (telegramUsername != null) updates['telegram_username'] = telegramUsername;
     if (websiteUrl != null) updates['website_url'] = websiteUrl;
+    if (residentNumber != null) {
+      updates['resident_number'] = residentNumber.trim().isEmpty
+          ? null
+          : residentNumber.trim();
+    }
     if (updates.isEmpty) return;
     updates['updated_at'] = DateTime.now().toIso8601String();
     await _client

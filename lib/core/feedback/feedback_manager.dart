@@ -9,11 +9,15 @@ import 'feedback_preferences_storage.dart';
 /// Initialise once in main.dart via [FeedbackManager.init].
 /// Then call from anywhere: [FeedbackManager.instance].
 ///
-/// Sound files (optional, <300ms):
-///   assets/sounds/success.mp3
-///   assets/sounds/error.mp3
-///   assets/sounds/message_sent.mp3
-///   assets/sounds/message_received.mp3
+/// Sound files (optional, <300ms, WAV/MP3/OGG):
+///   assets/sounds/success.wav
+///   assets/sounds/error.wav
+///   assets/sounds/message_sent.wav
+///   assets/sounds/message_received.wav
+///   assets/sounds/reaction.wav       — short sparkle/pop for emoji reactions
+///   assets/sounds/wow_battle.wav
+///   assets/sounds/wow_shop.wav
+///   assets/sounds/wow_wallet.wav
 ///
 /// If files are absent the method silently skips playback —
 /// haptics still fire.
@@ -77,6 +81,13 @@ class FeedbackManager {
   Future<void> messageRead() async {
     await _haptic(() => HapticFeedback.selectionClick());
     await _playAsset('sounds/success.wav');
+  }
+
+  /// Selection click haptic + sparkle sound when the user places or changes
+  /// an emoji reaction on a message.
+  Future<void> messageReaction() async {
+    await _haptic(() => HapticFeedback.selectionClick());
+    await _playAsset('sounds/reaction.wav');
   }
 
   /// Short ping when new activity lands in the in-app notifications list or peek bar.

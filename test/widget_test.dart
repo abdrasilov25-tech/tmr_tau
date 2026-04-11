@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:tmr_tau/app.dart';
+import 'package:tmr_tau/core/auth/guest_session_storage.dart';
 import 'package:tmr_tau/core/accounts/account_repository.dart';
 import 'package:tmr_tau/core/feedback/feedback_preferences_storage.dart';
 import 'package:tmr_tau/core/storage/chat_list_storage.dart';
@@ -23,6 +24,7 @@ void main() {
   late MultiAccountStorage multiAccountStorage;
   late AccountRepository accountRepository;
   late FeedbackPreferencesStorage feedbackPreferencesStorage;
+  late GuestSessionStorage guestSessionStorage;
 
   setUpAll(() async {
     SharedPreferences.setMockInitialValues({});
@@ -36,6 +38,7 @@ void main() {
     multiAccountStorage = MultiAccountStorage(prefs, const FlutterSecureStorage());
     accountRepository = AccountRepositoryImpl(prefs);
     feedbackPreferencesStorage = FeedbackPreferencesStorage(prefs);
+    guestSessionStorage = GuestSessionStorage(prefs);
   });
 
   group('TmrTauApp', () {
@@ -56,6 +59,7 @@ void main() {
           multiAccountStorage: multiAccountStorage,
           accountRepository: accountRepository,
           feedbackPreferencesStorage: feedbackPreferencesStorage,
+          guestSessionStorage: guestSessionStorage,
         ),
       );
       await tester.pumpAndSettle();

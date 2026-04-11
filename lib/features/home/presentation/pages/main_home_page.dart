@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart' as supa;
 import 'package:shimmer/shimmer.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../../core/auth/show_login_prompt.dart';
 import '../../../../core/following/following_change_bus.dart';
 import '../../../live_streaming/domain/entities/live_room_entity.dart';
 import '../../../live_streaming/domain/repositories/live_streaming_repository.dart';
@@ -921,8 +922,9 @@ class _MainHomePageState extends State<MainHomePage> {
     final uid = _currentUserId ?? _supabaseAuthUserIdOrNull();
     if (uid == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы снять сторис')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы снять сторис.',
       );
       return;
     }
@@ -953,8 +955,9 @@ class _MainHomePageState extends State<MainHomePage> {
   Future<void> _toggleLike(PostEntity post) async {
     final userId = _currentUserId;
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы ставить лайки')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы ставить лайки.',
       );
       return;
     }
@@ -984,8 +987,9 @@ class _MainHomePageState extends State<MainHomePage> {
   Future<void> _toggleRepost(PostEntity post) async {
     final userId = _currentUserId;
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы репостить')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы сделать репост.',
       );
       return;
     }
@@ -1014,8 +1018,9 @@ class _MainHomePageState extends State<MainHomePage> {
   Future<void> _toggleSave(PostEntity post) async {
     final userId = _currentUserId;
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы сохранять публикации')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы сохранять публикации.',
       );
       return;
     }
@@ -1039,8 +1044,9 @@ class _MainHomePageState extends State<MainHomePage> {
   Future<void> _toggleFollow(PostEntity post) async {
     final userId = _currentUserId;
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы подписаться')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы подписаться на автора.',
       );
       return;
     }
@@ -1084,8 +1090,9 @@ class _MainHomePageState extends State<MainHomePage> {
 
   Future<void> _shareToUser(PostEntity post) async {
     if (_currentUserId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Войдите, чтобы поделиться')),
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы поделиться публикацией.',
       );
       return;
     }

@@ -74,6 +74,7 @@ class AuthRepositoryImpl implements AuthRepository {
       username: profile.username,
       avatarUrl: profile.avatarUrl,
       bio: profile.bio,
+      residentNumber: profile.residentNumber,
       followersCount: profile.followersCount,
       followingCount: profile.followingCount,
     );
@@ -93,11 +94,14 @@ class AuthRepositoryImpl implements AuthRepository {
     final meta = authUser.userMetadata;
     String? username;
     String? avatarUrl;
+    String? residentNumber;
     if (meta != null) {
       final u = meta['username'];
       if (u is String) username = u;
       final a = meta['avatar_url'];
       if (a is String) avatarUrl = a;
+      final rn = meta['resident_number'];
+      if (rn is String) residentNumber = rn;
     }
     return AppUser(
       id: authUser.id,
@@ -105,6 +109,7 @@ class AuthRepositoryImpl implements AuthRepository {
       name: _getName(authUser),
       username: username,
       avatarUrl: avatarUrl,
+      residentNumber: residentNumber,
       followersCount: 0,
     );
   }
@@ -127,6 +132,7 @@ class AuthRepositoryImpl implements AuthRepository {
         id: uid,
         email: authUser?.email ?? email,
         name: _getName(authUser),
+        residentNumber: null,
         followersCount: 0,
       );
     }
@@ -136,8 +142,9 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<EmailSignUpResult> signUpWithEmail(
     String email,
     String password,
-    String name,
-  ) async {
+    String name, {
+    String? residentNumber,
+  }) async {
     // Старая сессия в клиенте даёт неверный currentUser после signUp без сессии
     // и повторная отправка формы приводит к user_already_exists.
     if (_client.auth.currentSession != null) {
@@ -149,12 +156,13 @@ class AuthRepositoryImpl implements AuthRepository {
       password,
       name,
       emailRedirectTo: OAuthEnvConfig.redirectTo,
+      residentNumber: residentNumber,
     );
 
     if (response.session != null && response.user != null) {
       final uid = response.user!.id;
       try {
-        await _ensureUserRow(uid, email, name);
+        await _ensureUserRow(uid, email, name, residentNumber: residentNumber);
       } catch (_) {
         // RLS/сеть: не блокируем вход — профиль подтянется позже или из метаданных.
       }
@@ -163,6 +171,9 @@ class AuthRepositoryImpl implements AuthRepository {
         id: uid,
         email: response.user!.email ?? email,
         name: name.isNotEmpty ? name : (response.user!.email ?? email),
+        residentNumber: residentNumber?.trim().isNotEmpty == true
+            ? residentNumber!.trim()
+            : null,
         followersCount: 0,
       );
       return EmailSignUpResult.signedIn(_cachedUser!);
@@ -204,6 +215,11 @@ class AuthRepositoryImpl implements AuthRepository {
       throw const AuthException('Не удалось открыть окно входа Google.');
     }
     final authUser = await _waitForOAuthUser();
+    await _hydrateCachedUserAfterOAuth(authUser);
+  }
+
+  /// После OAuth (Google / Apple web): профиль в `users` + fallback из JWT.
+  Future<void> _hydrateCachedUserAfterOAuth(User authUser) async {
     final uid = authUser.id;
     _cachedUser = await _fetchUserProfileMerged(uid);
     if (_cachedUser == null) {
@@ -217,6 +233,7 @@ class AuthRepositoryImpl implements AuthRepository {
         id: uid,
         email: authUser.email ?? '',
         name: _getName(authUser),
+        residentNumber: null,
         followersCount: 0,
       );
     }
@@ -227,10 +244,36 @@ class AuthRepositoryImpl implements AuthRepository {
     if (!kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.iOS ||
             defaultTargetPlatform == TargetPlatform.macOS)) {
-      await _signInWithAppleNative();
-      return;
+      try {
+        await _signInWithAppleNative();
+        return;
+      } catch (e, st) {
+        debugPrint('Apple native sign-in failed: $e\n$st');
+        // Нативный id_token: aud = Bundle ID (напр. com.tmrtau.app). В Supabase в Apple
+        // иногда указан только Services ID — сервер отклоняет токен. OAuth в Safari
+        // выдаёт токен под веб/Services ID из Dashboard.
+        if (_isAppleNativeTokenRejectedBySupabase(e)) {
+          await _signInWithAppleOAuth();
+          return;
+        }
+        rethrow;
+      }
     }
 
+    await _signInWithAppleOAuth();
+  }
+
+  bool _isAppleNativeTokenRejectedBySupabase(Object e) {
+    final s = e.toString().toLowerCase();
+    if (s.contains('cancel')) return false;
+    return s.contains('unacceptable audience') ||
+        (s.contains('audience') && s.contains('id_token')) ||
+        s.contains('authapiexception') && s.contains('audience') ||
+        s.contains('invalid issuer') ||
+        (s.contains('issuer') && s.contains('apple'));
+  }
+
+  Future<void> _signInWithAppleOAuth() async {
     final launched = await _client.auth.signInWithOAuth(
       OAuthProvider.apple,
       redirectTo: OAuthEnvConfig.redirectTo,
@@ -244,22 +287,7 @@ class AuthRepositoryImpl implements AuthRepository {
       throw const AuthException('Не удалось открыть окно входа Apple.');
     }
     final authUser = await _waitForOAuthUser();
-    final uid = authUser.id;
-    _cachedUser = await _fetchUserProfileMerged(uid);
-    if (_cachedUser == null) {
-      try {
-        await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
-        _cachedUser = await _fetchUserProfileMerged(uid);
-      } catch (e) {
-        // Профиль в БД не создался — пускаем в приложение с данными из сессии
-      }
-      _cachedUser ??= AppUser(
-        id: uid,
-        email: authUser.email ?? '',
-        name: _getName(authUser),
-        followersCount: 0,
-      );
-    }
+    await _hydrateCachedUserAfterOAuth(authUser);
   }
 
   @override
@@ -295,6 +323,7 @@ class AuthRepositoryImpl implements AuthRepository {
         id: uid,
         email: authUser?.email ?? '',
         name: _getName(authUser) ?? phone,
+        residentNumber: null,
         followersCount: 0,
       );
     }
@@ -316,12 +345,22 @@ class AuthRepositoryImpl implements AuthRepository {
     return name is String ? name : null;
   }
 
-  Future<void> _ensureUserRow(String uid, String email, String name) async {
-    await _client.from(SupabaseConstants.usersTable).upsert({
+  Future<void> _ensureUserRow(
+    String uid,
+    String email,
+    String name, {
+    String? residentNumber,
+  }) async {
+    final row = <String, dynamic>{
       'id': uid,
       'name': name.isNotEmpty ? name : email,
       'followers_count': 0,
-    });
+    };
+    final rn = residentNumber?.trim();
+    if (rn != null && rn.isNotEmpty) {
+      row['resident_number'] = rn;
+    }
+    await _client.from(SupabaseConstants.usersTable).upsert(row);
   }
 
   @override
@@ -447,15 +486,34 @@ class AuthRepositoryImpl implements AuthRepository {
       );
     }
 
-    await _client.auth.signInWithIdToken(
-      provider: OAuthProvider.apple,
-      idToken: idToken,
-      nonce: rawNonce,
-    );
+    try {
+      await _client.auth.signInWithIdToken(
+        provider: OAuthProvider.apple,
+        idToken: idToken,
+        nonce: rawNonce,
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => throw const AuthException(
+          'Apple Sign In: нет ответа от сервера. '
+          'Убедитесь что в Supabase Dashboard → Authentication → Providers → Apple '
+          'настроены Team ID, Key ID и Private Key.',
+        ),
+      );
+    } on AuthException {
+      rethrow;
+    } catch (e) {
+      throw AuthException(
+        'Apple Sign In: ошибка авторизации — ${e.toString()}. '
+        'Проверьте настройки Apple Provider в Supabase Dashboard.',
+      );
+    }
 
     final authUser = _client.auth.currentUser;
     if (authUser == null) {
-      throw const AuthException('Сессия Apple не создана.');
+      throw const AuthException(
+        'Apple Sign In: сессия не создана. '
+        'Проверьте настройки Apple Provider в Supabase Dashboard.',
+      );
     }
     final uid = authUser.id;
 
@@ -471,6 +529,7 @@ class AuthRepositoryImpl implements AuthRepository {
       id: uid,
       email: authUser.email ?? '',
       name: displayName,
+      residentNumber: null,
       followersCount: 0,
     );
 

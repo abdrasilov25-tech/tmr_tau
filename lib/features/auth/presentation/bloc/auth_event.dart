@@ -10,6 +10,11 @@ final class AuthCheckRequested extends AuthEvent {
   const AuthCheckRequested();
 }
 
+/// Сохранить флаг гостя и открыть приложение без Supabase-сессии.
+final class AuthContinueAsGuestRequested extends AuthEvent {
+  const AuthContinueAsGuestRequested();
+}
+
 final class AuthSignInRequested extends AuthEvent {
   const AuthSignInRequested({required this.email, required this.password});
   final String email;
@@ -54,12 +59,15 @@ final class AuthSignUpRequested extends AuthEvent {
     required this.email,
     required this.password,
     required this.name,
+    this.residentNumber,
   });
   final String email;
   final String password;
   final String name;
+  /// Номер жителя города (опционально), сохраняется в `public.users.resident_number`.
+  final String? residentNumber;
   @override
-  List<Object?> get props => [email, password, name];
+  List<Object?> get props => [email, password, name, residentNumber];
 }
 
 final class AuthSignOutRequested extends AuthEvent {

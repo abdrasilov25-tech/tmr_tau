@@ -102,6 +102,17 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
   Timer? _markReadDebounce;
   Timer? _presenceTimer;
 
+  // Typing indicator: true когда собеседник «печатает»
+  bool _peerIsTyping = false;
+  Timer? _typingHideTimer;
+  // Supabase Realtime канал для typing-событий
+  RealtimeChannel? _typingChannel;
+  // Debounce для отправки нашего typing-события
+  Timer? _myTypingDebounce;
+  // Swipe-to-reply: id сообщения которое сейчас свайпается
+  String? _swipingMessageId;
+  double _swipeOffset = 0.0;
+
   static const Duration _onlineThreshold = Duration(minutes: 2);
   /// Полоса реакций как в WhatsApp (плюс кнопка «ещё» открывает сетку).
   static const List<String> _waBarReactionEmojis = [
@@ -169,6 +180,49 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_loadPeerBlockedByMe());
+      _subscribeTypingChannel();
+    });
+  }
+
+  /// Подписываемся на Supabase Broadcast «typing» в канале DM.
+  void _subscribeTypingChannel() {
+    try {
+      final me = _me();
+      if (me == null) return;
+      // Канал уникален для пары пользователей (сортируем ID, чтобы был один канал)
+      final ids = [me, widget.peerId]..sort();
+      final channelName = 'typing:${ids[0]}:${ids[1]}';
+      _typingChannel = _client
+          .channel(channelName)
+          .onBroadcast(
+            event: 'typing',
+            callback: (payload) {
+              final senderId = payload['user_id'] as String?;
+              if (senderId == widget.peerId && mounted) {
+                _showPeerTyping();
+              }
+            },
+          )
+          .subscribe();
+    } catch (e) {
+      debugPrint('typing channel: $e');
+    }
+  }
+
+  /// Отправляем broadcast «я печатаю» с debounce.
+  void _broadcastTyping() {
+    _myTypingDebounce?.cancel();
+    _myTypingDebounce = Timer(const Duration(milliseconds: 500), () {
+      try {
+        final me = _me();
+        if (me == null) return;
+        _typingChannel?.sendBroadcastMessage(
+          event: 'typing',
+          payload: {'user_id': me},
+        );
+      } catch (e) {
+        debugPrint('broadcast typing: $e');
+      }
     });
   }
 
@@ -265,12 +319,27 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
     _markReadDebounce?.cancel();
     _presenceTimer?.cancel();
     _videoCircleArmTimer?.cancel();
+    _typingHideTimer?.cancel();
+    _myTypingDebounce?.cancel();
+    try {
+      _typingChannel?.unsubscribe();
+    } catch (_) {}
     _textHasContent.dispose();
     _voiceTimer?.cancel();
     _audioRecorder.dispose();
     _controller.dispose();
     _messagesScrollController.dispose();
     super.dispose();
+  }
+
+  // ── Typing indicator helpers ──────────────────────────────────
+  /// Показывает «собеседник печатает» на 4 секунды.
+  void _showPeerTyping() {
+    _typingHideTimer?.cancel();
+    if (!_peerIsTyping) setState(() => _peerIsTyping = true);
+    _typingHideTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _peerIsTyping = false);
+    });
   }
 
   @override
@@ -653,6 +722,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
           'emoji': trimmed,
         });
       }
+      unawaited(FeedbackManager.instance.messageReaction());
       if (mounted) {
         await _loadReactionsForMessages(_latestDialogMessages);
       }
@@ -2537,9 +2607,37 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             horizontal: 12,
                             vertical: 8,
                           ),
-                          itemCount: messages.length,
+                          // +1 для typing indicator когда _peerIsTyping
+                          itemCount: messages.length + (_peerIsTyping ? 1 : 0),
                           itemBuilder: (context, index) {
-                          final m = messages[messages.length - 1 - index];
+                          // Typing indicator — показываем первым (reverse=true → index 0 = внизу)
+                          if (_peerIsTyping && index == 0) {
+                            return const _TypingIndicatorBubble();
+                          }
+                          final adjustedIndex = _peerIsTyping ? index - 1 : index;
+                          final m = messages[messages.length - 1 - adjustedIndex];
+
+                          // ── Разделитель по датам ──────────────────────────────────
+                          DateTime? prevDate;
+                          final msgDate = () {
+                            final raw = m['created_at'];
+                            if (raw == null) return null;
+                            return DateTime.tryParse(raw.toString())?.toLocal();
+                          }();
+                          if (adjustedIndex < messages.length - 1) {
+                            final prevRaw = messages[messages.length - 2 - adjustedIndex]['created_at'];
+                            if (prevRaw != null) {
+                              prevDate = DateTime.tryParse(prevRaw.toString())?.toLocal();
+                            }
+                          }
+                          final showDateSeparator = msgDate != null &&
+                              (adjustedIndex == messages.length - 1 ||
+                                  (prevDate != null &&
+                                      (msgDate.year != prevDate.year ||
+                                          msgDate.month != prevDate.month ||
+                                          msgDate.day != prevDate.day)));
+                          // ─────────────────────────────────────────────────────────
+
                           final messageId = (m['id'] ?? '').toString();
                           final senderId = m['sender_id'] as String?;
                           final text = m['text'] as String? ?? '';
@@ -2595,7 +2693,24 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                           final useVideoShell = msgType == 'video_circle' &&
                               forwardOf == null &&
                               !isSelected;
-                          return Align(
+
+                          // Inline time label (WhatsApp-style)
+                          final timeLabel = _messageShortTime(m['created_at']);
+
+                          final bubbleBorderRadius = useVideoShell
+                              ? null
+                              : BorderRadius.only(
+                                  topLeft: const Radius.circular(16),
+                                  topRight: const Radius.circular(16),
+                                  bottomLeft: isMe
+                                      ? const Radius.circular(16)
+                                      : const Radius.circular(4),
+                                  bottomRight: isMe
+                                      ? const Radius.circular(4)
+                                      : const Radius.circular(16),
+                                );
+
+                          final bubbleWidget = Align(
                             alignment: isMe
                                 ? Alignment.centerRight
                                 : Alignment.centerLeft,
@@ -2607,6 +2722,15 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   _showDirectMessageActions(m, messageId);
                                 }
                               },
+                              onDoubleTap: _selectionMode
+                                  ? null
+                                  : () {
+                                      // Double-tap → быстрые реакции (WhatsApp-style)
+                                      if (messageId.isNotEmpty &&
+                                          !messageId.startsWith('tmp_')) {
+                                        _showWhatsAppStyleMessageMenu(m, messageId);
+                                      }
+                                    },
                               onLongPress: () {
                                 if (_selectionMode) {
                                   _toggleMessageSelection(messageId);
@@ -2614,15 +2738,60 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                   _showDirectMessageActions(m, messageId);
                                 }
                               },
-                              onHorizontalDragEnd: isMe
-                                  ? (details) {
-                                      if ((details.primaryVelocity ?? 0) > 200) {
+                              // Swipe right → reply (both own & peer messages)
+                              onHorizontalDragUpdate: _selectionMode
+                                  ? null
+                                  : (details) {
+                                      if (details.delta.dx > 0) {
+                                        setState(() {
+                                          _swipingMessageId = messageId;
+                                          _swipeOffset = (_swipeOffset + details.delta.dx)
+                                              .clamp(0.0, 72.0);
+                                        });
+                                      }
+                                    },
+                              onHorizontalDragEnd: _selectionMode
+                                  ? null
+                                  : (details) {
+                                      final wasSwipe = _swipeOffset > 40;
+                                      setState(() {
+                                        _swipingMessageId = null;
+                                        _swipeOffset = 0;
+                                      });
+                                      if (wasSwipe &&
+                                          messageId.isNotEmpty &&
+                                          !messageId.startsWith('tmp_')) {
+                                        final snippet = _dmMessageSnippetForActions(m);
+                                        setState(() {
+                                          _replyingToMessageId = messageId;
+                                          _replyingToSnippet = snippet;
+                                        });
+                                        // Haptic feedback
+                                        HapticFeedback.lightImpact();
+                                      } else if (isMe &&
+                                          (details.primaryVelocity ?? 0) > 200 &&
+                                          !wasSwipe) {
                                         _showReadReceiptSnackBar(m);
                                       }
-                                    }
-                                  : null,
-                              child: Container(
-                                margin: const EdgeInsets.symmetric(vertical: 4),
+                                    },
+                              onHorizontalDragCancel: () {
+                                if (mounted) {
+                                  setState(() {
+                                    _swipingMessageId = null;
+                                    _swipeOffset = 0;
+                                  });
+                                }
+                              },
+                              child: AnimatedSlide(
+                                offset: (_swipingMessageId == messageId)
+                                    ? Offset(_swipeOffset / 400, 0)
+                                    : Offset.zero,
+                                duration: (_swipingMessageId == messageId)
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 180),
+                                curve: Curves.easeOut,
+                                child: Container(
+                                margin: const EdgeInsets.symmetric(vertical: 2),
                                 padding: useVideoShell
                                     ? EdgeInsets.zero
                                     : EdgeInsets.symmetric(
@@ -2635,7 +2804,7 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                     ? null
                                     : BoxDecoration(
                                         color: bubbleBackground,
-                                        borderRadius: BorderRadius.circular(16),
+                                        borderRadius: bubbleBorderRadius,
                                         border: isSelected
                                             ? Border.all(
                                                 color: Theme.of(context)
@@ -2885,27 +3054,40 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                                                           ),
                                                             ),
                                         ),
-                                        if (isMe) ...[
-                                          const SizedBox(width: 4),
-                                          Padding(
-                                            padding: const EdgeInsets.only(
-                                                bottom: 2),
-                                            // Pending: часики; подтверждено: галочки
-                                            child: m['_pending'] == true
-                                                ? Icon(
-                                                    Icons.access_time_rounded,
-                                                    size: 13,
-                                                    color: Colors.black
-                                                        .withValues(alpha: 0.45),
-                                                  )
-                                                : _ReadReceiptTicks(
-                                                    readAt: m['read_at'],
-                                                    outgoingOnPrimary: true,
-                                                  ),
-                                          ),
-                                        ],
                                       ],
                                     ),
+                                    // ── Inline timestamp + read receipts (WhatsApp) ──
+                                    if (!useVideoShell && timeLabel.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              timeLabel,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.45),
+                                              ),
+                                            ),
+                                            if (isMe) ...[
+                                              const SizedBox(width: 4),
+                                              m['_pending'] == true
+                                                  ? Icon(
+                                                      Icons.access_time_rounded,
+                                                      size: 13,
+                                                      color: Colors.black
+                                                          .withValues(alpha: 0.45),
+                                                    )
+                                                  : _ReadReceiptTicks(
+                                                      readAt: m['read_at'],
+                                                      outgoingOnPrimary: true,
+                                                    ),
+                                            ],
+                                          ],
+                                        ),
+                                      ),
                                     if (reactionRows.isNotEmpty)
                                       Padding(
                                         padding: const EdgeInsets.only(top: 6),
@@ -2921,8 +3103,39 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                                       ),
                                   ],
                                 ),
+                              ), // AnimatedSlide child Container (closes Container)
+                            ), // AnimatedSlide
+                          ), // GestureDetector
+                          ); // Align bubbleWidget
+
+                          // Собираем финальный виджет с хвостиком и датой
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (showDateSeparator)
+                                _DateSeparator(date: msgDate),
+                              // Bubble + tail
+                              Stack(
+                                clipBehavior: Clip.none,
+                                children: [
+                                  bubbleWidget,
+                                  if (!useVideoShell && !isSelected)
+                                    Positioned(
+                                      bottom: 2,
+                                      left: isMe ? null : 4,
+                                      right: isMe ? 4 : null,
+                                      child: CustomPaint(
+                                        size: const Size(10, 10),
+                                        painter: _BubbleTailPainter(
+                                          isMe: isMe,
+                                          color: bubbleBackground,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
-                            ),
+                            ],
                           );
                           },
                         ),
@@ -3075,6 +3288,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
                             if (_showEmojiPanel && v.isNotEmpty) {
                               setState(() => _showEmojiPanel = false);
                             }
+                            // Typing indicator broadcast
+                            if (v.isNotEmpty) _broadcastTyping();
                           },
                           onAttachment: _showAttachmentSheet,
                           emojiPanelOpen: _showEmojiPanel,
@@ -4188,8 +4403,8 @@ class _ChatPageState extends State<ChatPage> with WidgetsBindingObserver {
 }
 
 /// WhatsApp-style read receipt ticks:
-/// 🔴 две красные галочки — отправлено, не прочитано
-/// 🟢 две зелёные галочки — прочитано
+/// ✓  одна серая галочка — доставлено (отправлено на сервер)
+/// ✓✓ две синих галочки — прочитано
 class _ReadReceiptTicks extends StatelessWidget {
   const _ReadReceiptTicks({
     required this.readAt,
@@ -4202,11 +4417,17 @@ class _ReadReceiptTicks extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final read = readAt != null;
-    // Красные = отправлено но не прочитано, зелёные = прочитано
+    // WhatsApp: серый = доставлено, синий = прочитано
     final color = read
-        ? const Color(0xFF22C55E) // зелёный — прочитано
-        : const Color(0xFFEF4444); // красный — не прочитано
+        ? const Color(0xFF53BDEB) // синий — прочитано
+        : Colors.black45; // серый — доставлено
 
+    if (!read) {
+      // Одна галочка = доставлено
+      return Icon(Icons.done_rounded, size: 15, color: color);
+    }
+
+    // Две галочки = прочитано
     return SizedBox(
       width: 26,
       height: 16,
@@ -4537,6 +4758,198 @@ String _formatCount(int value) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Bubble tail CustomPainter — WhatsApp-style хвостик
+// ─────────────────────────────────────────────────────────────
+
+/// CustomPainter рисует хвостик пузыря сообщения как в WhatsApp.
+/// [isMe] = true → хвостик справа внизу; false → слева внизу.
+class _BubbleTailPainter extends CustomPainter {
+  const _BubbleTailPainter({required this.isMe, required this.color});
+
+  final bool isMe;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.fill;
+
+    final path = Path();
+    if (isMe) {
+      path.moveTo(0, 0);
+      path.lineTo(0, size.height);
+      path.quadraticBezierTo(
+          size.width * 0.3, size.height, size.width, size.height + 6);
+      path.quadraticBezierTo(
+          size.width * 0.7, size.height - 2, size.width * 0.5, 0);
+      path.close();
+    } else {
+      path.moveTo(size.width, 0);
+      path.lineTo(size.width, size.height);
+      path.quadraticBezierTo(
+          size.width * 0.7, size.height, 0, size.height + 6);
+      path.quadraticBezierTo(
+          size.width * 0.3, size.height - 2, size.width * 0.5, 0);
+      path.close();
+    }
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_BubbleTailPainter old) =>
+      old.isMe != isMe || old.color != color;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Разделитель по датам (WhatsApp-style)
+// ─────────────────────────────────────────────────────────────
+
+class _DateSeparator extends StatelessWidget {
+  const _DateSeparator({required this.date});
+
+  final DateTime date;
+
+  String _label() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final d = DateTime(date.year, date.month, date.day);
+    if (d == today) return 'Сегодня';
+    if (d == yesterday) return 'Вчера';
+    const months = [
+      '', 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+      'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+    ];
+    if (date.year == now.year) {
+      return '${date.day} ${months[date.month]}';
+    }
+    return '${date.day} ${months[date.month]} ${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.18),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            _label(),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Typing indicator — три анимированные точки (WhatsApp-style)
+// ─────────────────────────────────────────────────────────────
+
+class _TypingIndicatorBubble extends StatefulWidget {
+  const _TypingIndicatorBubble();
+
+  @override
+  State<_TypingIndicatorBubble> createState() => _TypingIndicatorBubbleState();
+}
+
+class _TypingIndicatorBubbleState extends State<_TypingIndicatorBubble>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late List<Animation<double>> _dots;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+
+    _dots = List.generate(3, (i) {
+      final start = i * 0.2;
+      final end = (start + 0.4).clamp(0.0, 1.0);
+      return TweenSequence<double>([
+        TweenSequenceItem(tween: Tween(begin: 0.3, end: 1.0), weight: 1),
+        TweenSequenceItem(tween: Tween(begin: 1.0, end: 0.3), weight: 1),
+      ]).animate(
+        CurvedAnimation(
+          parent: _ctrl,
+          curve: Interval(start.clamp(0.0, 1.0), end, curve: Curves.easeInOut),
+        ),
+      );
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(left: 12, bottom: 6, top: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: _kDmIncomingBubble,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(16),
+            topRight: Radius.circular(16),
+            bottomRight: Radius.circular(16),
+            bottomLeft: Radius.circular(4),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: AnimatedBuilder(
+          animation: _ctrl,
+          builder: (context2, child2) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(3, (i) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: Opacity(
+                    opacity: _dots[i].value,
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.black54,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Бабл голосового сообщения
 // ─────────────────────────────────────────────────────────────
 
@@ -4562,23 +4975,28 @@ class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
   Duration _position = Duration.zero;
   Duration _total = Duration.zero;
 
+  late final StreamSubscription<PlayerState> _playerStateSub;
+  late final StreamSubscription<Duration> _positionSub;
+  late final StreamSubscription<Duration> _durationSub;
+  late final StreamSubscription<void> _completeSub;
+
   @override
   void initState() {
     super.initState();
     _total = Duration(seconds: widget.durationSeconds);
-    _player.onPlayerStateChanged.listen((s) {
+    _playerStateSub = _player.onPlayerStateChanged.listen((s) {
       if (!mounted) return;
       setState(() => _playing = s == PlayerState.playing);
     });
-    _player.onPositionChanged.listen((p) {
+    _positionSub = _player.onPositionChanged.listen((p) {
       if (!mounted) return;
       setState(() => _position = p);
     });
-    _player.onDurationChanged.listen((d) {
+    _durationSub = _player.onDurationChanged.listen((d) {
       if (!mounted) return;
       setState(() => _total = d);
     });
-    _player.onPlayerComplete.listen((_) {
+    _completeSub = _player.onPlayerComplete.listen((_) {
       if (!mounted) return;
       setState(() => _position = Duration.zero);
     });
@@ -4586,6 +5004,10 @@ class _VoiceMessageBubbleState extends State<_VoiceMessageBubble> {
 
   @override
   void dispose() {
+    _playerStateSub.cancel();
+    _positionSub.cancel();
+    _durationSub.cancel();
+    _completeSub.cancel();
     _player.dispose();
     super.dispose();
   }
@@ -5394,6 +5816,7 @@ class _GifMessageBubble extends StatelessWidget {
               gifUrl,
               fit: BoxFit.cover,
               width: side,
+              cacheWidth: side.toInt(),
               loadingBuilder: (ctx, child, progress) {
                 if (progress == null) return child;
                 return Container(

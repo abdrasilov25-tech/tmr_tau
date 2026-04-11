@@ -25,6 +25,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   late final TextEditingController _usernameController;
   late final TextEditingController _bioController;
   late final TextEditingController _cityController;
+  late final TextEditingController _residentNumberController;
   late final TextEditingController _instagramController;
   late final TextEditingController _telegramController;
   late final TextEditingController _websiteController;
@@ -42,6 +43,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _usernameController = TextEditingController(text: user?.username ?? '');
     _bioController = TextEditingController(text: user?.bio ?? '');
     _cityController = TextEditingController();
+    _residentNumberController = TextEditingController();
     _instagramController = TextEditingController();
     _telegramController = TextEditingController();
     _websiteController = TextEditingController();
@@ -55,6 +57,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
     _usernameController.dispose();
     _bioController.dispose();
     _cityController.dispose();
+    _residentNumberController.dispose();
     _instagramController.dispose();
     _telegramController.dispose();
     _websiteController.dispose();
@@ -82,6 +85,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 : _usernameController.text.trim(),
             gender: _gender,
             city: _cityController.text.trim(),
+            residentNumber: _residentNumberController.text.trim(),
             instagramUrl: _instagramController.text.trim(),
             telegramUsername: _telegramController.text.trim(),
             websiteUrl: _websiteController.text.trim(),
@@ -145,11 +149,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       final row = await supa.Supabase.instance.client
           .from('users')
-          .select('city,instagram_url,telegram_username,website_url')
+          .select('city,resident_number,instagram_url,telegram_username,website_url')
           .eq('id', uid)
           .maybeSingle();
       if (!mounted || row == null) return;
       _cityController.text = (row['city'] ?? '').toString();
+      _residentNumberController.text = (row['resident_number'] ?? '').toString();
       _instagramController.text = (row['instagram_url'] ?? '').toString();
       _telegramController.text = (row['telegram_username'] ?? '').toString();
       _websiteController.text = (row['website_url'] ?? '').toString();
@@ -206,6 +211,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   decoration: const InputDecoration(
                     labelText: 'Город',
                     hintText: 'Например, Алматы',
+                  ),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: _residentNumberController,
+                  decoration: const InputDecoration(
+                    labelText: 'Номер жителя',
+                    hintText: 'Городской номер (если есть)',
                   ),
                 ),
                 const SizedBox(height: 16),

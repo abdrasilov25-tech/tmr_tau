@@ -21,6 +21,10 @@
 -keep class com.google.firebase.** { *; }
 -dontwarn com.google.firebase.**
 
+# FlutterFire (Pigeon): без этого в release возможен channel-error на initializeCore / FCM.
+-keep class io.flutter.plugins.firebase.** { *; }
+-dontwarn io.flutter.plugins.firebase.**
+
 # Keep model classes used by Gson/Serialization
 -keepattributes Signature
 -keepattributes *Annotation*

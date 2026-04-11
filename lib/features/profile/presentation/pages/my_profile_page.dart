@@ -66,6 +66,12 @@ class _MyProfilePageState extends State<MyProfilePage> {
   int _loadRequestId = 0;
   Set<String> _hiddenPostIds = const <String>{};
   bool _autoReloadTriggeredForPublications = false;
+
+  // Кэшированные отфильтрованные списки — пересчитываются только при изменении данных
+  List<PostEntity> _visibleNewsPosts = const [];
+  List<PostEntity> _visiblePublicationPosts = const [];
+  List<PostEntity> _visibleVideoPosts = const [];
+  List<PostEntity> _cachedPrivatePosts = const [];
   List<StoryGroupEntity> _storyGroups = const [];
   Map<String, bool> _newStoriesByUserId = const {};
   String _myStoryNote = '';
@@ -267,16 +273,35 @@ class _MyProfilePageState extends State<MyProfilePage> {
   Future<void> _loadHiddenPostIds() async {
     final hidden = await HiddenPostsStorage.getHiddenPostIds();
     if (!mounted) return;
-    setState(() => _hiddenPostIds = hidden);
+    setState(() {
+      _hiddenPostIds = hidden;
+      _updateVisiblePosts();
+    });
   }
 
   bool _isPostHidden(PostEntity post) => _hiddenPostIds.contains(post.id);
+
+  void _updateVisiblePosts() {
+    _visibleNewsPosts = _newsPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+    _visiblePublicationPosts = _publicationPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+    _visibleVideoPosts = _videoPosts.where((p) => !_isPostHidden(p)).toList(growable: false);
+    _cachedPrivatePosts = [..._newsPosts, ..._publicationPosts, ..._videoPosts]
+        .where(_isPostHidden)
+        .fold<Map<String, PostEntity>>(<String, PostEntity>{}, (acc, p) {
+          acc[p.id] = p;
+          return acc;
+        })
+        .values
+        .toList(growable: false)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
 
   Future<void> _onHidePost(PostEntity post) async {
     await HiddenPostsStorage.hidePost(post.id);
     if (!mounted) return;
     setState(() {
       _hiddenPostIds = {..._hiddenPostIds, post.id};
+      _updateVisiblePosts();
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -290,6 +315,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
     if (!mounted) return;
     setState(() {
       _hiddenPostIds = {..._hiddenPostIds}..remove(post.id);
+      _updateVisiblePosts();
     });
   }
 
@@ -426,6 +452,7 @@ class _MyProfilePageState extends State<MyProfilePage> {
           _videoPosts = videoPosts;
           _myStoryNote = myStoryNote;
           _isFetchingPosts = false;
+          _updateVisiblePosts();
           if (publicationPosts.isNotEmpty) {
             _autoReloadTriggeredForPublications = false;
           }
@@ -927,7 +954,9 @@ class _MyProfilePageState extends State<MyProfilePage> {
         child: BlocBuilder<AuthBloc, AuthState>(
           buildWhen: (prev, curr) {
             bool authed(AuthState s) => s is AuthAuthenticated;
-            if (!authed(prev) && !authed(curr)) return false;
+            if (!authed(prev) && !authed(curr)) {
+              return prev != curr;
+            }
             if (authed(prev) != authed(curr)) return true;
             final p = (prev as AuthAuthenticated).user;
             final c = (curr as AuthAuthenticated).user;
@@ -935,16 +964,31 @@ class _MyProfilePageState extends State<MyProfilePage> {
                 p.avatarUrl != c.avatarUrl ||
                 p.name != c.name ||
                 p.username != c.username ||
-                p.email != c.email;
+                p.email != c.email ||
+                p.residentNumber != c.residentNumber;
           },
           builder: (context, state) {
             final user = state is AuthAuthenticated ? state.user : null;
             if (user == null) {
+              final guest = state is AuthBrowsingAsGuest;
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('Войдите в аккаунт'),
+                    Text(guest ? 'Гостевой режим' : 'Войдите в аккаунт'),
+                    if (guest) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Войдите, чтобы публиковать и управлять профилем.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withValues(alpha: 0.65),
+                            ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     FilledButton(
                       onPressed: () => context.push('/login'),
@@ -961,36 +1005,14 @@ class _MyProfilePageState extends State<MyProfilePage> {
               (g) => g?.userId == user.id,
               orElse: () => null,
             );
-            final visibleNewsPosts = _newsPosts
-                .where((p) => !_isPostHidden(p))
-                .toList(growable: false);
-            final visiblePublicationPosts = _publicationPosts
-                .where((p) => !_isPostHidden(p))
-                .toList(growable: false);
-            final visibleVideoPosts = _videoPosts
-                .where((p) => !_isPostHidden(p))
-                .toList(growable: false);
-            final privatePosts =
-                [..._newsPosts, ..._publicationPosts, ..._videoPosts]
-                    .where(_isPostHidden)
-                    .fold<Map<String, PostEntity>>(<String, PostEntity>{}, (
-                      acc,
-                      p,
-                    ) {
-                      acc[p.id] = p;
-                      return acc;
-                    })
-                    .values
-                    .toList(growable: false)
-                  ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
             return _ProfileContent(
               user: user,
               profile: _profile,
               selfVerified: _selfVerified,
-              newsPosts: visibleNewsPosts,
-              publicationPosts: visiblePublicationPosts,
-              videoPosts: visibleVideoPosts,
-              privatePosts: privatePosts,
+              newsPosts: _visibleNewsPosts,
+              publicationPosts: _visiblePublicationPosts,
+              videoPosts: _visibleVideoPosts,
+              privatePosts: _cachedPrivatePosts,
               tabIndex: _tabIndex,
               tabPageController: _profileTabPageController,
               onProfileTabSwipe: (i) {
@@ -2228,6 +2250,33 @@ class _ProfileContent extends StatelessWidget {
                                                 ),
                                               ),
                                             ],
+                                          ),
+                                        ],
+                                        if (user.residentNumber != null &&
+                                            user.residentNumber!.trim().isNotEmpty) ...[
+                                          const SizedBox(height: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Theme.of(context)
+                                                  .colorScheme
+                                                  .primaryContainer
+                                                  .withValues(alpha: 0.45),
+                                              borderRadius: BorderRadius.circular(20),
+                                            ),
+                                            child: Text(
+                                              'Житель № ${user.residentNumber}',
+                                              textAlign: TextAlign.center,
+                                              style: Theme.of(context)
+                                                  .textTheme
+                                                  .labelLarge
+                                                  ?.copyWith(
+                                                    fontWeight: FontWeight.w700,
+                                                  ),
+                                            ),
                                           ),
                                         ],
                                       ],

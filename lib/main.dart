@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'app.dart';
+import 'core/auth/guest_session_storage.dart';
 import 'core/accounts/account_repository.dart';
 import 'core/storage/chat_list_storage.dart';
 import 'core/storage/chat_story_list_storage.dart';
@@ -115,6 +116,7 @@ Future<void> main() async {
   const secureStorage = FlutterSecureStorage();
   final multiAccountStorage = MultiAccountStorage(prefs, secureStorage);
   final accountRepository = AccountRepositoryImpl(prefs);
+  final guestSessionStorage = GuestSessionStorage(prefs);
 
   runApp(TmrTauApp(
     feedbackPreferencesStorage: feedbackPrefs,
@@ -129,5 +131,6 @@ Future<void> main() async {
     chatStickerFavoritesStorage: chatStickerFavoritesStorage,
     multiAccountStorage: multiAccountStorage,
     accountRepository: accountRepository,
+    guestSessionStorage: guestSessionStorage,
   ));
 }

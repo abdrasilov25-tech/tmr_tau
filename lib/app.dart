@@ -72,6 +72,7 @@ import 'features/tap_game/data/tap_game_local_hall_repository_impl.dart';
 import 'features/tap_game/data/tap_game_repository_impl.dart';
 import 'features/tap_game/domain/repositories/tap_game_local_hall_repository.dart';
 import 'features/tap_game/domain/repositories/tap_game_repository.dart';
+import 'core/auth/guest_session_storage.dart';
 import 'core/feedback/feedback_preferences_storage.dart';
 import 'core/constants/legal_urls.dart';
 import 'core/config/dev_runtime_flags.dart';
@@ -104,6 +105,7 @@ class TmrTauApp extends StatefulWidget {
     required this.multiAccountStorage,
     required this.accountRepository,
     required this.feedbackPreferencesStorage,
+    required this.guestSessionStorage,
   });
 
   final String supabaseUrl;
@@ -118,6 +120,7 @@ class TmrTauApp extends StatefulWidget {
   final ChatStickerFavoritesStorage chatStickerFavoritesStorage;
   final MultiAccountStorage multiAccountStorage;
   final AccountRepository accountRepository;
+  final GuestSessionStorage guestSessionStorage;
 
   @override
   State<TmrTauApp> createState() => _TmrTauAppState();
@@ -379,6 +382,7 @@ class _TmrTauAppState extends State<TmrTauApp> with WidgetsBindingObserver {
         create: (context) => AuthBloc(
           _authRepository,
           widget.multiAccountStorage,
+          widget.guestSessionStorage,
         )..add(const AuthCheckRequested()),
         child: BlocProvider(
           create: (context) => PaymentCubit(context.read<PaymentService>()),

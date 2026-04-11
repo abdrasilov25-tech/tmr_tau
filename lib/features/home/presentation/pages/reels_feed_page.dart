@@ -6,6 +6,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:tmr_tau/core/auth/show_login_prompt.dart';
 import 'package:tmr_tau/core/following/following_change_bus.dart';
 import 'package:tmr_tau/core/formatting/compact_count_format.dart';
 import 'package:tmr_tau/core/widgets/double_tap_like_burst.dart';
@@ -257,7 +258,13 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   }
 
   Future<void> _toggleLike(int index) async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null) {
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы ставить лайки.',
+      );
+      return;
+    }
     final post = _posts[index];
     try {
       await context
@@ -284,7 +291,13 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   }
 
   Future<void> _toggleRepost(int index) async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null) {
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы сделать репост.',
+      );
+      return;
+    }
     final post = _posts[index];
     try {
       await context
@@ -305,7 +318,13 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   }
 
   Future<void> _toggleSave(int index) async {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null) {
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы сохранять публикации.',
+      );
+      return;
+    }
     final post = _posts[index];
     try {
       await context
@@ -321,7 +340,14 @@ class _ReelsFeedPageState extends State<ReelsFeedPage>
   }
 
   Future<void> _toggleFollowAuthor(String authorId) async {
-    if (_currentUserId == null || authorId == _currentUserId) return;
+    if (_currentUserId == null) {
+      await showLoginRequiredDialog(
+        context,
+        message: 'Войдите в аккаунт, чтобы подписаться на автора.',
+      );
+      return;
+    }
+    if (authorId == _currentUserId) return;
     try {
       await context.read<ProfileRepository>().toggleFollow(
             _currentUserId!,

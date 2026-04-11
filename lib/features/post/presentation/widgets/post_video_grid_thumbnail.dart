@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:get_thumbnail_video/index.dart';
@@ -55,7 +56,15 @@ class _PostVideoGridThumbnailState extends State<PostVideoGridThumbnail> {
         quality: 50,
       );
       if (!mounted) return;
-      if (data.isNotEmpty) {
+      if (data.isEmpty) {
+        setState(() => _failed = true);
+        return;
+      }
+      // Плагин иногда отдаёт непустой буфер без валидного JPEG — без проверки
+      // Image.memory бросает «Invalid image data» в image resource service.
+      final decodable = await _bytesDecodeAsImage(data);
+      if (!mounted) return;
+      if (decodable) {
         setState(() {
           _bytes = data;
           _failed = false;
@@ -65,6 +74,21 @@ class _PostVideoGridThumbnailState extends State<PostVideoGridThumbnail> {
       }
     } catch (_) {
       if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  /// true, если Flutter может декодировать [bytes] как растровое изображение.
+  static Future<bool> _bytesDecodeAsImage(Uint8List bytes) async {
+    ui.Codec? codec;
+    try {
+      codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      frame.image.dispose();
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      codec?.dispose();
     }
   }
 

@@ -647,6 +647,18 @@ class _SellerProfileViewState extends State<_SellerProfileView> {
                         ],
                       ],
                     ),
+                    if (profile.residentNumber != null &&
+                        profile.residentNumber!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        'Житель № ${profile.residentNumber}',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: ThemedContentSurface.profileTextSecondary,
+                              fontWeight: FontWeight.w700,
+                            ),
+                      ),
+                    ],
                     if (profile.bio != null && profile.bio!.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       Container(
