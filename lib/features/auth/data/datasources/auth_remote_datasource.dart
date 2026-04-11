@@ -31,12 +31,46 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     String name, {
     String? emailRedirectTo,
   }) async {
-    return _client.auth.signUp(
-      password: password,
-      email: email,
-      emailRedirectTo: emailRedirectTo,
-      data: {'name': name},
-    );
+    Future<AuthResponse> call(String? redirect) {
+      return _client.auth.signUp(
+        password: password,
+        email: email,
+        emailRedirectTo: redirect,
+        data: {'name': name},
+      );
+    }
+
+    try {
+      return await call(emailRedirectTo);
+    } catch (e) {
+      // Если `emailRedirectTo` не добавлен в Supabase → URL Configuration → Redirect URLs,
+      // API отклоняет всю регистрацию. Повтор без redirect: письмо уйдёт с Site URL из Dashboard.
+      final redirect = emailRedirectTo;
+      if (redirect != null &&
+          redirect.isNotEmpty &&
+          _isLikelyRedirectAllowlistError(e)) {
+        return await call(null);
+      }
+      rethrow;
+    }
+  }
+
+  /// Ошибки валидации redirect_to / redirect_uri на стороне GoTrue.
+  static bool _isLikelyRedirectAllowlistError(Object e) {
+    final s = e.toString().toLowerCase();
+    if (s.contains('redirect') &&
+        (s.contains('not allowed') ||
+            s.contains('invalid') ||
+            s.contains('must'))) {
+      return true;
+    }
+    if (s.contains('redirect_uri') || s.contains('redirect_to')) {
+      return true;
+    }
+    if (s.contains('validation_failed') && s.contains('redirect')) {
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -46,10 +80,11 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
 
   @override
   Future<AppUser?> fetchUserProfile(String uid) async {
+    // Колонка `email` в public.users может отсутствовать (email живёт в auth.users).
     final res = await _client
         .from(SupabaseConstants.usersTable)
         .select(
-          'id,email,name,username,avatar,bio,followers_count',
+          'id,name,username,avatar,bio,followers_count',
         )
         .eq('id', uid)
         .maybeSingle();

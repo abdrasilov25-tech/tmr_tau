@@ -21,7 +21,9 @@ class LiveBattleRepositoryImpl implements LiveBattleRepository {
   @override
   Future<List<LiveBattleLobbyPlayer>> fetchLobbyPlayers({int limit = 120}) async {
     final meId = _client.auth.currentUser?.id;
+    // Сначала без `email`: колонки может не быть в public.users (email в auth.users).
     const columnSets = <String>[
+      'id,name,avatar,username,telegram_username,last_active_at,updated_at',
       'id,name,avatar,username,email,telegram_username,last_active_at,updated_at',
       'id,name,avatar,telegram_username,last_active_at,updated_at',
       'id,name,avatar,last_active_at,updated_at',

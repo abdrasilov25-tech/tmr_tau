@@ -610,9 +610,12 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                   loading: loading,
                 ),
                 const SizedBox(height: 22),
-                // ── Register link ──
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+                // ── Register link (Wrap: no horizontal overflow on narrow screens) ──
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  alignment: WrapAlignment.center,
+                  spacing: 0,
+                  runSpacing: 4,
                   children: [
                     Text(
                       'Нет аккаунта? ',
@@ -621,8 +624,18 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                         color: subtitleColor,
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () => context.push('/register'),
+                    TextButton(
+                      onPressed: loading || oauthLoading
+                          ? null
+                          : () => context.push('/register'),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
                       child: Text(
                         'Зарегистрироваться',
                         style: GoogleFonts.poppins(

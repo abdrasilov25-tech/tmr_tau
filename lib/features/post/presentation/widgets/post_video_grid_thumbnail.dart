@@ -55,7 +55,7 @@ class _PostVideoGridThumbnailState extends State<PostVideoGridThumbnail> {
         quality: 50,
       );
       if (!mounted) return;
-      if (data != null && data.isNotEmpty) {
+      if (data.isNotEmpty) {
         setState(() {
           _bytes = data;
           _failed = false;

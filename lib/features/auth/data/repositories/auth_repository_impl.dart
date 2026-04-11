@@ -45,15 +45,38 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<AppUser?> fetchUserProfileFromRemote(String uid) async {
     try {
-      final profile = await _dataSource.fetchUserProfile(uid);
-      if (profile != null) {
-        _cachedUser = profile;
-        return profile;
+      final merged = await _fetchUserProfileMerged(uid);
+      if (merged != null) {
+        _cachedUser = merged;
+        return merged;
       }
       return null;
     } catch (e) {
       return null;
     }
+  }
+
+  /// Профиль из `public.users` + email из JWT (в таблице часто нет колонки `email`).
+  Future<AppUser?> _fetchUserProfileMerged(String uid) async {
+    final raw = await _dataSource.fetchUserProfile(uid);
+    if (raw == null) return null;
+    return _mergeSessionEmail(raw);
+  }
+
+  AppUser _mergeSessionEmail(AppUser profile) {
+    if (profile.email.isNotEmpty) return profile;
+    final authEmail = _client.auth.currentUser?.email ?? '';
+    if (authEmail.isEmpty) return profile;
+    return AppUser(
+      id: profile.id,
+      email: authEmail,
+      name: profile.name,
+      username: profile.username,
+      avatarUrl: profile.avatarUrl,
+      bio: profile.bio,
+      followersCount: profile.followersCount,
+      followingCount: profile.followingCount,
+    );
   }
 
   @override
@@ -92,11 +115,11 @@ class AuthRepositoryImpl implements AuthRepository {
     final authUser = _client.auth.currentUser;
     final uid = authUser?.id;
     if (uid == null) return;
-    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    _cachedUser = await _fetchUserProfileMerged(uid);
     if (_cachedUser == null) {
       try {
         await _ensureUserRow(uid, email, _getName(authUser) ?? email);
-        _cachedUser = await _dataSource.fetchUserProfile(uid);
+        _cachedUser = await _fetchUserProfileMerged(uid);
       } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
@@ -130,8 +153,12 @@ class AuthRepositoryImpl implements AuthRepository {
 
     if (response.session != null && response.user != null) {
       final uid = response.user!.id;
-      await _ensureUserRow(uid, email, name);
-      _cachedUser = await _dataSource.fetchUserProfile(uid);
+      try {
+        await _ensureUserRow(uid, email, name);
+      } catch (_) {
+        // RLS/сеть: не блокируем вход — профиль подтянется позже или из метаданных.
+      }
+      _cachedUser = await _fetchUserProfileMerged(uid);
       _cachedUser ??= AppUser(
         id: uid,
         email: response.user!.email ?? email,
@@ -152,11 +179,12 @@ class AuthRepositoryImpl implements AuthRepository {
       'prompt': 'select_account',
     };
     final webClientId = OAuthEnvConfig.googleWebClientId;
-    // На iOS лишний/несовпадающий client_id в query ломает OAuth; для мобильных
-    // достаточно настроек провайдера в Supabase Dashboard.
-    final attachWebClientId =
-        kIsWeb ||
-        (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
+    // Web Client ID в query (в т.ч. iOS): иначе Google может выдать id_token с aud = iOS client,
+    // а Supabase проверяет по Web Client ID → AuthApiException «Unacceptable audience».
+    final attachWebClientId = kIsWeb ||
+        (!kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS));
     if (attachWebClientId && webClientId.isNotEmpty) {
       queryParams['client_id'] = webClientId;
     }
@@ -177,11 +205,11 @@ class AuthRepositoryImpl implements AuthRepository {
     }
     final authUser = await _waitForOAuthUser();
     final uid = authUser.id;
-    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    _cachedUser = await _fetchUserProfileMerged(uid);
     if (_cachedUser == null) {
       try {
         await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
-        _cachedUser = await _dataSource.fetchUserProfile(uid);
+        _cachedUser = await _fetchUserProfileMerged(uid);
       } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
@@ -217,11 +245,11 @@ class AuthRepositoryImpl implements AuthRepository {
     }
     final authUser = await _waitForOAuthUser();
     final uid = authUser.id;
-    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    _cachedUser = await _fetchUserProfileMerged(uid);
     if (_cachedUser == null) {
       try {
         await _ensureUserRow(uid, authUser.email ?? '', _getName(authUser) ?? '');
-        _cachedUser = await _dataSource.fetchUserProfile(uid);
+        _cachedUser = await _fetchUserProfileMerged(uid);
       } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
@@ -255,11 +283,11 @@ class AuthRepositoryImpl implements AuthRepository {
     final uid = authUser?.id;
     if (uid == null) return;
 
-    _cachedUser = await _dataSource.fetchUserProfile(uid);
+    _cachedUser = await _fetchUserProfileMerged(uid);
     if (_cachedUser == null) {
       try {
         await _ensureUserRow(uid, phone, _getName(authUser) ?? phone);
-        _cachedUser = await _dataSource.fetchUserProfile(uid);
+        _cachedUser = await _fetchUserProfileMerged(uid);
       } catch (e) {
         // Профиль в БД не создался — пускаем в приложение с данными из сессии
       }
@@ -422,7 +450,6 @@ class AuthRepositoryImpl implements AuthRepository {
     await _client.auth.signInWithIdToken(
       provider: OAuthProvider.apple,
       idToken: idToken,
-      accessToken: credential.authorizationCode,
       nonce: rawNonce,
     );
 
@@ -469,7 +496,7 @@ class AuthRepositoryImpl implements AuthRepository {
     String combinedName,
   ) async {
     try {
-      var profile = await _dataSource.fetchUserProfile(uid);
+      var profile = await _fetchUserProfileMerged(uid);
       if (profile != null) {
         if (_client.auth.currentUser?.id == uid) {
           _cachedUser = profile;
@@ -481,7 +508,7 @@ class AuthRepositoryImpl implements AuthRepository {
         authUser.email ?? '',
         combinedName.isNotEmpty ? combinedName : (_getName(authUser) ?? ''),
       );
-      profile = await _dataSource.fetchUserProfile(uid);
+      profile = await _fetchUserProfileMerged(uid);
       if (profile != null && _client.auth.currentUser?.id == uid) {
         _cachedUser = profile;
       }

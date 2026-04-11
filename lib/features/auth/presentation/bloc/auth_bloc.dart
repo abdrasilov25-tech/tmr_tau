@@ -239,6 +239,14 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   static String _authErrorMessage(Object e) {
     final raw = e.toString();
     final s = raw.toLowerCase();
+    if (s.contains('unacceptable audience') && s.contains('id_token')) {
+      return 'Вход отклонён: audience в токене не совпадает с Supabase. '
+          'Если это Apple: в Dashboard → Authentication → Providers → Apple '
+          'в поле Client ID добавьте Bundle ID приложения: com.tmrtau.app '
+          '(при необходимости через запятую вместе с Services ID). '
+          'Если это Google: в том же разделе для Google в Client ID укажите '
+          'Web и iOS client ID из Google Cloud через запятую.';
+    }
     if (s.contains('redirect_uri_mismatch')) {
       final callback = OAuthEnvConfig.supabaseAuthV1CallbackUrl;
       final tail = callback != null
@@ -255,6 +263,17 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         raw.contains('регистрация')) {
       return 'Вход отклонён сервером: проверьте, что в Supabase включён провайдер '
           '(Google / Apple) и разрешена регистрация новых пользователей.';
+    }
+    if (s.contains('over_email_send_rate') ||
+        s.contains('email rate limit') ||
+        (s.contains('rate limit') && s.contains('email'))) {
+      return 'Слишком много запросов к почте. Подождите несколько минут и попробуйте снова.';
+    }
+    if (s.contains('password') &&
+        (s.contains('weak') ||
+            s.contains('pwned') ||
+            (s.contains('least') && s.contains('character')))) {
+      return 'Пароль не подходит под требования сервера. Усильте пароль и попробуйте снова.';
     }
     if (s.contains('email not confirmed') || s.contains('confirm your email')) {
       return 'Подтвердите email: проверьте почту и перейдите по ссылке из письма.';

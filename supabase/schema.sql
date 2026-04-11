@@ -22,6 +22,7 @@ alter table public.users add column if not exists story_note text default '';
 alter table public.users add column if not exists note_location text default '';
 alter table public.users add column if not exists share_location boolean default false;
 alter table public.users add column if not exists city text default '';
+alter table public.users add column if not exists email text;
 alter table public.users add column if not exists instagram_url text default '';
 alter table public.users add column if not exists telegram_username text default '';
 alter table public.users add column if not exists website_url text default '';
