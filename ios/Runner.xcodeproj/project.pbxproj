@@ -210,6 +210,7 @@
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				839507F14931E022406A4DE6 /* [CP] Copy Pods Resources */,
 				56D9F850CCA5080C11734EB2 /* [CP] Embed Pods Frameworks */,
+				A7F2C8E91D4B5020900C1A0B /* Copy Agora vendor dSYMs */,
 			);
 			buildRules = (
 			);
@@ -394,6 +395,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		A7F2C8E91D4B5020900C1A0B /* Copy Agora vendor dSYMs */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Agora vendor dSYMs";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -f \"${SRCROOT}/scripts/copy_agora_dsyms.sh\" ]; then /bin/sh \"${SRCROOT}/scripts/copy_agora_dsyms.sh\"; fi\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
