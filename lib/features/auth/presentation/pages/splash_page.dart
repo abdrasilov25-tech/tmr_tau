@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
@@ -102,36 +103,46 @@ class _SplashPageState extends State<SplashPage>
           if (mounted) _scheduleNavigateFromAuth();
         });
       },
-      child: Scaffold(
-        backgroundColor: const Color(0xFF080A10),
-        body: AnimatedBuilder(
-          animation: _fadeOutController,
-          builder: (context, child) {
-            final fadeOut = 1.0 - _fadeOutController.value;
-            return Opacity(
-              opacity: fadeOut,
-              child: child,
-            );
-          },
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              const SplashQarmetHeroBackdrop(),
-              SafeArea(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: MediaQuery.sizeOf(context).width - 40,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        value: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+          systemNavigationBarColor: Color(0xFF080A10),
+          systemNavigationBarIconBrightness: Brightness.light,
+        ),
+        child: Scaffold(
+          backgroundColor: const Color(0xFF080A10),
+          extendBody: true,
+          extendBodyBehindAppBar: true,
+          body: AnimatedBuilder(
+            animation: _fadeOutController,
+            builder: (context, child) {
+              final fadeOut = 1.0 - _fadeOutController.value;
+              return Opacity(
+                opacity: fadeOut,
+                child: child,
+              );
+            },
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const Positioned.fill(child: SplashQarmetHeroBackdrop()),
+                SafeArea(
+                  child: Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.sizeOf(context).width - 40,
+                        ),
+                        child: const TemirtauTramLoader(height: 56),
                       ),
-                      child: const TemirtauTramLoader(height: 62),
                     ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

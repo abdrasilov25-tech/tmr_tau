@@ -85,6 +85,8 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: ^0.20.2
+  get_thumbnail_video: ^0.7.3
+  flutter_native_splash: ^2.4.7
 
 dev_dependencies:
   flutter_test:
@@ -107,6 +109,17 @@ flutter_launcher_icons:
   web:
     generate: true
   image_path: "assets/icons.png"
+
+# Нативный splash до первого кадра Flutter: тёмный фон, картинка на весь экран (без белой «плашки»).
+flutter_native_splash:
+  color: "#080A10"
+  image: assets/splash_qarmet_hero.png
+  fullscreen: true
+  android_gravity: fill
+  ios_content_mode: scaleAspectFill
+  android_12:
+    color: "#080A10"
+    image: assets/splash_qarmet_hero.png
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

@@ -2,3 +2,4 @@
 #include "Generated.xcconfig"
 #include? "Secrets.xcconfig"
 SDKROOT = iphoneos
+SDKROOT = iphoneos

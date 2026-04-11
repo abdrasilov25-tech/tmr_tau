@@ -201,7 +201,8 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
                     ),
                     const SizedBox(height: 10),
                   ],
-                  if (!state.isStoreReady) ...[
+                  if (state.storeInitError == null &&
+                      !context.read<PaymentService>().hasAnyQarmetConsumableInStore) ...[
                     const _StoreConnectingHint(),
                     const SizedBox(height: 10),
                   ],
@@ -210,7 +211,9 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
                       pack: pack,
                       isPurchasingThisPack:
                           state.purchasingQarmetProductId == pack.productId,
-                      canTapBuy: state.canTapBuyQarmetPackage(pack.productId),
+                      canTapBuy: context
+                          .read<PaymentCubit>()
+                          .canPurchaseQarmetProduct(pack.productId),
                       isBestPricePackage: bestDealProductId == pack.productId,
                       onBuy: () => context
                           .read<PaymentCubit>()

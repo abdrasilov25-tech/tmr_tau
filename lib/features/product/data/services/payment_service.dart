@@ -147,6 +147,14 @@ class PaymentService {
     profileCosmeticsLifetimeProductId,
   };
 
+  /// Consumable Qarmet packs (не подписка) — для UI «можно купить этот SKU».
+  static const Set<String> qarmetConsumableProductIds = <String>{
+    promotionStartProductId,
+    promotionPremiumProductId,
+    promotionBusinessProductId,
+    promotionEliteProductId,
+  };
+
   List<QarmetProduct> get catalog =>
       _qarmetCatalog.values.toList(growable: false);
 
@@ -154,6 +162,13 @@ class PaymentService {
 
   /// true только когда [initStore] успешно завершился и продукты загружены.
   bool get isStoreCatalogLoaded => _storeCatalogLoaded && _storeAvailable;
+
+  bool hasLoadedStoreProduct(String storeProductId) =>
+      _productDetailsById(storeProductId) != null;
+
+  /// Хотя бы один consumable-пакет Qarmet есть в ответе StoreKit.
+  bool get hasAnyQarmetConsumableInStore =>
+      qarmetConsumableProductIds.any(hasLoadedStoreProduct);
 
   /// Плагин iOS отдаёт [IAPError] `storekit_no_response`, если нативный ответ пустой
   /// (часто гонка сразу после cold start, не «нет сети»).
@@ -214,16 +229,17 @@ class PaymentService {
   ) async {
     await Future<void>.delayed(const Duration(milliseconds: 60));
     var response = await _queryProductDetailsOnceWithTransientRetries(productIds);
-    // Пустой список при отсутствии жёсткой ошибки — типично для симулятора / гонки после старта.
+    // Пустой список при отсутствии жёсткой ошибки — типично для гонки после cold start.
+    // Максимум 2 ретрая (300ms + 600ms) чтобы не блокировать UI надолго.
     if (productIds.isNotEmpty && response.productDetails.isEmpty) {
-      const emptyMax = 5;
+      const emptyMax = 2;
       for (var j = 0; j < emptyMax; j++) {
         if (response.productDetails.isNotEmpty) break;
         if (response.error != null &&
             !_isTransientStoreKitQueryError(response.error)) {
           break;
         }
-        final ms = 280 * (j + 1);
+        final ms = 300 * (j + 1);
         debugPrint(
           'IAP queryProductDetails empty (err=${response.error?.code}), '
           'retry in ${ms}ms (${j + 1}/$emptyMax)',
@@ -339,6 +355,80 @@ class PaymentService {
     }
   }
 
+  /// До 8 попыток: сразу после запуска [InAppPurchase.isAvailable] часто даёт false.
+  Future<bool> _iapIsAvailableWithRetries() async {
+    for (var i = 0; i < 8; i++) {
+      try {
+        if (await _iap.isAvailable()) {
+          if (i > 0) {
+            debugPrint('IAP: isAvailable=true после попытки ${i + 1}');
+          }
+          return true;
+        }
+      } catch (e, st) {
+        debugPrint('IAP isAvailable исключение (попытка ${i + 1}): $e\n$st');
+      }
+      await Future<void>.delayed(Duration(milliseconds: 100 + 90 * i));
+    }
+    return false;
+  }
+
+  /// На iOS иногда канал плагина сообщает «недоступно», а запрос каталога работает.
+  Future<bool> _iosStoreAvailableProbeViaProductQuery() async {
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      final r = await _queryProductDetailsOnceWithTransientRetries({
+        promotionStartProductId,
+      });
+      if (r.productDetails.isNotEmpty) {
+        debugPrint(
+          'IAP: iOS probe — получены продукты (${r.productDetails.length}), считаем магазин доступным',
+        );
+        return true;
+      }
+      if (r.error != null) {
+        debugPrint('IAP: iOS probe пусто, error=${r.error}');
+      }
+    } catch (e, st) {
+      debugPrint('IAP iOS probe: $e\n$st');
+    }
+    return false;
+  }
+
+  Future<bool> _androidStoreAvailableProbeViaProductQuery() async {
+    try {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      final r = await _queryProductDetailsOnceWithTransientRetries({
+        promotionStartProductId,
+      });
+      if (r.productDetails.isNotEmpty) {
+        debugPrint(
+          'IAP: Android probe — получены продукты (${r.productDetails.length}), считаем магазин доступным',
+        );
+        return true;
+      }
+      if (r.error != null) {
+        debugPrint('IAP: Android probe пусто, error=${r.error}');
+      }
+    } catch (e, st) {
+      debugPrint('IAP Android probe: $e\n$st');
+    }
+    return false;
+  }
+
+  String _storeUnavailableUserMessage() {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      return 'Магазин покупок недоступен. Нужен Google Play и аккаунт Google. '
+          'На эмуляторе выберите образ с иконкой Play Store (не «Google APIs» без Play).';
+    }
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'Магазин покупок недоступен. Проверьте: Настройки → Экранное время → '
+          'Контент и конфиденциальность — покупки In‑App не должны быть запрещены. '
+          'Перезапустите приложение. Для storekit.storekit запускайте из Xcode (Run).';
+    }
+    return 'Магазин покупок недоступен на этом устройстве.';
+  }
+
   Future<void> initStore({bool forceCatalogRefresh = false}) {
     if (!forceCatalogRefresh &&
         _storeCatalogLoaded &&
@@ -364,15 +454,29 @@ class PaymentService {
     }
     try {
       await WidgetsBinding.instance.endOfFrame;
-      await Future<void>.delayed(const Duration(milliseconds: 120));
+      await Future<void>.delayed(const Duration(milliseconds: 200));
 
-      final available = await _iap.isAvailable();
+      // StoreKit / Play Billing часто отвечают false на isAvailable сразу после cold start.
+      var available = await _iapIsAvailableWithRetries();
+      if (!available && !kIsWeb) {
+        if (defaultTargetPlatform == TargetPlatform.iOS) {
+          debugPrint(
+            'IAP: isAvailable=false после ретраев — пробуем queryProductDetails (обход гонки StoreKit)',
+          );
+          available = await _iosStoreAvailableProbeViaProductQuery();
+        } else if (defaultTargetPlatform == TargetPlatform.android) {
+          debugPrint(
+            'IAP: isAvailable=false на Android — пробуем queryProductDetails (Play Billing)',
+          );
+          available = await _androidStoreAvailableProbeViaProductQuery();
+        }
+      }
       _storeAvailable = available;
       if (!available) {
         _products = const <ProductDetails>[];
         _storeCatalogLoaded = false;
-        _storeInitError = 'Магазин покупок недоступен на устройстве';
-        debugPrint('IAP init: store unavailable');
+        _storeInitError = _storeUnavailableUserMessage();
+        debugPrint('IAP init: store unavailable (isAvailable + probe не удались)');
         return;
       }
 
@@ -390,7 +494,7 @@ class PaymentService {
       }
       if (response.productDetails.isEmpty && allIds.isNotEmpty) {
         debugPrint(
-          'IAP init: порционный запрос без продуктов, пробуем по одному Product ID',
+          'IAP init: порционный запрос пуст, пробуем по одному Product ID',
         );
         response = await _queryProductDetailsSequentialIds(allIds);
       }
@@ -403,15 +507,12 @@ class PaymentService {
               _friendlyIapUserMessage(response.error!.message);
           debugPrint('IAP init queryProductDetails error: ${response.error}');
         } else {
-          _storeInitError =
-              'Не удалось получить товары из App Store. Проверьте StoreKit Configuration '
-              'в схеме Xcode и Product ID в App Store Connect.';
+          _storeInitError = _emptyIapCatalogHint();
         }
         return;
       }
 
       _products = response.productDetails;
-      _storeCatalogLoaded = true;
       debugPrint(
         'IAP catalog loaded: count=${_products.length} '
         'ids=[${_products.map((e) => e.id).join(",")}]',
@@ -434,9 +535,23 @@ class PaymentService {
       if (notFound.isNotEmpty) {
         debugPrint('IAP notFoundIDs (нет в ASC или неверный id): $notFound');
       }
-      if (_products.isEmpty) {
+      final loadedIds = _products.map((e) => e.id).toSet();
+      // Subscriptions load slower than consumables — only require consumable
+      // Qarmet packages for the store to be considered ready. Subscription
+      // absence should not block purchases of qarmet_10/20/30/40.
+      final requiredQarmetIds = qarmetConsumableProductIds;
+      final missingRequired = requiredQarmetIds
+          .where((id) => !loadedIds.contains(id))
+          .toList();
+      _storeCatalogLoaded = _products.isNotEmpty && missingRequired.isEmpty;
+      if (_products.isEmpty || missingRequired.isNotEmpty) {
         _storeInitError = notFound.isEmpty
-            ? 'Не удалось получить товары из App Store. Проверьте сеть, Sandbox и capability In‑App Purchase.'
+            ? (missingRequired.isNotEmpty
+                  ? 'Не все товары Qarmet доступны в App Store: '
+                        '${missingRequired.join(", ")}. '
+                        'Проверьте Product ID в App Store Connect и статус In‑App Purchase.'
+                        '${_iosFlutterRunStoreKitHintSuffix()}'
+                  : '${_emptyIapCatalogHint()} Проверьте также сеть, Sandbox и capability In‑App Purchase.')
             : 'В App Store не найдены товары: ${notFound.join(", ")}. '
                 'Создайте в App Store Connect In‑App Purchase с **такими же** Product ID или измените константы в PaymentService.';
       } else {
@@ -1507,6 +1622,26 @@ class PaymentService {
     return null;
   }
 
+  /// Локальный [ios/storekit.storekit] подключается схемой Xcode; `flutter run` часто
+  /// не применяет StoreKit Configuration из схемы — тогда каталог пустой.
+  String _emptyIapCatalogHint() {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+      return 'Не удалось получить товары из StoreKit. Откройте ios/Runner.xcworkspace, '
+          'схема Runner → Run → Options → StoreKit Configuration = storekit.storekit '
+          'и запустите приложение кнопкой Run в Xcode (не через «flutter run»). '
+          'Для продакшена нужны те же Product ID в App Store Connect.';
+    }
+    return 'Не удалось получить товары из магазина. Проверьте In‑App Purchase и сеть.';
+  }
+
+  String _iosFlutterRunStoreKitHintSuffix() {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+      return '';
+    }
+    return ' Если тестируете на симуляторе с локальным storekit — запускайте из Xcode, '
+        'иначе список товаров может быть пустым.';
+  }
+
   /// Сообщение для пользователя; не подменяем любую ошибку со словом «storekit» —
   /// при StoreKit Testing в тексте почти всегда есть storekit/storekit2, иначе UI врёт про «App Store».
   String _friendlyIapUserMessage(String? raw) {
@@ -1579,7 +1714,8 @@ class PaymentService {
     if (code.contains('failed_to_fetch_product') ||
         code == 'storekit2_products_error') {
       return 'Товар не найден в StoreKit. Сверьте Product ID с ios/storekit.storekit и '
-          'PaymentService; в схеме Runner должен быть подключён StoreKit Configuration.';
+          'PaymentService; в схеме Runner → Run → Options должен быть storekit.storekit. '
+          'Локальный каталог работает при запуске из Xcode, не через «flutter run».';
     }
     return _friendlyIapUserMessage(
       '${e.code} ${e.message ?? ''} ${e.details ?? ''}',

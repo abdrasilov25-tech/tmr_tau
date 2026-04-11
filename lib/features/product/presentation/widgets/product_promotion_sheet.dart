@@ -154,7 +154,9 @@ class _ProductPromotionSheetState extends State<ProductPromotionSheet> {
                               subtitle: Text(
                                 '${pack.priceKzt} тг, ~${pack.pricePerQarmet.toStringAsFixed(2)} тг/Qarmet',
                               ),
-                              onTap: state.canTapBuyQarmetPackage(pack.productId)
+                              onTap: context
+                                      .read<PaymentCubit>()
+                                      .canPurchaseQarmetProduct(pack.productId)
                                   ? () => context
                                       .read<PaymentCubit>()
                                       .buyQarmetPackage(pack.productId)

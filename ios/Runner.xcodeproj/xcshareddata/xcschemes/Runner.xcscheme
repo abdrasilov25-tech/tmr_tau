@@ -99,6 +99,9 @@
             ReferencedContainer = "container:Runner.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <StoreKitConfigurationFileReference
+         identifier = "../storekit.storekit">
+      </StoreKitConfigurationFileReference>
    </ProfileAction>
    <AnalyzeAction
       buildConfiguration = "Debug">

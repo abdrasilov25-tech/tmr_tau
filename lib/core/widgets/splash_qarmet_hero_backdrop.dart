@@ -48,8 +48,8 @@ class _SplashQarmetHeroBackdropState extends State<SplashQarmetHeroBackdrop>
             animation: _ambient,
             builder: (context, child) {
               final t = _ambient.value * math.pi * 2;
-              // Сильнее «от зрителя» + очень мягкое дыхание (меньше нагрузка на глаза).
-              final scale = 0.815 + 0.01 * math.sin(t * 0.85);
+              // Лёгкое «дыхание» без уменьшения кадра — иначе по краям виден фон (как «обрезанная» картинка).
+              final scale = 1.0 + 0.006 * math.sin(t * 0.85);
               return Stack(
                 fit: StackFit.expand,
                 children: [
@@ -64,7 +64,7 @@ class _SplashQarmetHeroBackdropState extends State<SplashQarmetHeroBackdrop>
                       fit: BoxFit.cover,
                       alignment: Alignment.center,
                       gaplessPlayback: true,
-                      filterQuality: FilterQuality.medium,
+                      filterQuality: FilterQuality.high,
                       errorBuilder: (context, error, stackTrace) => const Center(
                         child: Icon(
                           Icons.image_not_supported_outlined,

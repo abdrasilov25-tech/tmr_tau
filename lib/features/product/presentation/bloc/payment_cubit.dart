@@ -49,14 +49,6 @@ class PaymentUiState {
   /// Подписка Official Page / премиум-витрина (`users.official_page_active`).
   bool get isPremium => isOfficialPageActive;
 
-  /// Можно нажать «купить» для этого productId (остальные пакеты остаются активными).
-  bool canTapBuyQarmetPackage(String productId) {
-    if (!isStoreReady) return false;
-    if (status != PaymentUiStatus.loading) return true;
-    return purchasingQarmetProductId != null &&
-        purchasingQarmetProductId != productId;
-  }
-
   PaymentUiState copyWith({
     PaymentUiStatus? status,
     String? message,
@@ -96,6 +88,16 @@ class PaymentCubit extends Cubit<PaymentUiState> {
 
   final PaymentService _service;
 
+  /// Кнопка «купить» активна, если этот Product ID уже пришёл из StoreKit
+  /// (не ждём загрузки всех SKU сразу).
+  bool canPurchaseQarmetProduct(String productId) {
+    if (state.isWalletWideBusy) return false;
+    if (!_service.hasLoadedStoreProduct(productId)) return false;
+    if (state.status != PaymentUiStatus.loading) return true;
+    return state.purchasingQarmetProductId == null ||
+        state.purchasingQarmetProductId == productId;
+  }
+
   void resetForLogout() {
     _service.clearWalletMemoryCache();
     emit(const PaymentUiState());
@@ -107,9 +109,10 @@ class PaymentCubit extends Cubit<PaymentUiState> {
       final mem = _service.getCachedWalletSnapshot();
       final disk = mem ?? await _service.getPersistentWalletSnapshot();
       final warm = mem ?? disk;
+      final storePrimed = _service.isStoreCatalogLoaded;
       emit(
         state.copyWith(
-          status: PaymentUiStatus.idle,
+          status: storePrimed ? PaymentUiStatus.idle : PaymentUiStatus.loading,
           message: null,
           catalog: _service.catalog,
           balance: warm?.balance ?? 0,
@@ -118,8 +121,8 @@ class PaymentCubit extends Cubit<PaymentUiState> {
               warm?.cosmeticsLifetimeUnlocked ?? false,
           promotionHistory: warm?.promotionHistory ?? const [],
           storeInitError: _service.storeInitError,
-          isStoreReady: _service.isStoreCatalogLoaded,
-          clearStoreInitError: _service.isStoreCatalogLoaded,
+          isStoreReady: storePrimed,
+          clearStoreInitError: storePrimed,
         ),
       );
 
