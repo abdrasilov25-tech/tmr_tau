@@ -417,16 +417,13 @@ class PaymentService {
   }
 
   String _storeUnavailableUserMessage() {
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      return 'Магазин покупок недоступен. Нужен Google Play и аккаунт Google. '
-          'На эмуляторе выберите образ с иконкой Play Store (не «Google APIs» без Play).';
-    }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-      return 'Магазин покупок недоступен. Проверьте: Настройки → Экранное время → '
-          'Контент и конфиденциальность — покупки In‑App не должны быть запрещены. '
-          'Перезапустите приложение. Для storekit.storekit запускайте из Xcode (Run).';
+      return 'Магазин покупок временно недоступен. '
+          'Проверьте: Настройки → Экранное время → Контент и конфиденциальность — '
+          'покупки In‑App не должны быть запрещены. Перезапустите приложение.';
     }
-    return 'Магазин покупок недоступен на этом устройстве.';
+    return 'Магазин покупок временно недоступен. '
+        'Проверьте интернет-соединение и повторите попытку.';
   }
 
   Future<void> initStore({bool forceCatalogRefresh = false}) {
@@ -1023,53 +1020,61 @@ class PaymentService {
     // Kick off monthly credit check in background — don't block wallet load.
     unawaited(ensureMonthlySubscriptionCredit());
 
-    final results = await Future.wait<Object>([
-      _getUserWalletFields(),
-      getMyPromotionHistory().catchError(
-        (_) => const <QarmetPromotionHistoryItem>[],
-      ),
-    ]);
-    final fields = results[0] as _UserWalletFields;
-    // Sync cosmetics local flag if server says unlocked (background, non-blocking).
-    if (fields.cosmeticsUnlocked) {
-      final auth = _client.auth.currentUser;
-      if (auth != null) unawaited(_setPremiumIapLocalUnlocked(true, userId: auth.id));
+    late final _UserWalletFields fields;
+    try {
+      final results = await Future.wait<Object>([
+        _getUserWalletFields(),
+        getMyPromotionHistory().catchError(
+          (_) => const <QarmetPromotionHistoryItem>[],
+        ),
+      ]);
+      fields = results[0] as _UserWalletFields;
+      final snapshot = WalletSnapshot(
+        balance: fields.balance,
+        isOfficialPageActive: fields.officialPageActive,
+        cosmeticsLifetimeUnlocked: fields.cosmeticsUnlocked,
+        promotionHistory: results[1] as List<QarmetPromotionHistoryItem>,
+        catalog: catalog,
+        fetchedAt: DateTime.now().toUtc(),
+      );
+      if (fields.cosmeticsUnlocked) {
+        final auth = _client.auth.currentUser;
+        if (auth != null) unawaited(_setPremiumIapLocalUnlocked(true, userId: auth.id));
+      }
+      _walletCache = snapshot;
+      unawaited(_savePersistentWalletSnapshot(snapshot));
+      return snapshot;
+    } catch (e) {
+      // Live fetch failed — fall back to disk cache rather than showing error.
+      final stale = await getPersistentWalletSnapshot(
+        maxAge: const Duration(hours: 24),
+      );
+      if (stale != null) {
+        _walletCache = stale;
+        return stale;
+      }
+      rethrow;
     }
-    final snapshot = WalletSnapshot(
-      balance: fields.balance,
-      isOfficialPageActive: fields.officialPageActive,
-      cosmeticsLifetimeUnlocked: fields.cosmeticsUnlocked,
-      promotionHistory: results[1] as List<QarmetPromotionHistoryItem>,
-      catalog: catalog,
-      fetchedAt: DateTime.now().toUtc(),
-    );
-    _walletCache = snapshot;
-    unawaited(_savePersistentWalletSnapshot(snapshot));
-    return snapshot;
   }
 
   /// Single DB round-trip replacing getQarmetBalance + isOfficialPageActive + getCosmeticsLifetimeUnlocked.
   Future<_UserWalletFields> _getUserWalletFields() async {
     final auth = _client.auth.currentUser;
     if (auth == null) return const _UserWalletFields();
-    try {
-      // Check local flag first (avoids DB call if already confirmed locally).
-      final localUnlocked = await _getPremiumIapLocalUnlocked(userId: auth.id);
-      final row = await _client
-          .from('users')
-          .select('qarmet_balance, official_page_active, profile_cosmetics_iap_forever')
-          .eq('id', auth.id)
-          .maybeSingle();
-      if (row == null) return _UserWalletFields(cosmeticsUnlocked: localUnlocked);
-      final serverCosmetics = row['profile_cosmetics_iap_forever'] as bool? ?? false;
-      return _UserWalletFields(
-        balance: row['qarmet_balance'] as int? ?? 0,
-        officialPageActive: row['official_page_active'] as bool? ?? false,
-        cosmeticsUnlocked: localUnlocked || serverCosmetics,
-      );
-    } catch (e) {
-      return const _UserWalletFields();
-    }
+    final localUnlocked = await _getPremiumIapLocalUnlocked(userId: auth.id);
+    final row = await _client
+        .from('users')
+        .select('qarmet_balance, official_page_active, profile_cosmetics_iap_forever')
+        .eq('id', auth.id)
+        .maybeSingle()
+        .timeout(const Duration(seconds: 12));
+    if (row == null) return _UserWalletFields(cosmeticsUnlocked: localUnlocked);
+    final serverCosmetics = row['profile_cosmetics_iap_forever'] as bool? ?? false;
+    return _UserWalletFields(
+      balance: row['qarmet_balance'] as int? ?? 0,
+      officialPageActive: row['official_page_active'] as bool? ?? false,
+      cosmeticsUnlocked: localUnlocked || serverCosmetics,
+    );
   }
 
   Future<void> _savePersistentWalletSnapshot(WalletSnapshot snapshot) async {
@@ -1625,40 +1630,22 @@ class PaymentService {
   /// Локальный [ios/storekit.storekit] подключается схемой Xcode; `flutter run` часто
   /// не применяет StoreKit Configuration из схемы — тогда каталог пустой.
   String _emptyIapCatalogHint() {
-    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
-      return 'Не удалось получить товары из StoreKit. Откройте ios/Runner.xcworkspace, '
-          'схема Runner → Run → Options → StoreKit Configuration = storekit.storekit '
-          'и запустите приложение кнопкой Run в Xcode (не через «flutter run»). '
-          'Для продакшена нужны те же Product ID в App Store Connect.';
-    }
-    return 'Не удалось получить товары из магазина. Проверьте In‑App Purchase и сеть.';
+    return 'Не удалось загрузить каталог покупок. '
+        'Проверьте интернет-соединение и нажмите «Повторить».';
   }
 
-  String _iosFlutterRunStoreKitHintSuffix() {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
-      return '';
-    }
-    return ' Если тестируете на симуляторе с локальным storekit — запускайте из Xcode, '
-        'иначе список товаров может быть пустым.';
-  }
+  String _iosFlutterRunStoreKitHintSuffix() => '';
 
-  /// Сообщение для пользователя; не подменяем любую ошибку со словом «storekit» —
-  /// при StoreKit Testing в тексте почти всегда есть storekit/storekit2, иначе UI врёт про «App Store».
   String _friendlyIapUserMessage(String? raw) {
     if (raw == null || raw.isEmpty) return 'Ошибка покупки';
     final lower = raw.toLowerCase();
     if (lower.contains('failed to get response from platform')) {
-      return 'Не удалось получить ответ от StoreKit. Подождите несколько секунд, '
-          'закройте экран оплаты и откройте снова или перезапустите приложение. '
-          'При тесте через Xcode: Run → Options → StoreKit Configuration = storekit.storekit. '
-          'На устройстве без этого файла нужен Sandbox Apple ID и товары в App Store Connect.';
+      return 'Не удалось соединиться с магазином покупок. '
+          'Подождите несколько секунд и повторите попытку. '
+          'Если ошибка повторяется — перезапустите приложение.';
     }
-    // Не подменяем любой «401 + FunctionException» — это даёт ложное «сессия устарела»
-    // при 401 от getUser() на Edge (секреты/проект) или No Authorization.
     if (lower.contains('invalid jwt')) {
-      return 'Сессия устарела для проверки покупки на сервере. Выйдите из аккаунта '
-          'и войдите снова, затем повторите покупку. Если ошибка остаётся — проверьте, '
-          'что в .env указан тот же проект Supabase, что и у задеплоенной функции verifyPurchase.';
+      return 'Сессия устарела. Выйдите из аккаунта, войдите снова и повторите покупку.';
     }
     return raw;
   }
@@ -1687,19 +1674,15 @@ class PaymentService {
         return 'Запрос к серверу без токена авторизации. Перезапустите приложение и войдите снова.';
       }
       if (code == 'auth_get_user_failed') {
-        final hint = detailsMap?['auth_message']?.toString();
-        final tail = (hint != null && hint.isNotEmpty) ? ' ($hint)' : '';
-        return 'Сервер не смог подтвердить вход при проверке покупки$tail. '
-            'Выйдите из аккаунта и войдите снова. Если не помогает — в Supabase Dashboard '
-            'проверьте секреты Edge Function verifyPurchase (SUPABASE_URL и ANON_KEY того же проекта, '
-            'что в приложении), затем выполните: supabase functions deploy verifyPurchase';
+        return 'Сервер не смог подтвердить вашу сессию при проверке покупки. '
+            'Выйдите из аккаунта и войдите снова, затем повторите.';
       }
       final raw = details?.toString().toLowerCase() ?? '';
       if (raw.contains('invalid jwt')) {
         return _friendlyIapUserMessage('Invalid JWT');
       }
-      return 'Покупку не удалось подтвердить на сервере (ошибка авторизации). '
-          'Войдите снова; если повторяется — проверьте совпадение проекта Supabase в .env и деплой verifyPurchase.';
+      return 'Не удалось подтвердить покупку на сервере. '
+          'Выйдите из аккаунта, войдите снова и повторите попытку.';
     }
     if (e.status == 400 && detailsMap?['error'] != null) {
       return 'Проверка покупки: ${detailsMap!['error']}';
@@ -1713,9 +1696,8 @@ class PaymentService {
     final code = e.code.toLowerCase();
     if (code.contains('failed_to_fetch_product') ||
         code == 'storekit2_products_error') {
-      return 'Товар не найден в StoreKit. Сверьте Product ID с ios/storekit.storekit и '
-          'PaymentService; в схеме Runner → Run → Options должен быть storekit.storekit. '
-          'Локальный каталог работает при запуске из Xcode, не через «flutter run».';
+      return 'Не удалось загрузить каталог покупок. '
+          'Проверьте интернет-соединение и нажмите «Повторить».';
     }
     return _friendlyIapUserMessage(
       '${e.code} ${e.message ?? ''} ${e.details ?? ''}',

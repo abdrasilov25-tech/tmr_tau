@@ -169,13 +169,18 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
                 }
               }
             }
-            return RefreshIndicator(
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final hPad = constraints.maxWidth > 600
+                    ? constraints.maxWidth * 0.12
+                    : 16.0;
+                return RefreshIndicator(
               onRefresh: () => context
                   .read<PaymentCubit>()
                   .refreshWallet(forceRefresh: true),
               color: _QarmetBrand.goldDeep,
               child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 32),
                 children: [
                   _QarmetHeroBalance(
                     state: state,
@@ -300,6 +305,8 @@ class _QarmetWalletPageState extends State<QarmetWalletPage>
                   ),
                 ],
               ),
+            );
+              },
             );
           },
         ),
